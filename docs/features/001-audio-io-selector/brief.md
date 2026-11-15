@@ -19,8 +19,16 @@ styled like the rest of Buddy, applied everywhere Buddy uses voice. Draft: refin
 - New voice features beyond choosing the device.
 
 ## Done when
-<!-- testable items; the Verifier checks each one -->
-- [ ] 
+1. Settings → Voice has an "Audio device" choice: Auto plus the devices Android offers for voice now (test phone:
+   Speaker, Phone, Galaxy Watch4), styled like the card's other choices; picking one plays the sample on it.
+2. The voice bar (chat and bubble; dictation and live voice) has a quick switch for the same choice, working
+   mid-call.
+3. With a device chosen, live voice, voice input and read aloud use it (or the Settings note says honestly which
+   path can't follow it, after on-device testing).
+4. The choice survives a restart; a missing device means Auto (Settings says so), and it's used again on reconnect.
+5. Auto behaves as before; ~2 s after Buddy's voice stops the phone is back to normal audio mode; Buddy's own
+   voice never auto-pauses an agent as a call.
+6. CI apk job green.
 
 ## Clarifications
 - 2026-11-15: Pick the device in Settings AND via a quick switch in the voice/bubble UI.
