@@ -59,3 +59,9 @@ Build/test: `./gradlew assembleGithubRelease assembleFdroidRelease` (`.github/wo
 
 ## Answers to open questions
 None yet (Planner has not written `plan.md`).
+- **Watch on Nicholas's phone (orchestrator, checked on device 2026-11-15 via `dumpsys`):** phone is a Galaxy
+  S21 FE (SM-G990W). `dumpsys bluetooth_manager` shows `(Connected) Galaxy Watch4 (K1KA)` with profiles
+  `AudioSource, Avrcp, HSP_AG, Handsfree, Handsfree_AG`, so the watch is a Bluetooth hands-free (SCO) device
+  and should appear in `getAvailableCommunicationDevices()` as `TYPE_BLUETOOTH_SCO`. `dumpsys audio`: active
+  communication device is the earpiece, `Preferred communication device: null` (nothing sets one, matching
+  the earpiece report for live voice). The phone runs API 31+ (has the communication-device APIs).
