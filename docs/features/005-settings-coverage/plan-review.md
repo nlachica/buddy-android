@@ -12,3 +12,37 @@ F3 [major] Service deletion during approval has no specified stale-write protect
 F4 [minor] Button-rule removal must work after its app is uninstalled - `plan.md:100` requires an installed package for the button family without exempting removal. The screen lists stored rules and deletes them without an installation check (`app/src/main/java/app/buddy/assistant/AppPermissionsActivity.java:275-282`), and `Guard.rules` retains their package strings (`Guard.java:135-143`). The proposed check therefore leaves a listed permission rule that the tool cannot remove, although Settings can. -> Require installation when adding a new app-scoped rule, but permit reading and removing an existing rule for an absent package; use its stored app label or package on the card. Add a regression case for removing an orphaned rule.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - added `service/<id>/name` (Agents and models table). It takes one trimmed line and refuses a blank
+name (the screen would fill one in from the address, and the tool never reads addresses). It sets `p.name` on the
+live service, then calls `Providers.save(svc, p, null)`, the editor's own save with the key kept. Addresses, key and
+model list are untouched. The editor's model fetch and default-agent fill-in don't run, because a rename changes
+nothing they read (`ApiKeysActivity:327-331`). Step 7 splits research.md's API keys row into one row per control:
+name covered; key, addresses, add and remove excluded (1); Check now is not a setting. Unit tests cover shape, card,
+stale write and no secret; phone matrix row 9.
+
+F2: accepted - Test plan item 4 is now a 12-row matrix: the five Settings pages' scalar groups, plus one row each for
+`default_model/<agent>`, `reviewer_model/<h>`, `service/<id>`, `service/<id>/name`, `service/<id>/models`,
+`button/…` and `chat/<id>/allowed/<pkg>`. Each row needs one approved and one denied change on a real card.
+"Already" and refusals before the card don't count. A row whose prerequisite is missing stays pending, so the
+verdict is PARTIAL (also in Risks).
+
+F3: accepted - all three service rows come from one factory, `service(id, part, find, store)`:
+- `get`, `check` and `set` each look the service up through `find` (in production `Providers::find`).
+- `get` returns null once the service is gone. Otherwise the snapshot is its non-secret record minus the model list,
+  which a background refresh rewrites, so a removed or same-id re-added service fails the gate's compare. This is
+  004's `mcp/<id>` pattern, and `view` shows only the part.
+- `lock()` is `Providers.class`.
+- `set` throws IllegalStateException and never calls `store` when the service is missing, so `save` can't add it
+  back.
+
+The gate stays unchanged. JVM tests use a map-backed `find`. For each part: the service is removed or replaced while
+the card is open, `store` is never called and the map isn't re-populated. Separately, `set` with the service gone is
+refused, and no reply contains an address.
+
+F4: accepted - an installed app is needed only to put an app-scoped rule that is on neither list onto one. A rule
+already on a list can be read, moved or removed (`""` is always accepted), as the screen's chips allow
+(`AppPermissionsActivity:275-282`). The card names the installed label, else the stored `app`, else the package. The
+factory gains an `installed` flag so JVM tests cover orphan removal and the refused new rule.

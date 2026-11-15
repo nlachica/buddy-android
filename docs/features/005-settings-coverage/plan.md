@@ -55,11 +55,12 @@ the setter calls `Voice.stopSpeaking()`, so the next speech uses the new choice.
 `accent` and `surface`.
 
 **Testable seams, without a new abstraction.** Family rows come from static factories that take the item's getter and
-setter, e.g. `button(pkg, label, app, get, set)`, `allowedApp(chat, pkg, app, get, set)`, `serviceModels(id, ids, get,
-set)`, `model(name, options, services, get, set, note)`. `find()` passes the Guard / ChatHub / Providers / Prefs calls
-and the tests pass in-memory ones. That is the `Scalar` constructor's own shape, reused. There are also two pure
-helpers: `accent(String)` and `languages(String)`, each returning the canonical value or throwing
-IllegalArgumentException.
+setter, e.g. `button(pkg, label, app, installed, get, set)`, `allowedApp(chat, pkg, app, get, set)`,
+`model(name, options, services, get, set, note)`. `find()` passes the Guard / ChatHub / Prefs calls and the tests pass
+in-memory ones. That is the `Scalar` constructor's own shape, reused. API key services get one factory,
+`service(id, part, find, store)`, which takes the lookup itself instead of a getter (below), so tests exercise the
+real lookup. There are also two pure helpers: `accent(String)` and `languages(String)`, each returning the canonical
+value or throwing IllegalArgumentException.
 
 ### New settings
 
@@ -72,9 +73,27 @@ Paths: `SetupActivity` unless named. "Signed in" = `SetupState.signedIn`, the sc
 |---|---|---|---|
 | `default_agent` | claude, codex, opencode, agy, grok | signed in | `Prefs.setBackend` (`:488`). Note: new chats use it |
 | `default_model/<agent>` | `default`, a model the picker lists (`Models.options(agent, true)`: the agent's own, and `@service/model`), or a typed model name | the agent is on one of the two "Chats on Default" screens: signed in (`Ui.defaultsSheet`, `Ui.java:495`) or with a usable API key service (`Providers.forAgent`, `ApiKeysActivity:84`). A typed name is one line, no spaces, at most 200 characters, and starts with `@` only if it is listed | `Prefs.setAgentDefault(svc, agent, "" for default)`, then `ChatHub.get(svc).changed()` (`Ui.pickDefault`, `Ui.java:520-526`). Reading the item lists the options with their names |
-| `service/<id>` | on, off | the service exists (`Providers.find`) | `Providers.setOff(svc, p, !on)` (`ApiKeysActivity:214`) |
-| `service/<id>/models` | `all`, or comma-separated model ids from the service's list | each id is in `p.models` (matched ignoring case, stored as listed, duplicates dropped) | `p.shown` replaced, then `Providers.save(svc, p, null)` (`null` keeps the saved key; `ApiKeysActivity:435-437`) |
+| `service/<id>` | on, off | the service exists (live lookup, below) | `Providers.setOff(svc, p, !on)` on the live service (`ApiKeysActivity:214`) |
+| `service/<id>/name` | the service's name: one line, trimmed, not blank | the service exists; a blank name is refused (the screen would fill one in from the address, `ApiKeysActivity:303`; the tool never reads addresses) | `p.name` set on the live service, then `Providers.save(svc, p, null)`, the editor's own save with the key kept (`:343-349`). Addresses, key and model list stay as they are. The editor's model fetch and default-agent fill-in don't run: a rename changes nothing they read (the editor skips the fetch for a rename too, `:327-331`) |
+| `service/<id>/models` | `all`, or comma-separated model ids from the service's list | each id is in the live `p.models` (matched ignoring case, stored as listed, duplicates dropped) | `p.shown` replaced on the live service, then `Providers.save(svc, p, null)` (`null` keeps the saved key; `ApiKeysActivity:435-437`) |
 | `download_server` | default, ustc, tuna, aliyun, yandex, mobinhost (`Mirrors.ALL` ids), plus `custom` once the user has saved a server of their own | none | `Prefs.setMirror(svc, "" for default)`, then `Mirrors.apply` on a new thread (`chooseMirror`, `:1321-1325`). Note: Buddy's Linux uses it from now on. The custom address is never shown or set |
+
+**API key service rows look the service up live**, as 004's `mcp/<id>` does with `McpServers.find`. A captured
+`Providers.P` outlives its removal, and `Providers.save` adds back a service whose id is missing
+(`Providers.java:180-183`), so no row holds on to one. `service(id, part, find, store)`, with part `""`, `name` or
+`models`:
+- `get`, `check` and `set` each call `find(id)` (in production `Providers::find`). `get` returns null when the service
+  is gone. Otherwise it returns the service's non-secret record without its model list: name, both addresses, off and
+  shown. A removed service, or one added again under the same id with other details, then fails the gate's
+  compare ("changed while the card was open"). Like the `mcp/<id>` snapshot holding the URL, the record never leaves
+  the row: `view` shows only the part (on/off, the name, or the shown list). The model list stays out because a
+  background refresh rewrites it (`Providers.refresh`). That would void cards for on/off and the name.
+- `lock()` returns `Providers.class`, the monitor every `Providers` writer holds, so another thread can't change the
+  store between the gate's compare and the write.
+- `set` looks the service up again. If it is missing it throws IllegalStateException ("service <id> was removed") and
+  never calls `store`, so nothing is added back. Otherwise it changes the live service and calls `store`: in
+  production `Providers.setOff(svc, p, p.off)` for `""`, and `Providers.save(svc, p, null)` for `name` and `models`.
+  Since the service is in the list under the held lock, `save` can't add one.
 
 **Voice**
 
@@ -97,7 +116,7 @@ Paths: `SetupActivity` unless named. "Signed in" = `SetupState.signedIn`, the sc
 | `reviewer` | same, claude, codex | claude and codex must be signed in (`:90-91`) | `setReviewer` (`:94`) |
 | `reviewer_model/<claude or codex>` | default (the quick one: Haiku, or a small Codex model), a model that `Models.options(h, false)` lists, or a typed name (no `@`: the reviewer's picker offers no services) | the harness is signed in (the row only shows then, `:101`) | `setReviewerModel(svc, h, "" for default)` (`:114`) |
 | `builtin_risky_words` | on, off | none | `setGuardBuiltin` (`:270`) |
-| `button/<package or *>/<label>` | ask (always ask), allow (never ask), `""` (on neither list) | the label isn't blank; a package must be an installed app; `*` = every app | ask/allow: `Guard.addRule(svc, list, new Guard.Rule(label, pkg or null, app label))` (`:319`, `:344`; it also takes the button off the other list). `""`: the matching rule (same `Guard.norm` label and package) comes off both lists through `Guard.saveRules` (`:280-282`). Snapshot: which list holds it |
+| `button/<package or *>/<label>` | ask (always ask), allow (never ask), `""` (on neither list) | the label isn't blank; `*` = every app. ask/allow for a package that is on neither list yet needs an installed app. A rule already on a list can be read, moved or removed whether or not its app is still installed (the screen's chips remove such rules, `:275-282`), and `""` is always accepted. The card names the app by its installed label, else the rule's stored `app`, else the package | ask/allow: `Guard.addRule(svc, list, new Guard.Rule(label, pkg or null, app label))` (`:319`, `:344`; it also takes the button off the other list). `""`: the matching rule (same `Guard.norm` label and package) comes off both lists through `Guard.saveRules` (`:280-282`). Snapshot: which list holds it |
 
 **Background and automation**
 
@@ -130,18 +149,21 @@ spell out what the value does (the same text goes in the reply):
 
 **Listing.** 004's listing, plus these additions in Settings-page order: the new scalars; one `default_model/<agent>`
 line per agent the screens show and one `reviewer_model/<h>` line per signed-in harness (value and "name=… lists
-the models"); an "API key services" section (`service/<id> = on  (<name>; models shown: all of N | K of N)`, never
-an address, host or key); a "Button lists" section (`button/*/Pay = ask`); and each chat line gains `allowed: none |
+the models"); an "API key services" section (`service/<id> = on  (<name>; models shown: all of N | K of N)`, its
+heading saying each also has `/name` and `/models`, never an address, host or key); a "Button lists" section (`button/*/Pay = ask`); and each chat line gains `allowed: none |
 <packages>`. Reading an item adds what its screen offers: an agent's models with their names, a service's model ids.
 
 ### What is covered and what is excluded (the done-when inventory)
 
-Covered: every **add** row of research.md's inventory, as above, and `service/<id>/models`. Research suggested
-excluding that one, but it holds no secret and saves with the key untouched (`save(…, null)`), so no non-goal
-excludes it. Research's `voice_languages` and `voice_language_default` become one setting.
+Covered: every **add** row of research.md's inventory, as above, plus `service/<id>/models` and `service/<id>/name`.
+Research suggested excluding the shown models and bundled the service editor's fields under its key. But neither the
+shown models nor the name is a secret, and both save with the key untouched (`save(…, null)`), so no non-goal
+excludes them. Step 7 lists the editor's controls one by one. Research's `voice_languages` and
+`voice_language_default` become one setting.
 
 Excluded, by the brief's non-goals (step 7 writes the final status into research.md's inventory):
-1. **Secrets:** API keys, service addresses and adding/editing/removing a service (the editor holds the key); the custom
+1. **Secrets:** a service's API key and addresses; adding a service (it needs a key); removing one (that deletes its
+   saved key); the custom
    download server's addresses (`Mirrors.address` allows a path, so a token can sit there; same rule as MCP addresses
    in 004); the phone-tools command (it holds `Prefs.token`); MCP keys and addresses (004); SSH's one-time code.
 2. **User flows:** the accessibility and battery steps, agent install and sign-in, GitHub, background-mode pairing,
@@ -151,7 +173,7 @@ Excluded, by the brief's non-goals (step 7 writes the final status into research
 4. **Not offered by the Settings screens:** a chat's model, effort, keep-awake and incognito (chat screen; see Open
    questions).
 
-Not settings (actions, navigation or screen state; nothing to change): Check for updates, Help, Setup check, the
+Not settings (actions, navigation or screen state; nothing to change): a service's Check now, Check for updates, Help, Setup check, the
 rules' Clear activity, removing old Termux chats, the phone-tools agent picker, the "seen" buttons (suggestions for the
 lists). The brief's "Experience" page doesn't exist in this build: the Settings menu has eight pages
 (`SetupActivity.pages()`, `:253-263`), and research walked all of them.
@@ -183,20 +205,25 @@ the user's; a never-ask rule is skipped in rule runs (`Tools.java:1623`) and `Gu
    New `app/src/test/java/app/buddy/assistant/SettingsCoverageTest.java` with the Scalar cases (Test plan 2a).
    `ApprovalGateTest` must pass unchanged.
 2. **Agents and models.** `SettingsTool.java`: `default_agent`, `download_server`, `default_model/<agent>`,
-   `service/<id>`, `service/<id>/models` (factories `model(…)`, `serviceModels(…)`), their `find` routes, the
+   `service/<id>`, `service/<id>/name`, `service/<id>/models` (factories `model(…)` and `service(id, part, find,
+   store)` with the live lookup, `Providers.class` lock and missing-service refusal above), their `find` routes, the
    default-model lines and the "API key services" section of the listing (never a host or key). Tests 2b, 3.
 3. **Voice.** `SettingsTool.java`: `voice_input`, `voice_output`, `chatgpt_voice`, `audio_device`, `voice_languages`
    (`languages(…)`), `assist_mode`, `live_agent`, `live_continue`, `pause_media`. Tests 2b, 3.
 4. **Safety and approvals.** `SettingsTool.java`: `reviewer`, `reviewer_model/<h>`, `builtin_risky_words`, the
    `button(…)` family (name parsing `button/<pkg or *>/<label>`, get = the list holding it, set via
-   `Guard.addRule`/`saveRules`), its `find` route, the "Button lists" section, the cards above. Tests 2b, 3.
+   `Guard.addRule`/`saveRules`, an installed app needed only for a rule on neither list, the card's app name from the
+   installed label, else the stored one, else the package), its `find` route, the "Button lists" section, the
+   cards above. Tests 2b, 3.
 5. **Background and appearance.** `SettingsTool.java`: `background_browser` (its card), `accent` (`accent(…)`),
    `surface`, `face`; `Theme.changed(svc)` in `theme`, `accent` and `surface`. Tests 2b, 3.
 6. **Chats.** `SettingsTool.java`: `chat/<id>/allowed/<package>` (`allowedApp(…)`), `find` for four-part chat names,
    `allowed:` on each chat line, the card. Tests 2b, 3.
 7. **Description and inventory.** `SettingsTool.list`: `value ""` also takes a button off the lists, and the families
    are named in a few words. `docs/features/005-settings-coverage/research.md`: each inventory row gets its final
-   status: covered (setting name), excluded (non-goal number), or not a setting, matching this plan. No other doc
+   status: covered (setting name), excluded (non-goal number), or not a setting, matching this plan. The API keys
+   row is split into one row per control: Use this service, name, key, the two addresses, Check now, shown models,
+   add, remove. No other doc
    changes: `docs/GUIDE.md:204` and `AGENTS.md:24` already say "these settings, and others".
 
 All code lives in `SettingsTool.java` and its tests. No upstream file changes, so upstream merges don't touch this
@@ -207,9 +234,31 @@ feature.
 | Done-when item | Proof |
 |---|---|
 | 1. Checked inventory in research.md | Step 7. The Verifier checks that every row has a final status, that every "covered" name appears in the tool's listing on the phone (item 4), and that every "excluded" row names a non-goal. After step 7, no inventory row still says **add** (only the legend may). |
-| 2. Lists and changes every non-excluded control, with the screen's checks | **Unit** (`SettingsCoverageTest`, JVM): (a) Scalar: a mixed-case value matches and is stored in the choice's spelling (`7:galaxy buds2` → `7:Galaxy Buds2`); a supplier is read at check time (it changes between two checks, so does the answer); 004 rows are unchanged (`ApprovalGateTest`). (b) `scalars(null)` holds every new scalar name, built without touching `svc` or Android-backed classes; shape refusals through `find(null, name).check(…)`, before any phone state is read: `surface` purple, `assist_mode` shout, `default_agent`/`live_agent` nobody, `voice_input` siri, `voice_output` claude, `reviewer` gpt, `builtin_risky_words`/`live_continue`/`pause_media`/`background_browser` maybe → refused; `Black`/`LIVE`/`ON` → `black`/`live`/`on`. `accent(…)`: `Ocean` → `ocean`, `#4f8bff` → `ocean`, `#123abc` → `#123ABC`; `#12345`, `blue`, `#GGGGGG` refused. `languages(…)`: `fr-fr, en-US, fr-FR` → `fr-FR,en-US`; `""` and `xx-XX` refused. `model(…)`: `default` kept; a listed `@svc/m` accepted, an unlisted `@svc/m` refused; `opus` accepted; `two words` and a 201-character name refused; with services off, every `@…` refused. `serviceModels(…)`: `all` accepted; `a, B` against ids `[a, b]` → `a,b`; `zzz` refused. `button` name parsing: `button/*/Log out` → every app, `Log out`; `button/com.x/a/b` → `com.x`, `a/b`; `button/*/ ` and `button/bad pkg/x` → not a setting. **Device**: availability refusals: `voice_input claude` / `reviewer codex` with that agent not signed in (if one isn't), `face picture` with no saved picture, `chat/<id>/allowed/<a bank app>`, `audio_device` with a key not connected. |
-| 3. JVM tests: validation, card text, stale-write refusal | Validation: item 2. **Card text** (the factories with in-memory get/set, the real format string as in 004's tests): `button` allow for `*` says "never ask" and "every app", ask says "always ask", `""` says "on neither list"; `builtin_risky_words` off names "Send, Pay, Delete"; `allowedApp` on says "until this chat's task ends"; `voice_languages` Now/New show the default first; `service/<id>/models` shows both lists whole. **Stale write** (fake asker changes the in-memory state before `APPROVED…` → "changed while the card was open", setter never called): `button` moved from ask to allow, and removed; `allowedApp` turned on by the screen; `serviceModels` list edited; `voice_languages` default changed; `default_model` set elsewhere. **No secret** (`Providers.P` built in the test with `openai = https://u:p@h.example/v1?token=abc`, `anthropic = https://sk-123.example`): the service's list line and read text contain no part of either address. **CI**: `./gradlew --no-daemon testGithubDebugUnitTest assembleGithubRelease assembleFdroidRelease :wear:assembleRelease` (`build.yml:59`) green on the branch (`gh run watch`). |
-| 4. On the phone: new entries listed; per new family one change approved, one denied | Needs this build on the phone. After the merge, the orchestrator bumps `BuildInfo` (`2.3.9-fork.2`, `VERSION_CODE` = max(fork, upstream) + 1), tags with Nicholas's OK (a public release), watches CI, then calls `update_buddy install=true` (AGENTS.md "Updating Buddy on the phone"). Then, through the phone's `buddy_settings`: the list shows every new name and section, with no address or key. For each family, approve one cheap change and deny one, and check its screen shows the approved value and kept the denied one: `default_agent` (or `default_model/<agent>`); `service/<id>` (if a service exists, otherwise noted); `download_server` (approve, then set it back); `voice_languages`; `chatgpt_voice` or `assist_mode`; `audio_device` (if more than one device); `reviewer`; `builtin_risky_words`; `button/*/<test label>` allow, then `""`; `background_browser` (deny on; approve only if Nicholas wants the 300 MB download); `accent` and `surface`; `face` (if a picture is saved); `chat/<this chat>/allowed/<a messaging app>`. Plus one stale-write check: ask to change `accent`, change it in Settings before approving → "changed while the card was open". |
+| 2. Lists and changes every non-excluded control, with the screen's checks | **Unit** (`SettingsCoverageTest`, JVM): (a) Scalar: a mixed-case value matches and is stored in the choice's spelling (`7:galaxy buds2` → `7:Galaxy Buds2`); a supplier is read at check time (it changes between two checks, so does the answer); 004 rows are unchanged (`ApprovalGateTest`). (b) `scalars(null)` holds every new scalar name, built without touching `svc` or Android-backed classes; shape refusals through `find(null, name).check(…)`, before any phone state is read: `surface` purple, `assist_mode` shout, `default_agent`/`live_agent` nobody, `voice_input` siri, `voice_output` claude, `reviewer` gpt, `builtin_risky_words`/`live_continue`/`pause_media`/`background_browser` maybe → refused; `Black`/`LIVE`/`ON` → `black`/`live`/`on`. `accent(…)`: `Ocean` → `ocean`, `#4f8bff` → `ocean`, `#123abc` → `#123ABC`; `#12345`, `blue`, `#GGGGGG` refused. `languages(…)`: `fr-fr, en-US, fr-FR` → `fr-FR,en-US`; `""` and `xx-XX` refused. `model(…)`: `default` kept; a listed `@svc/m` accepted, an unlisted `@svc/m` refused; `opus` accepted; `two words` and a 201-character name refused; with services off, every `@…` refused. `service(…)` (a map-backed `find`): an unknown id is refused as no such service; `models`: `all` accepted, `a, B` against ids `[a, b]` → `a,b`, `zzz` refused; `name`: `  Work  ` → `Work`, blank and a two-line name refused. `button` name parsing: `button/*/Log out` → every app, `Log out`; `button/com.x/a/b` → `com.x`, `a/b`; `button/*/ ` and `button/bad pkg/x` → not a setting. `button` with `installed` false: allow for a rule on neither list is refused as not installed; `""` for a rule already on ask is accepted. **Device**: availability refusals: `voice_input claude` / `reviewer codex` with that agent not signed in (if one isn't), `face picture` with no saved picture, `chat/<id>/allowed/<a bank app>`, `audio_device` with a key not connected. |
+| 3. JVM tests: validation, card text, stale-write refusal | Validation: item 2. **Card text** (the factories with in-memory get/set, the real format string as in 004's tests): `button` allow for `*` says "never ask" and "every app", ask says "always ask", `""` says "on neither list"; `builtin_risky_words` off names "Send, Pay, Delete"; `allowedApp` on says "until this chat's task ends"; `voice_languages` Now/New show the default first; `service/<id>/models` shows both lists whole; `service/<id>/name` shows the old and new names; an orphaned `button/com.gone/Pay` (stored `app` "Old Bank", `installed` false) names "Old Bank". **Stale write** (fake asker changes the in-memory state before `APPROVED…` → "changed while the card was open", setter or `store` never called): `button` moved from ask to allow, and removed; `allowedApp` turned on by the screen; `voice_languages` default changed; `default_model` set elsewhere. For each `service` part (`""`, `name`, `models`): the shown list or name edited; the service removed from the map (reply says "now: (none)", `store` never called, the map still has no such id); the service replaced by a new `P` with the same id and another address (refused). Calling `set` directly while `find` returns null throws IllegalStateException and never calls `store`. **Orphan removal** (F4): `button/com.gone/Pay` on ask with `installed` false, `""` approved → the setter removes it. **No secret** (`Providers.P` built in the test with `openai = https://u:p@h.example/v1?token=abc`, `anthropic = https://sk-123.example`): the service's list line, read text, cards and every reply above (changed, stale, refused) contain no part of either address. **CI**: `./gradlew --no-daemon testGithubDebugUnitTest assembleGithubRelease assembleFdroidRelease :wear:assembleRelease` (`build.yml:59`) green on the branch (`gh run watch`). |
+| 4. On the phone: new entries listed; per new family one change approved, one denied | Needs this build on the phone. After the merge, the orchestrator bumps `BuildInfo` (`2.3.9-fork.2`, `VERSION_CODE` = max(fork, upstream) + 1), tags with Nicholas's OK (a public release), watches CI, then calls `update_buddy install=true` (AGENTS.md "Updating Buddy on the phone"). Then, through the phone's `buddy_settings`: the list shows every new name and section, with no address or key. Then the family matrix below, plus one stale-write check: ask to change `accent`, change it in Settings before approving → "changed while the card was open". |
+
+**Phone matrix (item 4).** A family is one `find()` name pattern, or one Settings page's new table scalars, which
+share the `Scalar` path. Their shapes are unit-tested (item 2) and their availability refusals are checked on the
+phone (item 2, Device). Every row needs one change the user approves and one the user denies on a real card, with
+the screen (or a re-read) showing the approved value and showing that the denied change wasn't made. "Already …"
+and a refusal before the card are not evidence. A row whose prerequisite is missing stays pending with the reason,
+and the verdict is then PARTIAL, not PASS. Set-backs restore the user's values after the test.
+
+| # | family (members) | approve / deny on the phone | needs |
+|---|---|---|---|
+| 1 | Agents and models scalars (`default_agent`, `download_server`) | `download_server`: approve a preset, then approve the original back; deny another preset | none |
+| 2 | Voice scalars (`voice_input`, `voice_output`, `chatgpt_voice`, `audio_device`, `voice_languages`, `assist_mode`, `live_agent`, `live_continue`, `pause_media`) | `voice_languages`: approve adding a language, then set back; deny adding another | none |
+| 3 | Safety scalars (`reviewer`, `builtin_risky_words`) | `builtin_risky_words`: deny off; approve off, then approve on | none |
+| 4 | Background (`background_browser`) | deny on; approve on (downloads Chromium) only with Nicholas's OK, or approve off if it is already on | Nicholas's OK, or the browser on |
+| 5 | Appearance (`accent`, `surface`, `face`) | `accent`: approve a preset (the bubble restyles at once), then set back; deny another | none |
+| 6 | `default_model/<agent>` | approve a listed model for an agent, then `default`; deny another | an agent the screens show (signed in, or with a service) |
+| 7 | `reviewer_model/<h>` | approve a listed model, then `default`; deny another | Claude Code or Codex signed in |
+| 8 | `service/<id>` | approve off, then on; deny off | a saved API key service |
+| 9 | `service/<id>/name` | approve a new name, then the old one; deny another | a saved API key service |
+| 10 | `service/<id>/models` | approve two model ids, then `all`; deny one id | a saved service listing two or more models |
+| 11 | `button/<scope>/<label>` | approve `button/*/<test label>` = allow (a label no real button has), deny = ask, approve `""` | none |
+| 12 | `chat/<id>/allowed/<package>` | approve on for a messaging app in this chat, then off; deny on for another | none |
 
 ## Risks
 
@@ -229,7 +278,11 @@ feature.
   Accepted.
 - **Open screens go stale**, as in 004: the tool never writes over a change it didn't show (gate step 5).
 - **Device rows need a release.** The tag is public, so the orchestrator confirms with Nicholas first. If the release
-  can't happen in this run, item 4 stays pending and the verdict is PARTIAL (as in 003/004).
+  can't happen in this run, item 4 stays pending and the verdict is PARTIAL (as in 003/004). The same goes for any
+  matrix row whose prerequisite the phone lacks (no saved API key service, no signed-in harness, no OK for the
+  browser download). Its row stays pending, so the verdict is PARTIAL.
+- **The service snapshot holds the addresses** (as 004's `mcp/<id>` holds the URL), so a slip in `view` would show
+  them. The no-secret test checks every reply the service rows give, stale and refused ones included.
 
 ## Open questions
 

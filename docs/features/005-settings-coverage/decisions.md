@@ -103,3 +103,37 @@
   `Guard.norm` label and package) from both lists. The snapshot is the list holding it, so a move or removal made
   on the screen while the card is open is caught.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - A service's name is covered (`service/<id>/name`); key, addresses, add and remove stay excluded
+- Options: keep the whole editor excluded because it holds the key; cover the name field alone (plan review F1).
+- Choice: cover the name. It is a separate field and no secret, and `Providers.save(…, null)` keeps the key. This
+  amends the earlier service decision, which covered on/off and shown models only. Blank is refused instead of
+  derived from the address, so the tool never reads addresses. Removing a service stays out because it deletes the
+  saved key.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Service rows look the service up live and lock `Providers.class`; the snapshot is the record minus models
+- Options: getters/setters closing over a `Providers.P`; live lookup with an identity token in the snapshot; live
+  lookup with the non-secret record as the snapshot (004's `mcp/<id>`).
+- Choice: live lookup through a `find` seam, `get` null once removed, snapshot = name, addresses, off and shown (not
+  models, which `Providers.refresh` rewrites in the background), `view` showing only the part, `lock()` =
+  `Providers.class`, and `set` refusing a missing service without calling `store`. A captured `P` outlives removal,
+  and `save` re-adds a missing id (plan review F3). The record reuses 004's pattern, so there is no new concept. A
+  re-added copy with identical details (only the key differs) passes, and the user can't tell it apart either.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Button rules: an installed app is needed only to put a new app-scoped rule on a list
+- Options: always require installation (first plan); never check; check only for a rule on neither list.
+- Choice: check only for a new rule. The screen removes stored rules whatever the package's state, so a rule for
+  an uninstalled app must stay removable and movable (plan review F4). The card falls back to the stored app label,
+  then the package.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Phone evidence: one approved and one denied card per family; a missing prerequisite means PARTIAL
+- Options: a few representative changes ("or" lists, prerequisites "noted"); every setting; one row per `find()`
+  pattern plus one per Settings page's scalar group.
+- Choice: per pattern plus per page group, 12 rows (plan review F2). Page scalars share the `Scalar` path and are
+  unit-tested; each item family has its own parsing and storage. "Already" and refusals before a card are not
+  evidence. A missing prerequisite (no service, no signed-in harness, no OK for the browser download) leaves its row
+  pending and the verdict PARTIAL.
+- By: Planner (claude-opus-5-5)
