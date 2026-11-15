@@ -68,3 +68,34 @@ F1 [major] The APK lock ends before the recipient finishes reading the file - Th
 F2 [major] Main-thread commits do not serialize with the existing skill importer - The stale-write fix relies on the claim that settings screens write on the main thread (`plan.md:67-70`), including skills (`plan.md:52-54,129`). However, `SkillsActivity.onActivityResult` starts a background `skill-import` thread that calls `Skills.importUri` (`app/src/main/java/app/buddy/assistant/SkillsActivity.java:164-180`). That method writes directly into the destination skill directory, including existing files (`Skills.java:125-130,150-162`). An import can therefore write a new SKILL.md between the tool's comparison and its write/delete, losing content absent from the approval card; imports can also interleave with `Linux.write`, which deletes and recreates the file (`Linux.java:358-362`). This is an ordinary UI operation, distinct from the explicitly accepted hostile Linux symlink-swap risk. -> Serialize the tool's skill re-check/write/delete with Buddy's own create/import/delete mutation paths using a shared skill-store critical section; keep URI reading and archive preparation outside that section and never hold it while waiting for approval. Add a coordinated concurrent-import test proving an import cannot land between comparison and commit and that an import completed before the comparison causes the stale request to be refused. The main-thread approach can remain for stores whose writers actually run there.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - Each install attempt now gets its own file and URI (plan B.4, Step 5). `FilesProvider` stages every
+APK as a new file in `cache/apk/` (`File.createTempFile`). The installer gets that file's own
+`content://…/apk/<name>`, which `fileFor` maps back with the share folder's name check. `Updates.install` and
+`Tools.installApk` each check and launch only their own file. Every path that doesn't open the installer (failed
+download, not newer, Buddy's own package or an unreadable APK in `install_apk`, missing install permission) deletes
+only that file. A launched file is left unchanged for the installer's later `openFile`. Cleanup is bounded: staging
+deletes staged APKs older than a day and never a newer one. Nothing is shared between attempts any more, so the
+round-1 lock is dropped. Its only job was guarding the shared file, and it didn't cover the installer's read. The
+staging change applies to both flavors (one code path). In F-Droid, `install_apk` opens the installer exactly as
+before and only the cache file name differs. Section C and decisions.md record this. Regression check: a JVM test of
+the Context-free staging helpers stages A, then a second successful attempt B and a refused attempt C that deletes
+its own file. A's name still maps to A's file with A's original bytes, and only a file aged past a day is cleaned up.
+On the device, the installer for one app stays open while a refused `install_apk` of Buddy's APK runs, and the first
+install still completes (Test plan 3).
+
+F2: accepted - The skills folder gets one lock, `Skills.LOCK`. It's held by every Buddy write there: `Skills.create`,
+`Skills.delete`, the writing part of `Skills.importUri`, and the tool's skill snapshot and its re-check-and-write or
+delete (plan A, gate step 5 and "Skills"; Step 4). `importUri` still reads the URI and finds the zip's SKILL.md before
+any write, outside the lock, so the lock covers only local file writes. It is never held while a card waits or while
+anything waits for the main thread, so it can't deadlock with main-thread commits. A skill's snapshot is its SKILL.md
+text plus that file's last-modified time. Every Buddy write to an existing skill rewrites SKILL.md, so the commit also
+catches an import that only added files before an approved delete. To test it in the JVM, the import's parse-and-write
+part moves into a Context-free `Skills.importBytes(root, data, badFile)`, which `importUri` calls after reading the URI.
+Behaviour is unchanged. Tests (Test plan 2): (a) the test holds `Skills.LOCK`, and both an approved tool commit and
+`importBytes`, each on its own thread, stay `BLOCKED` without writing until it releases; (b) a fake asker runs
+`importBytes` before answering APPROVED, once with a different SKILL.md and once adding only a file. The edit and the
+delete are refused and the imported files kept. The other stores keep main-thread serialization, because their
+writers run there.

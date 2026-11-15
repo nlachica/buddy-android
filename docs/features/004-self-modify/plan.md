@@ -67,8 +67,9 @@ unlisted call can't reach it.
 5. **Re-check and commit**, in one main-thread task: `if (!Objects.equals(setting.get(), old))` → `Not changed:
    <name> changed while the card was open (now: …). Ask again.` and no write; else `setting.set(value)`. The
    settings screens write on the main thread, so this compare-and-write can't interleave with them or with another
-   `buddy_settings` commit. Network work that has to follow the approval (an MCP server's `discover`) runs on the
-   tool thread before this task.
+   `buddy_settings` commit. Skills are the exception: Buddy's skill importer writes from a background thread, so a
+   skill's snapshot and its compare-and-write also hold `Skills.LOCK` (see "Skills"). Network work that has to follow
+   the approval (an MCP server's `discover`) runs on the tool thread before this task.
 
 `asker` is a one-method nested interface (`String ask(String card) throws InterruptedException`), and `main` is a
 `java.util.concurrent.Executor`; the gate wraps steps 2 and 5 in a `FutureTask` it runs on `main` and waits for
@@ -129,6 +130,16 @@ editor offers (`Account.ALL` with `runsRules()`, `RulesActivity:290`).
 changing it is refused. The commit runs the check again right before `Linux.write` / `Skills.delete`. `Skills.all`
 is not used for the tool's listing, since it reads linked SKILL.md files.
 
+One lock, `Skills.LOCK` (a static object), is held by every Buddy write to the skills folder: `Skills.create`,
+`Skills.delete`, the writing part of `Skills.importUri`, and the tool's skill snapshot and re-check-and-write/delete.
+`importUri` reads the file from its URI and finds the zip's SKILL.md before taking the lock (already the order today),
+so the lock covers only local file writes. It is never held while a card waits or while anything waits for the main
+thread, so it can't deadlock with the main-thread commit. A skill's snapshot is its SKILL.md text plus that file's
+last-modified time. Every Buddy write to an existing skill rewrites SKILL.md, so an import that only added files is
+caught too before an approved delete removes them (the "Already" check and the card use the text only). For the JVM test, the import's parse-and-write part moves into a
+Context-free `Skills.importBytes(File root, byte[] data, String badFile)`, which `importUri` calls after reading the
+URI. Behaviour is unchanged.
+
 **MCP servers.** A stored server address, or any part of it (host included), never goes into a reply, a card or an
 error: a URL can carry credentials in its user-info, query or path (`McpServers.java:94-95`), and Buddy keeps it from
 the agents today (`McpServers.java:135-137`). A server shows as `mcp/<id> = on|off  (key: set|none, N tools)`; reading
@@ -168,15 +179,22 @@ The carded `update_buddy` is the only way an agent gets Buddy's installer opened
 3. `update_buddy`'s description: "this fork's GitHub release", plus one sentence on how an agent makes one (below).
 4. **No side doors** (github flavor only, F-Droid's behaviour is unchanged):
    - `install_apk` reads the package of the APK it copied (`getPackageArchiveInfo`). If it's Buddy's own package, or
-     Android can't read it, the copy is deleted and the tool refuses: "That's Buddy itself: use update_buddy
+     Android can't read it, that attempt's staged copy is deleted and the tool refuses: "That's Buddy itself: use update_buddy
      install=true (the user approves it on a card)." Other apps install as before, with no Buddy card. This refuses
      rather than adds a second card: one carded route meets the brief, and a fork-signed APK only comes from the
      fork's CI, which publishes it as a release when tagged.
    - The update sheet's Update button (`Updates.java:231`) gets `Ui.protect`, so only the user can start it even
      with "Let agents tap Buddy's screens" on (`Guard.offLimits`, `Guard.java:485-494`). Opening the sheet (Settings
      → Check for updates, the notification) installs nothing, so it stays as it is.
-   - `Updates.install` and `Tools.installApk` write `install.apk` and open the installer inside one lock
-     (`synchronized (FilesProvider.class)`), so one route can't swap the file another has just checked.
+   - **Each install attempt gets its own file** (both flavors, one code path, see C). The installer opens its URI later (`FilesProvider.openFile`), so a
+     shared `install.apk` could be replaced or deleted by a second attempt after the first was checked. `FilesProvider`
+     stages every APK as a new file in `cache/apk/` (`File.createTempFile("install", ".apk", dir)`) and gives the
+     installer that file's own URI, `content://…/apk/<file name>`. `fileFor` maps the name back using the share
+     folder's name check, and `query` still names it `app.apk`. `Updates.install` and `Tools.installApk` check and
+     launch only their own file. Every path that doesn't open the installer (download failed, not newer, Buddy's own
+     or an unreadable APK, no install permission yet) deletes only that file. A launched file is left as it is.
+     Staging also deletes staged APKs older than a day and never a newer one, so the folder stays bounded without
+     touching a pending handoff. Nothing is shared between attempts, so no lock is needed.
    - `phone_shell` can run `pm install`, but each command shows its own card unless the user switched that off,
      and `phone_commands_ask` is read-only in `buddy_settings` (see Risks).
 
@@ -199,10 +217,11 @@ installer-of-record rules unverified on this phone); a CI-derived versionCode (t
 
 Both A and B are reachable only in the github flavor. A is gated by `Flavor.FDROID`. B: `Updates` is only used
 behind `!Flavor.FDROID` (`BuddyService.java:72`, `Tools.java:298-302`), and `fdroidUpdates()` with its upstream link
-stays unchanged. The new `install_apk` check is behind `!Flavor.FDROID`, and its lock changes no behaviour. The
-F-Droid APK's behaviour is unchanged; its bytes differ by the gated-off code (the class, the `install_apk` check), the
-lock and one string constant. That difference is deliberate and recorded in decisions.md. CI's reproducibility check compares two
-fdroid builds of the same source, so it is unaffected.
+stays unchanged. The new `install_apk` check is behind `!Flavor.FDROID`. The per-attempt APK files (B.4) are one
+code path for both flavors: F-Droid's `install_apk` opens the installer exactly as before, and only the cache file's
+name and its cleanup differ. To the user, the F-Droid APK behaves as before. Its bytes differ by the gated-off code
+(the class, the `install_apk` check), the APK staging and one string constant. That difference is deliberate and
+recorded in decisions.md. CI's reproducibility check compares two fdroid builds of the same source, so it is unaffected.
 
 ## Steps
 
@@ -225,14 +244,18 @@ fdroid builds of the same source, so it is unaffected.
 3. **Per-app trust and per-chat settings.** `SettingsTool.java`: `app/<package>`, `chat/<id>/linux_tools`,
    `chat/<id>/background`, `chat/<id>/schedule` (main-thread `FutureTask`), and their listing lines.
 4. **Rules, skills, MCP servers.** `SettingsTool.java`: `rule/…` (path id wins, the editor's checks), `skill/…`
-   (`skillFile(root, name)` on every access and again in the commit; `Skills.isLink` package-private), `mcp/…`
-   (address-free lines, `on`/`off`/""/new URL), the JSON field diff for rule and schedule cards, and their listing
-   lines. Tests: Test plan 1-2.
-5. **Self-update through the fork.** `Updates.java`: `REPO`/`API` → fork, plus the class comment; `Ui.protect` on the
-   sheet's Update button; `install` writes and opens inside `synchronized (FilesProvider.class)`. `Tools.java`:
-   `update_buddy` description; `SettingsTool.approval` before `Updates.install` in `updateBuddy`; in `installApk`
-   (when `!Flavor.FDROID`) the package check that refuses Buddy's own or an unreadable APK, inside the same lock.
-   `strings.xml`: `tools_card_update` = `Install Buddy %1$s over %2$s?\n%3$s`.
+   (`skillFile(root, name)` on every access and again in the commit; `Skills.isLink` package-private; snapshot =
+   SKILL.md text + last-modified), `mcp/…` (address-free lines, `on`/`off`/""/new URL), the JSON field diff for rule
+   and schedule cards, and their listing lines. `Skills.java`: `LOCK`, held in `create`, `delete` and the write part
+   of `importUri`, which moves into `importBytes(root, data, badFile)` (the URI read stays outside). Tests: Test plan 1-2.
+5. **Self-update through the fork.** `FilesProvider.java`: a Context-free `newApk(File cacheDir)` (a fresh file in
+   `cache/apk/`, deleting staged APKs older than a day), `apkUri(File)`, and `fileFor`/`query` for `apk/<name>`;
+   `apkFile` goes. `Updates.java`: `REPO`/`API` → fork, plus the class comment; `Ui.protect` on the sheet's Update
+   button; `install` uses its own staged file and deletes it on every path that doesn't open the installer.
+   `Tools.java`: `update_buddy` description; `SettingsTool.approval` before `Updates.install` in `updateBuddy`;
+   `installApk` stages the same way, and (when `!Flavor.FDROID`) the package check refuses Buddy's own or an
+   unreadable APK and deletes that attempt's file. `strings.xml`: `tools_card_update` =
+   `Install Buddy %1$s over %2$s?\n%3$s`. Test: Test plan 3 (staging).
 6. **Docs.** `AGENTS.md` (repo): "Updating Buddy on the phone" (version rule, tag, CI, `update_buddy`).
    `docs/GUIDE.md:202`: one sentence saying that in this fork agents can change these settings with `buddy_settings`,
    each change on an approval card, and still can't answer cards.
@@ -242,8 +265,8 @@ fdroid builds of the same source, so it is unaffected.
 | Done-when item | Proof |
 |---|---|
 | 1. List with secrets masked; change after a card naming setting/old/new; denial leaves it unchanged | **Unit** (`ApprovalGateTest`, fake setting + fake asker): `DENIED…`, `CHANGES REQUESTED…`, the 5-minute timeout text, `NOT_NOW`, `AUTO_APPROVED` and `RULE_APPROVED` leave the fake's value unchanged and its setter uncalled; `APPROVED by the user. Go ahead.` calls the setter once with the new value; the card text holds name, old and new; an unchanged value asks no card. **Unit, stale writes**: a fake asker that changes the fake's value, or deletes it (`get` → null), before answering `APPROVED…` → setter never called, reply says it changed while the card was open. **Unit, MCP**: the list line, read text and card for servers with URLs carrying credentials (`https://u:p@h.example/mcp`, `…?token=abc`, `…/sk-123/mcp`) and a saved key contain no part of the URL or key; a URL for an existing id is refused. **Device** (after the switch, phone MCP): list shows no `Prefs.token`/`bg_token` value, MCP servers without addresses and keys only as `set`/`none`; change `read_aloud` → deny → still the old value; approve → new value, visible in Settings; ask to change a rule's `on`, then edit and save its instruction in Settings before approving → "changed while the card was open", the new instruction kept. |
-| 2. Covers the user-only settings + ordinary ones | **Unit**: the setting names/families include `app/`, `chat/<id>/linux_tools`, `chat/<id>/background`, `chat/<id>/schedule`, `rule/`, `skill/`, `mcp/`, `background_new_chats`, `notification_rules`, `linux_tools_new_chats` and at least the ordinary rows of the table. **Unit, rules**: `rule/A` with `"id":"B"` refused; `rule/A` without an id → the rule built has id A; `rule/new` with an id refused; empty instruction, unknown `approval`/`seconds`/`limit` refused. **Unit, skills** (temp folder, real symlinks): a skill folder linked outside the root and a `SKILL.md` linked to an outside file are refused by `skillFile` for read, write and delete, listed by name only, and the outside file's text never appears in a reply and is unchanged; a plain skill passes. **Device**: one approved change per family (trust for one app, a rule's `on`, a schedule's `paused`, a test skill created then deleted, a keyless MCP server switched off, this chat's Linux tools), each checked on its Settings screen. |
-| 3. Code change → signed APK by fork CI → installed after one card; Buddy back up intact | **CI**: a `v…-fork.N` tag on the fork publishes `buddy.apk`; `apksigner verify --print-certs` shows the fork cert (`7cf74b84…`, as in 003's verify); `curl` of the fork's `releases/latest` API shows the asset Updates accepts. **Device** (after the switch): in a chat with Linux tools, the agent makes a trivial visible change, bumps the version, tags, waits for CI, calls `update_buddy install=true` → card → installer → Update; Buddy restarts on the new version (Settings › About); chat list, a test chat's messages and a changed setting are still there. **Device, side doors**: `update_buddy install=true` → deny → no installer; `install_apk` with the release's `buddy.apk` copied into Buddy's Linux → refused, pointing to `update_buddy`; `install_apk` with another app's APK → installer as before; with "Let agents tap Buddy's screens" on, `tap` on the update sheet's Update → BLOCKED. Tagging publishes a public release, so it needs the orchestrator's confirm with Nicholas first. |
+| 2. Covers the user-only settings + ordinary ones | **Unit**: the setting names/families include `app/`, `chat/<id>/linux_tools`, `chat/<id>/background`, `chat/<id>/schedule`, `rule/`, `skill/`, `mcp/`, `background_new_chats`, `notification_rules`, `linux_tools_new_chats` and at least the ordinary rows of the table. **Unit, rules**: `rule/A` with `"id":"B"` refused; `rule/A` without an id → the rule built has id A; `rule/new` with an id refused; empty instruction, unknown `approval`/`seconds`/`limit` refused. **Unit, skills** (temp folder, real symlinks): a skill folder linked outside the root and a `SKILL.md` linked to an outside file are refused by `skillFile` for read, write and delete, listed by name only, and the outside file's text never appears in a reply and is unchanged; a plain skill passes. **Unit, skills vs import** (temp folder): (a) the test holds `Skills.LOCK`, and an approved tool edit of a skill and `importBytes` of the same skill, each on its own thread, both reach `Thread.State.BLOCKED` with the files unchanged; after release both finish, so an import can't land between a commit's compare and its write; (b) a fake asker runs `importBytes` before answering `APPROVED…`, once with a different SKILL.md and once with the same SKILL.md plus an extra file → the edit and the delete are refused, the imported files kept. **Device**: one approved change per family (trust for one app, a rule's `on`, a schedule's `paused`, a test skill created then deleted, a keyless MCP server switched off, this chat's Linux tools), each checked on its Settings screen. |
+| 3. Code change → signed APK by fork CI → installed after one card; Buddy back up intact | **Unit, staging** (temp folder, Context-free `FilesProvider` helpers): stage A and write its bytes; then a second attempt B (written, kept) and a refused attempt C (written, then its own file deleted); A's name still maps to A's file with A's original bytes, B is intact, and a staged file aged past a day (`setLastModified`) is removed by the next staging while A stays. **CI**: a `v…-fork.N` tag on the fork publishes `buddy.apk`; `apksigner verify --print-certs` shows the fork cert (`7cf74b84…`, as in 003's verify); `curl` of the fork's `releases/latest` API shows the asset Updates accepts. **Device** (after the switch): in a chat with Linux tools, the agent makes a trivial visible change, bumps the version, tags, waits for CI, calls `update_buddy install=true` → card → installer → Update; Buddy restarts on the new version (Settings › About); chat list, a test chat's messages and a changed setting are still there. **Device, side doors**: `update_buddy install=true` → deny → no installer; `install_apk` with the release's `buddy.apk` copied into Buddy's Linux → refused, pointing to `update_buddy`; `install_apk` with another app's APK → installer as before, and while that installer is still open an `install_apk` of the release's `buddy.apk` is refused, then tapping Install on the first installer still installs that app; with "Let agents tap Buddy's screens" on, `tap` on the update sheet's Update → BLOCKED. Tagging publishes a public release, so it needs the orchestrator's confirm with Nicholas first. |
 | 4. Approval cards still can't be answered by the agent (tested) | **Unit**: (a) the gate test above (only the user's APPROVED applies a change; self-approval strings don't); (b) `phone_commands_ask` and an unknown/secret name (`token`) are refused without calling the asker; (c) `SHELL_NO` cases (step 1). **Device**: `tap` on an open card's button → BLOCKED (existing `Guard.offLimits`), `phone_shell "input tap …"` → BLOCKED, `buddy_settings name=phone_commands_ask value=off` → refused. |
 | 5. Style, YAGNI, F-Droid | Code review against this plan and the repo's style (no new dependency in the APK, English strings, same patterns as `PhoneTools`/`Schedules.agentTool`). CI: both flavors build, unit tests and helper tests green, "F-Droid APK is reproducible" green. Grep: `buddy_settings` is only listed/handled behind `!Flavor.FDROID`. decisions.md records the F-Droid byte difference. |
 
@@ -268,6 +291,12 @@ fdroid builds of the same source, so it is unaffected.
 - **Skill folder swapped for a link mid-commit.** An agent with Linux tools could swap a skill folder for a link
   between the commit's check and the write (milliseconds). `Linux.write` replaces a linked `SKILL.md` rather than
   following it, and that agent can already write files in Buddy's Linux with its own shell. Accepted.
+- **The main thread can wait briefly for a skill import.** A UI create or delete, or a tool commit, that coincides with
+  an import waits for that import's local file writes (one skill folder from memory, KBs in practice, at most a 50 MB
+  archive). It never waits on the network or a card. Accepted.
+- **Staged APK cleanup by age.** A staged APK is deleted once it is a day old. Android's installer reads it when it
+  opens, so a pending handoff is never that old in practice. Until then, a few APKs can sit in Buddy's cache, which
+  Android may clear anyway. Accepted.
 - **`phone_shell` can `pm install`.** It is adb-level by design: each command shows its own card unless the user
   turned that off (`phone_commands_ask`, read-only in `buddy_settings`). Not a new route; left as upstream has it.
 - **Upstream merges** conflict on `Updates.REPO`, `BuildInfo` and the `Tools.java` hunks. These are small and the
@@ -275,8 +304,8 @@ fdroid builds of the same source, so it is unaffected.
 - **`releases/latest`** picks the newest non-draft, non-prerelease release by its commit date. Tag the commit you
   mean (normally `main`), never mark it prerelease.
 - **JVM tests and Android stubs**: `android.*` is stubbed in local unit tests (the real `org.json` is on the test
-  classpath), so the tested code (gate, names, `SHELL_NO`, rule building, `skillFile`, MCP lines) takes plain values,
-  `File`s and JSON, never a `Context`.
+  classpath), so the tested code (gate, names, `SHELL_NO`, rule building, `skillFile`, `Skills.importBytes`, MCP
+  lines, APK staging) takes plain values, `File`s and JSON, never a `Context`.
 
 ## Open questions
 

@@ -155,3 +155,25 @@
 - Choice: `testImplementation("org.json:json:20240303")` (the Coder may take the current release). The rule-id and
   JSON-diff tests need real JSON parsing, and android.jar only has stubs. It is test-only and never in the APK.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Each APK install attempt stages its own file and URI; the round-1 lock goes (amends "Self-install side doors")
+- Options: keep the shared `install.apk` under a lock (round-1 plan); a per-attempt file and URI; also hold the file
+  until `wait_for_install` sees the install.
+- Choice: `FilesProvider` stages each attempt as a new file in `cache/apk/` with its own `content://…/apk/<name>`.
+  Each route checks and launches only its own file, and deletes only that file on every path that doesn't open the
+  installer. Staging deletes staged APKs older than a day. This is one code path for both flavors: F-Droid's
+  `install_apk` behaves the same and only the cache file name differs. That byte difference is deliberate. The
+  installer opens the URI after `startActivity` returns, so a lock around the launch can't cover its read. With
+  nothing shared, no lock is needed. Tying cleanup to `wait_for_install` would miss attempts the agent never waits
+  for. (Plan review round 2, F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Skills folder: one `Skills.LOCK` for every Buddy write; other stores stay main-thread
+- Options: move the importer's writes onto the main thread; a shared lock for skill writes; leave it (round-1 plan).
+- Choice: `Skills.LOCK` is held by `create`, `delete`, the write part of `importUri` (after the URI read and zip
+  scan) and the tool's skill snapshot and re-check-and-write/delete. It is never held while a card waits or while
+  anything waits for the main thread. A skill's snapshot adds SKILL.md's last-modified time, because every Buddy write
+  to an existing skill rewrites it. The import's parse-and-write part becomes a Context-free `importBytes` so a JVM
+  test can race it. A lock is fewer changes than moving the importer onto the main thread, which would need a
+  prepared-import object handed between threads. (Plan review round 2, F2.)
+- By: Planner (claude-opus-5-5)
