@@ -1,8 +1,10 @@
 package app.buddy.assistant.wear;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.ActivityNotFoundException;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
@@ -27,7 +29,7 @@ import java.util.ArrayList;
  * draws it.
  */
 public class TalkActivity extends Activity {
-    private static final int LISTEN = 1;
+    private static final int LISTEN = 1, CALL = 2;
     /** With nothing from the phone for this long, the screen may go to sleep; Talk carries on without it. */
     private static final long SCREEN_ON_MS = 120_000;
 
@@ -77,10 +79,24 @@ public class TalkActivity extends Activity {
             Talk.silence();
             listen();
         });
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(Look.dp(this, 48), Look.dp(this, 48));
+        ImageView call = new ImageView(this); // a call: the live voice, with the watch's microphone and speaker
+        call.setImageResource(R.drawable.ms_graphic_eq);
+        call.setColorFilter(0xFF1A1714);
+        call.setContentDescription(getString(R.string.call_button));
+        call.setPadding(p, p, p, p);
+        call.setBackground(Look.pill(this, accent, 24));
+        call.setOnClickListener(v -> call());
+        LinearLayout buttons = new LinearLayout(this);
+        buttons.setGravity(Gravity.CENTER_HORIZONTAL);
+        LinearLayout.LayoutParams bp = new LinearLayout.LayoutParams(Look.dp(this, 48), Look.dp(this, 48));
+        bp.setMarginStart(Look.dp(this, 4));
+        bp.setMarginEnd(Look.dp(this, 4));
+        buttons.addView(mic, bp);
+        buttons.addView(call, bp);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
         lp.gravity = Gravity.CENTER_HORIZONTAL;
         lp.bottomMargin = Look.dp(this, round ? 14 : 6);
-        root.addView(mic, lp);
+        root.addView(buttons, lp);
         setContentView(root);
 
         // a fresh open means "I want to say something"; not when Talk has news for this chat, or Android is recreating us
@@ -107,6 +123,30 @@ public class TalkActivity extends Activity {
     protected void onDestroy() {
         super.onDestroy();
         if (isFinishing() && chat.equals(Talk.chat)) Talk.left(); // swiped away: no more waiting for this
+    }
+
+    /** The call button: the microphone permission once, then Talk gives way to the call (the last started owns the speaker). */
+    private void call() {
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, CALL);
+            return;
+        }
+        problem = "";
+        Talk.left();
+        Talk.silence();
+        Call.start(this, chat, title, accent);
+        startActivity(new Intent(this, CallActivity.class));
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int request, String[] permissions, int[] results) {
+        if (request != CALL) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            call();
+        } else {
+            problem = getString(R.string.call_needs_mic);
+            draw();
+        }
     }
 
     private void listen() {

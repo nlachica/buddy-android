@@ -12,9 +12,12 @@ import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
+import android.util.Log;
 
+import com.google.android.gms.wearable.ChannelClient;
 import com.google.android.gms.wearable.MessageClient;
 import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Wearable;
@@ -24,8 +27,10 @@ import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
 
@@ -35,6 +40,8 @@ import java.util.function.BooleanSupplier;
  * back when the wrist goes down, and Android may reclaim a stopped activity's process). TalkActivity only draws
  * {@link #lines}. The wait ENDS on done, an error, lost contact, the 15-minute ceiling or the screen being swiped away;
  * the service STOPS once the last reply has been said (so a done that comes mid-reply doesn't cut it off).
+ * Replies are said in order: by the watch's TTS, or, when the phone says a reply comes in ChatGPT's voice
+ * (docs/features/007-watch-live-voice/plan.md), by playing its channel; the watch alone decides which, once.
  */
 public class Talk extends Service {
     static final int YOU = 0, BUDDY = 1, ERROR = 2;
@@ -73,6 +80,8 @@ public class Talk extends Service {
     private static final String PATHS = "/buddy";
     private static final String CHANNEL = "talk";
     private static final long NO_HEARD_MS = 10_000, QUIET_MS = 30_000, STATUS_MS = 10_000;
+    /** A reply in the phone's voice that isn't audible after this long at the head of the queue is said by the watch. */
+    private static final long HEAD_MS = 35_000;
     /** The phone's wake lock lasts 15 minutes (WatchLink); the watch gives up at the same time. */
     private static final long CEILING_MS = 15 * 60_000L;
     /** A 3000-character reply takes about 3½ minutes to say. */
@@ -84,13 +93,46 @@ public class Talk extends Service {
     private PowerManager.WakeLock wake;
     private TextToSpeech tts;
     private boolean ttsReady, ttsFailed;
-    /** Replies that arrived before the engine was ready, in order (the phone's Voice keeps only the last). */
-    private final List<String> early = new ArrayList<>();
-    /** Ids of the utterances still to be said. */
+    /** What is still to be said, in order: TTS texts (also those that arrived before the engine was ready) and voice replies. */
+    private final List<Say> toSay = new ArrayList<>();
+    /** Ids of the TTS utterances still to be said, and when their reply arrived (for the latency log). */
     private final Set<String> pending = new HashSet<>();
+    private final Map<String, Long> ttsArrived = new HashMap<>();
     private int utterances;
+    /** Voice channels the phone opened, by reply id, kept until read to the end, converted, hushed or Talk stops. */
+    private final Map<Long, ChannelClient.Channel> channels = new HashMap<>();
+    /** Reply ids the phone said the watch must say itself (its message may come before the reply's). */
+    private final Set<Long> saidByWatch = new HashSet<>();
+
+    /** One thing to say. voice: the reply id the phone streams in ChatGPT's voice, or -1 for the watch's TTS. */
+    private static final class Say {
+        final String text;
+        final long arrived = SystemClock.elapsedRealtime();
+        long voice;
+        /** The voice's first audible block was written: the voice owns this reply from then on (reader thread sets). */
+        volatile boolean committed; // the voice owns the reply; with fellBack, set only under synchronized (this)
+        boolean fellBack; // the TTS owns it
+        Speaker speaker;
+        Runnable deadline;
+
+        Say(String text, long voice) {
+            this.text = text;
+            this.voice = voice;
+        }
+    }
 
     private final MessageClient.OnMessageReceivedListener listener = e -> h.post(() -> onPhone(e));
+    private final ChannelClient.ChannelCallback channelCallback = new ChannelClient.ChannelCallback() {
+        @Override
+        public void onChannelOpened(ChannelClient.Channel ch) {
+            h.post(() -> voiceOpened(ch));
+        }
+
+        @Override
+        public void onChannelClosed(ChannelClient.Channel ch, int reason, int code) {
+            h.post(() -> voiceClosed(ch));
+        }
+    };
     private final Runnable noHeard = () -> fail(R.string.talk_no_answer);
     private final Runnable quiet = this::askStatus;
     private final Runnable noStatus = () -> fail(R.string.talk_lost);
@@ -99,6 +141,7 @@ public class Talk extends Service {
 
     /** Starts the conversation: the listener first, then {@code send}, so a fast answer can't come before anyone listens. */
     static void begin(Context c, String chat, String title, int accent, Sender send) {
+        Call.hangUp(); // the last one started owns the speaker
         Talk.chat = chat;
         Talk.title = title;
         Talk.accent = accent;
@@ -145,6 +188,7 @@ public class Talk extends Service {
         // a conversation that is still being said gives way to this one
         h.removeCallbacksAndMessages(null);
         Wearable.getMessageClient(this).removeListener(listener);
+        Wearable.getChannelClient(this).unregisterChannelCallback(channelCallback);
         hush();
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, getString(R.string.talk_channel), NotificationManager.IMPORTANCE_LOW));
@@ -159,6 +203,7 @@ public class Talk extends Service {
         final Sender send = sender;
         final int mine = run;
         h.postDelayed(noHeard, NO_HEARD_MS); // armed before anything is sent; any answer from the phone cancels it
+        Wearable.getChannelClient(this).registerChannelCallback(channelCallback); // from start to stop: voice channels
         Wearable.getMessageClient(this).addListener(listener)
                 .addOnSuccessListener(v -> {
                     if (active(mine)) send.send(() -> active(mine), error -> {
@@ -186,7 +231,8 @@ public class Talk extends Service {
     // ---------------------------------------------------------------- from the phone
 
     private void onPhone(MessageEvent e) {
-        if (!waiting || !e.getPath().startsWith(PATHS)) return;
+        if (e.getPath().startsWith(Phone.LIVE)) return; // a call's (Call listens): not an answer, nothing to reset
+        if (!e.getPath().startsWith(PATHS) || (!waiting && !Phone.SAY.equals(e.getPath()))) return; // after the end only /buddy/say
         JSONObject in;
         try {
             in = new JSONObject(new String(e.getData(), StandardCharsets.UTF_8));
@@ -194,6 +240,10 @@ public class Talk extends Service {
             return;
         }
         if (!chat.equals(in.optString("chat"))) return;
+        if (Phone.SAY.equals(e.getPath())) { // the phone's voice couldn't say reply id: the watch does
+            sayItself(in.optLong("id"), "say");
+            return;
+        }
         h.removeCallbacks(noHeard); // whatever it is, the phone got the message
         String text = in.optString("text");
         switch (e.getPath()) {
@@ -206,7 +256,7 @@ public class Talk extends Service {
                 break;
             case Phone.REPLY:
                 status = "";
-                say(in.optBoolean("error") ? ERROR : BUDDY, text);
+                say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1));
                 break;
             case Phone.DONE:
                 if ("stopped".equals(in.optString("outcome"))) say(ERROR, getString(R.string.talk_stopped));
@@ -255,6 +305,7 @@ public class Talk extends Service {
     }
 
     private void fail(String text) {
+        for (Say s : new ArrayList<>(toSay)) toTts(s, "fail"); // no more waiting for a voice that may never come
         say(ERROR, text);
         end();
     }
@@ -265,8 +316,7 @@ public class Talk extends Service {
         h.removeCallbacks(quiet);
         h.removeCallbacks(noStatus);
         h.removeCallbacks(ceiling);
-        Wearable.getMessageClient(this).removeListener(listener);
-        waiting = false;
+        waiting = false; // the listener stays until stop: after the end it only takes /buddy/say
         status = "";
         getSystemService(NotificationManager.class).notify(1, notification(R.string.talk_notif_speaking));
         h.postDelayed(forceStop, SPEAK_MS); // a hung engine must not keep the watch awake
@@ -275,11 +325,12 @@ public class Talk extends Service {
     }
 
     private void maybeStop() {
-        if (!waiting && pending.isEmpty() && early.isEmpty()) stop();
+        if (!waiting && pending.isEmpty() && toSay.isEmpty()) stop();
     }
 
     private void stop() {
         h.removeCallbacksAndMessages(null);
+        release();
         stopForeground(STOP_FOREGROUND_REMOVE);
         stopSelf();
     }
@@ -288,6 +339,8 @@ public class Talk extends Service {
     public void onDestroy() {
         h.removeCallbacksAndMessages(null);
         Wearable.getMessageClient(this).removeListener(listener);
+        Wearable.getChannelClient(this).unregisterChannelCallback(channelCallback);
+        release();
         if (tts != null) tts.shutdown();
         if (wake != null && wake.isHeld()) wake.release();
         if (instance == this) instance = null;
@@ -298,30 +351,187 @@ public class Talk extends Service {
 
     /** Shows a line and says it (in order, once). End messages are said too: the user may not be looking. */
     private void say(int kind, String text) {
-        lines.add(new Line(kind, text));
-        if (ttsFailed) return;
-        if (ttsReady) speak(text);
-        else early.add(text);
+        say(kind, text, -1);
     }
 
-    private void speak(String text) {
+    /** voice: a reply id the phone streams in ChatGPT's voice (-1: the watch's TTS says it). */
+    private void say(int kind, String text, long voice) {
+        lines.add(new Line(kind, text));
+        if (voice >= 0 && saidByWatch.remove(voice)) voice = -1; // the phone already gave up on its voice
+        Log.i("BuddyTalk", "reply arrived" + (voice >= 0 ? " (voice " + voice + ")" : " (tts)"));
+        if (voice < 0 && ttsFailed) return;
+        toSay.add(new Say(text, voice));
+        pump();
+    }
+
+    /** Moves the head of the queue on: TTS goes to the engine at once; a voice reply waits for the TTS before it. */
+    private void pump() {
+        while (!toSay.isEmpty()) {
+            Say s = toSay.get(0);
+            if (s.voice < 0) {
+                if (!ttsReady && !ttsFailed) break; // ttsInit() calls pump again
+                toSay.remove(0);
+                if (!ttsFailed) speak(s);
+            } else {
+                if (pending.isEmpty()) startVoice(s);
+                break; // what comes after waits for this
+            }
+        }
+        maybeStop();
+    }
+
+    private void speak(Say s) {
         String id = "u" + utterances++;
         pending.add(id);
-        if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { // no callback will come for it
+        ttsArrived.put(id, s.arrived);
+        if (tts.speak(s.text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { // no callback will come for it
             pending.remove(id);
+            ttsArrived.remove(id);
             lines.add(new Line(ERROR, getString(R.string.talk_no_voice)));
             changed();
-            maybeStop();
         }
+    }
+
+    // ---------------------------------------------------------------- ChatGPT's voice for a reply
+
+    /** The head voice reply: its 35 s start now; its channel is played when it is here. */
+    private void startVoice(Say s) {
+        if (s.deadline == null) {
+            s.deadline = () -> toTts(s, "timeout");
+            h.postDelayed(s.deadline, HEAD_MS);
+        }
+        ChannelClient.Channel ch = channels.get(s.voice);
+        if (ch == null || s.speaker != null) return;
+        final Speaker sp = new Speaker(false, "voice " + s.voice, new Speaker.Listener() {
+            @Override
+            public boolean audible() {
+                synchronized (s) { // one owner: the first sound or the fallback, whichever claims first
+                    if (s.fellBack) return false;
+                    s.committed = true; // here, not posted: a /buddy/say that comes next must find it already the voice's
+                }
+                h.post(() -> {
+                    Log.i("BuddyTalk", "first sound (voice) " + (SystemClock.elapsedRealtime() - s.arrived) + " ms after the reply");
+                    if (s.deadline != null) h.removeCallbacks(s.deadline);
+                });
+                return true;
+            }
+
+            @Override
+            public void ended(String by) {
+                h.post(() -> streamEnded(s, by));
+            }
+        });
+        s.speaker = sp;
+        Wearable.getChannelClient(this).getInputStream(ch)
+                .addOnSuccessListener(sp::play)
+                .addOnFailureListener(e -> toTts(s, "closed"));
+    }
+
+    /** The head's stream ended or broke (main thread). Audible before: the voice said it, never again. Else the watch does. */
+    private void streamEnded(Say s, String by) {
+        if (!toSay.contains(s) || s.speaker == null) return; // converted or hushed meanwhile
+        if (s.committed && !s.speaker.sounded()) { // claimed, but the first write failed: nobody heard it. The speaker is done, so no race
+            synchronized (s) {
+                s.committed = false;
+            }
+        }
+        if (!s.committed) {
+            toTts(s, by);
+            return;
+        }
+        toSay.remove(s);
+        if (s.deadline != null) h.removeCallbacks(s.deadline);
+        s.speaker = null;
+        closeChannel(s.voice);
+        pump();
+    }
+
+    /** The phone gave up on its voice for reply id, or the watch did: TTS says it (unless the voice already started it). */
+    private void sayItself(long id, String why) {
+        for (Say s : toSay) {
+            if (s.voice == id) {
+                toTts(s, why);
+                return;
+            }
+        }
+        saidByWatch.add(id); // the reply itself is still to come
+        closeChannel(id);
+    }
+
+    private void toTts(Say s, String why) {
+        if (s.voice < 0 || !toSay.contains(s)) return;
+        synchronized (s) {
+            if (s.committed) return;
+            s.fellBack = true;
+        }
+        Log.i("BuddyTalk", "voice " + s.voice + " becomes tts (" + why + ")");
+        if (s.deadline != null) h.removeCallbacks(s.deadline);
+        if (s.speaker != null) s.speaker.stop(why);
+        s.speaker = null;
+        closeChannel(s.voice); // unread: the phone retires that reply
+        s.voice = -1;
+        pump();
+    }
+
+    private void voiceOpened(ChannelClient.Channel ch) {
+        String path = ch.getPath();
+        if (!path.startsWith(Phone.VOICE)) return;
+        long id;
+        try {
+            id = Long.parseLong(path.substring(Phone.VOICE.length()));
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (saidByWatch.contains(id)) { // the phone already said the watch says it
+            Wearable.getChannelClient(this).close(ch);
+            return;
+        }
+        channels.put(id, ch);
+        pump();
+    }
+
+    /** A channel closed: by the phone (cancelled, link gone) or by us. Nothing audible from it yet means the watch says it. */
+    private void voiceClosed(ChannelClient.Channel ch) {
+        String path = ch.getPath();
+        if (!path.startsWith(Phone.VOICE)) return;
+        long id;
+        try {
+            id = Long.parseLong(path.substring(Phone.VOICE.length()));
+        } catch (NumberFormatException e) {
+            return;
+        }
+        if (!channels.containsKey(id)) return; // closed by us (read, converted, hushed)
+        channels.remove(id);
+        for (Say s : toSay) {
+            if (s.voice == id) {
+                toTts(s, "closed"); // changes toSay
+                return;
+            }
+        }
+    }
+
+    private void closeChannel(long id) {
+        ChannelClient.Channel ch = channels.remove(id);
+        if (ch != null) Wearable.getChannelClient(this).close(ch);
+    }
+
+    /** Silences the voice and lets go of every channel (hush, stop). */
+    private void release() {
+        for (Say s : toSay) {
+            if (s.deadline != null) h.removeCallbacks(s.deadline);
+            if (s.speaker != null) s.speaker.stop("hush");
+            s.speaker = null;
+        }
+        for (ChannelClient.Channel ch : channels.values()) Wearable.getChannelClient(this).close(ch);
+        channels.clear();
     }
 
     private void ttsInit(int status) {
         if (status != TextToSpeech.SUCCESS) {
             ttsFailed = true;
-            early.clear();
             lines.add(new Line(ERROR, getString(R.string.talk_no_voice))); // shown, not said
             changed();
-            maybeStop();
+            pump(); // drops the TTS items; voice replies can still be played
             return;
         }
         tts.setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_ASSISTANT)
@@ -329,6 +539,10 @@ public class Talk extends Service {
         tts.setOnUtteranceProgressListener(new UtteranceProgressListener() {
             @Override
             public void onStart(String id) {
+                h.post(() -> {
+                    Long at = ttsArrived.remove(id);
+                    if (at != null) Log.i("BuddyTalk", "first sound (tts) " + (SystemClock.elapsedRealtime() - at) + " ms after the reply");
+                });
             }
 
             @Override
@@ -347,21 +561,23 @@ public class Talk extends Service {
             }
         });
         ttsReady = true;
-        for (String t : early) speak(t);
-        early.clear();
-        maybeStop(); // every speak() may have been refused
+        pump(); // every speak() may have been refused
     }
 
     private void finished(String id) {
         h.post(() -> {
             pending.remove(id);
-            maybeStop();
+            ttsArrived.remove(id);
+            pump(); // a voice reply waiting behind this one is next
         });
     }
 
     private void hush() {
         pending.clear();
-        early.clear(); // replies buffered before the engine was ready are silenced too
+        ttsArrived.clear();
+        release(); // the voice and its channels; the phone retires those replies
+        toSay.clear(); // replies buffered before the engine was ready are silenced too
+        saidByWatch.clear();
         if (tts != null && ttsReady) tts.stop();
         maybeStop();
     }

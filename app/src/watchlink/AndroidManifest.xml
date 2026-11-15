@@ -15,6 +15,14 @@
                     android:host="*"
                     android:pathPrefix="/buddy" />
             </intent-filter>
+            <!-- the watch opens the channel /buddy/live for a call -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/buddy" />
+            </intent-filter>
         </service>
     </application>
 </manifest>
