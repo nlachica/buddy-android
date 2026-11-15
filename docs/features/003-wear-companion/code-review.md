@@ -77,3 +77,19 @@ Validation and done-when coverage:
 Only this review document was modified in the repository.
 
 VERDICT: APPROVE
+
+## Round 4 - Code Reviewer (gpt-6-astra)
+
+Reviewed only the straight-to-talk follow-up, `git diff 0b4a0a3..HEAD` at `af13899`, against the brief's last clarification. Read the brief, plan, decisions and earlier review rounds, plus the changed `ChatsActivity` and its `TalkActivity`/manifest integration. Earlier approved implementation is not reopened.
+
+F1 [major] Reopening the existing task does not go straight to listening - `wear/src/main/java/app/buddy/assistant/wear/ChatsActivity.java:53-58` redirects only from `onCreate` with a null saved state. After choosing a chat and finishing or cancelling dictation, go Home and open Buddy again without killing its task: Android brings the existing top activity forward, so this block does not run. `TalkActivity.onStart` only redraws; its automatic `listen()` is also confined to `onCreate`. If the user previously backed out to the list, reopening instead leaves them on that list. Thus the ordinary repeated quick-access action still needs another tap, contrary to the latest clarification that opening the app goes straight to listening in the last-used chat. This follows Android's documented [task foreground/resume behavior](https://developer.android.com/guide/components/activities/tasks-and-back-stack#Background); the new decision explicitly acknowledges the limitation but gives no user-approved narrowing of the goal. -> Handle an explicit launcher/button open for both new and existing tasks, routing it to the saved chat and starting recognition once. Keep Back to the list, activity restoration, notification viewing and recognizer return distinct from that explicit launch; simply auto-listening on every `onResume` would introduce loops and break navigation. Add focused verification for first launch without a saved chat, cold launch with one, warm reopening with Talk on top, warm reopening with the list on top, and Back/cancel/recreation without unwanted re-listening. Confirm the actual Watch4 double-press path as well as app-icon launch.
+
+Validation and coverage:
+- All current Wear Java compiled with `javac --release 8`, Android 36's real `android.jar`, the existing generated Wear resource class, and the real Play services wearable/base/basement/tasks JARs retained from earlier rounds. Output: `/tmp/wear-review-r4-nnvdtjr6/`. No source code changed.
+- `git diff --check 0b4a0a3..HEAD`: passed.
+- The saved chat/id/title/accent and first-launch list fallback fit the requested scope; the fresh-task path reaches the existing recognizer logic. No additional security, data, YAGNI or convention finding in this delta.
+- Neither the plan nor `verify.md` records cold/warm launch coverage for this follow-up. The existing CI/install/probe evidence does not establish the new quick-access behavior. The lifecycle finding above is based on source and the platform contract, not a claimed device reproduction; full Gradle assembly and on-device launch tests were not run in this review. Existing phone-switch/device gates remain with the Verifier.
+
+Only this review document was modified in the repository.
+
+VERDICT: REVISE
