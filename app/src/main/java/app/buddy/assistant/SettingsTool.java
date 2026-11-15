@@ -3,6 +3,7 @@ package app.buddy.assistant;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.File;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -308,6 +309,293 @@ final class SettingsTool {
         return l;
     }
 
+
+    // ------------------------------------------------------------ rules
+
+    /** A rule from the agent's JSON, checked as the rule editor checks it. pathId: the rule's id, or null for a new one. */
+    static Rules.Rule buildRule(String pathId, JSONObject o, java.util.Collection<String> agents) {
+        if (o.has("id") && (pathId == null || !o.optString("id").equals(pathId))) {
+            throw new IllegalArgumentException(pathId == null ? "rule/new takes no id; Buddy gives it one"
+                    : "the id in the value isn't " + pathId + ": rule/" + pathId + " only changes that rule");
+        }
+        Rules.Rule r = Rules.Rule.of(o);
+        if (pathId != null) r.id = pathId;
+        r.instruction = r.instruction.trim();
+        r.from = r.from.trim();
+        r.words = r.words.trim();
+        if (r.pkg.isEmpty()) throw new IllegalArgumentException("pkg (the app whose notifications it watches) is needed");
+        if (r.instruction.isEmpty()) throw new IllegalArgumentException("instruction is needed");
+        if (!Arrays.asList("ask", "countdown", "now").contains(r.approval)) {
+            throw new IllegalArgumentException("approval takes: ask, countdown, now");
+        }
+        if (Arrays.binarySearch(sorted(Rules.SECONDS), r.seconds) < 0) {
+            throw new IllegalArgumentException("seconds takes: " + Arrays.toString(Rules.SECONDS));
+        }
+        if (Arrays.binarySearch(sorted(Rules.LIMITS), r.limit) < 0) {
+            throw new IllegalArgumentException("limit takes: " + Arrays.toString(Rules.LIMITS) + " (0 is no limit)");
+        }
+        if (!agents.contains(r.backend)) throw new IllegalArgumentException("backend takes: " + String.join(", ", agents));
+        return r;
+    }
+
+    private static int[] sorted(int[] a) {
+        int[] b = a.clone();
+        Arrays.sort(b);
+        return b;
+    }
+
+    /** rule/&lt;id&gt; or rule/new (id null): the rule's JSON; "" deletes it. */
+    static Setting rule(BuddyService svc, String id) {
+        return new Setting("rule/" + (id == null ? "new" : id), "the rule as JSON (pkg, instruction, from, words, backend, "
+                + "model, approval ask|countdown|now, seconds, limit, on), or \"\" to delete it") {
+            private String added = "";
+
+            @Override
+            String get() {
+                Rules.Rule r = id == null ? null : Rules.find(svc, id);
+                return r == null ? null : ruleJson(r);
+            }
+
+            @Override
+            String check(String value) {
+                if (id != null && Rules.find(svc, id) == null) throw new IllegalArgumentException("no rule " + id + "; use rule/new");
+                if (value.trim().isEmpty()) {
+                    if (id == null) throw new IllegalArgumentException("rule/new needs the rule's JSON");
+                    return "";
+                }
+                return ruleJson(buildRule(id, json(value), ruleAgents()));
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return diff(snapshot, value);
+            }
+
+            @Override
+            String set(String value) {
+                if (value.isEmpty()) {
+                    Rules.remove(svc, id);
+                } else {
+                    Rules.Rule r = Rules.Rule.of(json(value));
+                    if (id == null) { // a new rule: its id must be unused by the time it is saved
+                        while (Rules.find(svc, r.id) != null) r.id = Long.toString(Long.parseLong(r.id, 36) + 1, 36);
+                        added = " (id " + r.id + ")";
+                    }
+                    Rules.put(svc, r);
+                }
+                Triggers.get(svc).rulesChanged();
+                return added;
+            }
+
+            @Override
+            String read() {
+                String j = get();
+                return name + " = " + (j == null ? "(none)" : j) + "\n" + allowed;
+            }
+        };
+    }
+
+    /** The agents that can run a rule (the editor offers these). */
+    private static List<String> ruleAgents() {
+        List<String> l = new ArrayList<>();
+        for (Account a : Account.ALL) if (a.runsRules()) l.add(a.agent);
+        return l;
+    }
+
+    private static String ruleJson(Rules.Rule r) {
+        try {
+            return r.json().toString();
+        } catch (org.json.JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    // ------------------------------------------------------------ skills
+
+    /**
+     * A skill's SKILL.md, if the skill is Buddy's to read and change: a plain skill folder inside root. A link (the
+     * folder or the file) is refused, and so is anything whose real path leaves root, so a skill can't reach a file
+     * elsewhere on the phone.
+     */
+    static File skillFile(File root, String name) throws java.io.IOException {
+        if (name.isEmpty() || !name.equals(Skills.slug(name))) {
+            throw new IllegalArgumentException("a skill's name is lower-case letters, digits and dashes");
+        }
+        File d = new File(root, name), md = new File(d, "SKILL.md");
+        if (Skills.isLink(d) || Skills.isLink(md)) {
+            throw new IllegalArgumentException("skill " + name + " is linked: it is not read or changed here");
+        }
+        if (!md.getCanonicalPath().startsWith(root.getCanonicalPath() + File.separator)) {
+            throw new IllegalArgumentException("skill " + name + " is outside the skills folder");
+        }
+        return md;
+    }
+
+    /** skill/&lt;name&gt;: the whole SKILL.md (name and description up top); "" deletes the skill's folder. */
+    static Setting skill(File root, String skillName) {
+        return new Setting("skill/" + skillName, "the skill's whole SKILL.md (its front matter name must be " + skillName
+                + "), or \"\" to delete the skill's folder") {
+            @Override
+            String get() {
+                synchronized (Skills.LOCK) { // text, then its time: an import that only added files still rewrote SKILL.md
+                    try {
+                        File md = skillFile(root, skillName);
+                        return md.isFile() ? Skills.read(md) + "\u0000" + md.lastModified() : null;
+                    } catch (java.io.IOException e) {
+                        throw new IllegalStateException(e.getMessage());
+                    }
+                }
+            }
+
+            @Override
+            String view(String snapshot) {
+                return snapshot == null ? "(none)" : snapshot.substring(0, snapshot.lastIndexOf('\u0000'));
+            }
+
+            @Override
+            String check(String value) {
+                try {
+                    skillFile(root, skillName);
+                } catch (java.io.IOException e) {
+                    throw new IllegalStateException(e.getMessage());
+                }
+                if (value.isEmpty()) return "";
+                String[] fm = Skills.frontMatter(value);
+                if (!fm[0].equals(skillName) || fm[2].isEmpty()) {
+                    throw new IllegalArgumentException("the SKILL.md must start with front matter (---, name: " + skillName
+                            + ", description: ..., ---) and have instructions");
+                }
+                return value;
+            }
+
+            @Override
+            Object lock() {
+                return Skills.LOCK;
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{view(snapshot), value.isEmpty() ? "(deleted: the skill's whole folder goes)" : value};
+            }
+
+            @Override
+            String set(String value) throws Exception {
+                File md = skillFile(root, skillName); // again, right before the write
+                if (value.isEmpty()) Skills.delete(new Skills.Skill(skillName, "", md.getParentFile()));
+                else Linux.write(md, value);
+                return "";
+            }
+
+            @Override
+            String read() {
+                return name + ":\n" + view(get());
+            }
+        };
+    }
+
+    /** A line per skill in the listing: its description, or that it is linked. */
+    private static String skillLines(File root) {
+        StringBuilder b = new StringBuilder();
+        File[] ds = root.listFiles();
+        if (ds != null) java.util.Arrays.sort(ds);
+        for (File d : ds == null ? new File[0] : ds) {
+            if (!d.getName().equals(Skills.slug(d.getName())) || !d.isDirectory() && !Skills.isLink(d)) continue;
+            try {
+                File md = skillFile(root, d.getName());
+                if (md.isFile()) b.append("skill/").append(d.getName()).append(" — ").append(Skills.frontMatter(Skills.read(md))[1]).append('\n');
+            } catch (IllegalArgumentException | java.io.IOException e) {
+                b.append("skill/").append(d.getName()).append(" (linked: not read or changed here)\n");
+            }
+        }
+        return b.toString();
+    }
+
+    // ------------------------------------------------------------ MCP servers
+
+    /** "mcp/notes = on  (key: set, 3 tools)": never the server's address. */
+    static String mcpLine(McpServers.S s, boolean keySet) {
+        return "mcp/" + s.id + " = " + (s.on ? "on" : "off") + "  (key: " + (keySet ? "set" : "none") + ", " + s.tools.length()
+                + " tools)";
+    }
+
+    /** mcp/&lt;id&gt;: an existing server takes on, off or ""; a new id takes the server's https address (no key). */
+    static Setting mcp(BuddyService svc, String id, McpServers.S existing, boolean keySet) {
+        return new Setting("mcp/" + id, "on, off or \"\" to remove it; a new id takes the server's address (https://…) and "
+                + "is added without a key") {
+            private JSONArray found = new JSONArray();
+
+            @Override
+            String get() {
+                McpServers.S s = McpServers.find(id);
+                if (s == null) return null;
+                try {
+                    return new JSONObject().put("id", s.id).put("url", s.url).put("on", s.on).put("tools", s.tools).toString();
+                } catch (org.json.JSONException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+
+            @Override
+            String view(String snapshot) { // the snapshot holds the address: only on/off comes out of it
+                return snapshot == null ? "(none)" : json(snapshot).optBoolean("on") ? "on" : "off";
+            }
+
+            @Override
+            String check(String value) {
+                String v = value.trim();
+                if (existing != null) {
+                    if (!Arrays.asList("on", "off", "").contains(v.toLowerCase(Locale.ROOT))) {
+                        throw new IllegalArgumentException("mcp/" + id + " exists: its address can't be changed here "
+                                + "(its key would follow it). Use on, off or \"\"");
+                    }
+                    return v.toLowerCase(Locale.ROOT);
+                }
+                if (!McpServers.slug(id).equals(id) || !McpServers.free(id)) {
+                    throw new IllegalArgumentException("no server " + id + ", and that isn't a free name (lower-case letters, digits, _)");
+                }
+                if (!McpServers.addressOk(v)) throw new IllegalArgumentException("the address must be https://… (or http on this phone or the user's own network)");
+                return v;
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                if (snapshot == null) return new String[]{"(none)", "add the server at " + value + " (no key)"};
+                return new String[]{view(snapshot), value.isEmpty() ? "(deleted)" : value};
+            }
+
+            @Override
+            void prepare(String value) throws Exception {
+                if (existing == null) found = McpServers.discover(value, null);
+            }
+
+            @Override
+            String set(String value) throws Exception {
+                if (existing == null) {
+                    if (!McpServers.free(id)) throw new IllegalStateException("the name " + id + " was taken meanwhile");
+                    McpServers.S s = new McpServers.S(id);
+                    s.url = value;
+                    s.tools = found;
+                    McpServers.save(svc, s, ""); // "" so no saved key can follow it
+                } else if (value.isEmpty()) {
+                    McpServers.remove(svc, id);
+                } else {
+                    McpServers.setOn(svc, McpServers.find(id), value.equals("on"));
+                }
+                return "";
+            }
+
+            @Override
+            String read() {
+                if (existing == null) return name + " = (none)";
+                StringBuilder tools = new StringBuilder();
+                for (int i = 0; i < existing.tools.length(); i++) {
+                    tools.append(i == 0 ? "" : ", ").append(existing.tools.optJSONObject(i).optString("name"));
+                }
+                return mcpLine(existing, keySet) + (tools.length() == 0 ? "" : "\ntools: " + tools);
+            }
+        };
+    }
+
     // ------------------------------------------------------------ the gate
 
     /** The answer when the user (and nothing standing in for them) approved, else null. */
@@ -323,15 +611,16 @@ final class SettingsTool {
      */
     static String change(Setting s, String value, String cardFormat, Asker asker, Executor main) throws Exception {
         if (value.length() > MAX) return "Not changed: the value is over " + MAX + " characters.";
-        String v;
+        String v, old;
+        String[] nn;
         try {
             v = s.check(value);
-        } catch (IllegalArgumentException e) {
+            old = onMain(main, s::get);
+            if (v.isEmpty() ? old == null : v.equals(s.view(old))) return "Already " + s.name + " = " + s.view(old);
+            nn = s.card(old, v);
+        } catch (IllegalArgumentException | IllegalStateException e) {
             return "Not changed: " + e.getMessage();
         }
-        String old = onMain(main, s::get);
-        if (v.isEmpty() ? old == null : v.equals(s.view(old))) return "Already " + s.name + " = " + s.view(old);
-        String[] nn = s.card(old, v);
         String no = approval(asker, String.format(cardFormat, s.name, nn[0], nn[1]));
         if (no != null) return "Not changed. " + no;
         try {
@@ -346,7 +635,9 @@ final class SettingsTool {
                     return "Changed " + s.name + ": " + nn[0] + " → " + nn[1] + s.set(v);
                 }
             });
-        } catch (IllegalArgumentException | IllegalStateException e) {
+        } catch (InterruptedException e) {
+            throw e;
+        } catch (Exception e) {
             return "Not changed: " + e.getMessage();
         }
     }
@@ -388,8 +679,12 @@ final class SettingsTool {
         if (name.isEmpty()) return onMain(main, this::listing);
         if (!a.has("value")) {
             return onMain(main, () -> {
-                Setting s = find(svc, name);
-                return s == null ? unknown(name) : s.read();
+                try {
+                    Setting s = find(svc, name);
+                    return s == null ? unknown(name) : s.read();
+                } catch (IllegalArgumentException | IllegalStateException e) {
+                    return e.getMessage();
+                }
             });
         }
         Setting s = onMain(main, () -> find(svc, name));
@@ -406,6 +701,16 @@ final class SettingsTool {
     static Setting find(BuddyService svc, String name) {
         for (Setting s : scalars(svc)) if (s.name.equals(name)) return s;
         if (name.startsWith("app/") && name.substring(4).matches("[A-Za-z0-9_.]+")) return app(svc, name.substring(4));
+        if (name.startsWith("rule/")) {
+            String id = name.substring(5);
+            return id.matches("[A-Za-z0-9]+") ? rule(svc, id.equals("new") ? null : id) : null;
+        }
+        if (name.startsWith("skill/")) return skill(Skills.dir(svc), name.substring(6));
+        if (name.startsWith("mcp/") && name.substring(4).matches("[a-z0-9_]+")) {
+            String id = name.substring(4);
+            McpServers.S s = McpServers.find(id);
+            return mcp(svc, id, s, s != null && McpServers.header(svc, id) != null);
+        }
         String[] p = name.split("/");
         if (p.length == 3 && p[0].equals("chat") && chat(svc, p[1]) != null && chat(svc, p[1]).parent.isEmpty()) {
             switch (p[2]) {
@@ -442,6 +747,15 @@ final class SettingsTool {
                     .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
                             : c.schedule.paused ? "paused" : "set").append('\n');
         }
+        b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
+        for (Rules.Rule r : Rules.all(svc)) {
+            b.append("rule/").append(r.id).append(" = ").append(r.on ? "on" : "off").append("  ").append(r.pkg).append(": ")
+                    .append(r.instruction.length() > 60 ? r.instruction.substring(0, 60) + "…" : r.instruction)
+                    .append("  (approval ").append(r.approval).append(")\n");
+        }
+        b.append("\nSkills (skill/<name>):\n").append(skillLines(Skills.dir(svc)));
+        b.append("\nMCP servers (mcp/<id>; a new id with an address adds one):\n");
+        for (McpServers.S m : McpServers.all()) b.append(mcpLine(m, McpServers.header(svc, m.id) != null)).append('\n');
         return b.toString().trim();
     }
 }
