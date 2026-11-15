@@ -56,7 +56,7 @@ jobs:
       - name: Build release APKs (GitHub and F-Droid)
         env:
           BUDDY_KEYSTORE_PASSWORD: ${{ secrets.BUDDY_KEYSTORE_PASSWORD }}
-        run: ./gradlew --no-daemon testGithubReleaseUnitTest assembleGithubRelease assembleFdroidRelease
+        run: ./gradlew --no-daemon testGithubDebugUnitTest assembleGithubRelease assembleFdroidRelease
 
       - name: Collect APK
         run: |
