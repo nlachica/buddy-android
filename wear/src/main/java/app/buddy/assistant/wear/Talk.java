@@ -430,6 +430,11 @@ public class Talk extends Service {
     /** The head's stream ended or broke (main thread). Audible before: the voice said it, never again. Else the watch does. */
     private void streamEnded(Say s, String by) {
         if (!toSay.contains(s) || s.speaker == null) return; // converted or hushed meanwhile
+        if (s.committed && !s.speaker.sounded()) { // claimed, but the first write failed: nobody heard it. The speaker is done, so no race
+            synchronized (s) {
+                s.committed = false;
+            }
+        }
         if (!s.committed) {
             toTts(s, by);
             return;

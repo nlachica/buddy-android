@@ -126,7 +126,7 @@ final class CodexSpeech {
     }
 
     /** Ends the call so its late events can't reach a later one. */
-    private static void hangUp() {
+    private static synchronized void hangUp() { // same lock as startCall's publish: it publishes before this (and is retired) or finds its page gone
         String old = sessionThread;
         if (old != null) retired.add(old);
         threadId = null;

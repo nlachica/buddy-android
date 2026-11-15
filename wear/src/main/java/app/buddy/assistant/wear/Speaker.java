@@ -36,6 +36,7 @@ final class Speaker {
     private volatile boolean stopped;
     private volatile String endedBy = "";
     private volatile long audibleUntil;
+    private volatile boolean sounded; // the track accepted audible samples
     private volatile InputStream in;
     private volatile AudioTrack track;
     private long received, played, dropped, audibleAt = -1;
@@ -57,6 +58,11 @@ final class Speaker {
             return;
         }
         new Thread(this::run, "speaker").start();
+    }
+
+    /** Audible samples reached the track (false after the claim means nothing was heard). */
+    boolean sounded() {
+        return sounded;
     }
 
     /** Sound is coming out of the speaker now (the last audible block written is still playing). */
@@ -128,6 +134,7 @@ final class Speaker {
                         playing = true;
                     }
                     if (len > 0 && loud) {
+                        sounded = true;
                         long lag = (frames - t.getPlaybackHeadPosition()) * 1000 / RATE;
                         audibleUntil = SystemClock.elapsedRealtime() + lag;
                     }
