@@ -106,8 +106,6 @@ final class Sessions {
         String lastReply = "";
         long lastEventAt;
         int runId;
-        /** How many of this chat's ask helpers (buddy-run) are still alive; main thread (ChatHub.ask). */
-        int asking;
         /** What the user added while this chat was working, not yet passed to the agent (guarded by itself). */
         final List<String> notes = new ArrayList<>();
         /** Notes the agent never got because the user stopped it: put back into the message box (main thread). */

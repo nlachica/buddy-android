@@ -1,2 +1,2 @@
-{"buddy_session":"run","fallback":true,"text":"OpenCode failed: it was killed (signal 9).","type":"buddy_error"}
+{"buddy_session":"run","quiet":true,"text":"OpenCode was killed (signal 9).","type":"buddy_error"}
 {"buddy_session":"run","text":"","type":"buddy_done"}

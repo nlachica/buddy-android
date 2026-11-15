@@ -1,4 +1,4 @@
 {"buddy_session":"run","session_id":"abc","type":"system"}
 {"buddy_session":"run","is_error":true,"result":"Rate limited","subtype":"error_during_execution","type":"result"}
-{"buddy_session":"run","fallback":true,"text":"Claude Code failed: it exited with status 1.","type":"buddy_error"}
+{"buddy_session":"run","quiet":true,"text":"Claude Code ended with exit status 1 and said nothing.","type":"buddy_error"}
 {"buddy_session":"run","text":"","type":"buddy_done"}
