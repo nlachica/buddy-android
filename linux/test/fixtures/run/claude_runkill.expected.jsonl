@@ -1,3 +1,2 @@
 {"buddy_session":"run","session_id":"abc","type":"system"}
-{"buddy_session":"run","fallback":true,"text":"The run was cut off: Buddy's helper in Linux was stopped.","type":"buddy_error"}
 {"buddy_session":"run","text":"","type":"buddy_done"}

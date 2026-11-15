@@ -1,3 +1,3 @@
 {"buddy_session":"run","model":null,"session_id":"abc","subtype":null,"type":"system"}
-{"buddy_session":"run","fallback":true,"text":"Grok failed: it was killed (signal 9).","type":"buddy_error"}
+{"buddy_session":"run","quiet":true,"text":"Grok was killed (signal 9).","type":"buddy_error"}
 {"buddy_session":"run","text":"","type":"buddy_done"}
