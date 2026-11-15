@@ -5,6 +5,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
 
+import com.google.android.gms.wearable.ChannelClient;
 import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Wearable;
 import com.google.android.gms.wearable.WearableListenerService;
@@ -22,7 +23,8 @@ import java.util.Map;
 /**
  * The phone's end of the Galaxy Watch app (the wear/ module): the watch lists the chats, sends what the user said to
  * one of them, and gets Buddy's answer back to show and speak. Messages are JSON over the Wear Data Layer, paths under
- * /buddy (the table is in docs/features/003-wear-companion/plan.md). Github build only (src/watchlink).
+ * /buddy (the table is in docs/features/003-wear-companion/plan.md; the live call's and the ChatGPT voice's additions
+ * are in docs/features/007-watch-live-voice/plan.md). Github build only (src/watchlink).
  */
 public class WatchLink extends WearableListenerService {
     private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status";
@@ -38,6 +40,14 @@ public class WatchLink extends WearableListenerService {
     private static Context app;
     private static PowerManager.WakeLock wake;
     private static boolean listening;
+
+    /** The watch opened a channel: /buddy/live is a call (WatchCall). */
+    @Override
+    public void onChannelOpened(ChannelClient.Channel channel) {
+        if (!WatchCall.PATH.equals(channel.getPath())) return;
+        app = getApplicationContext();
+        WatchCall.open(app, channel);
+    }
 
     @Override
     public void onMessageReceived(MessageEvent e) {
@@ -158,13 +168,27 @@ public class WatchLink extends WearableListenerService {
             if (ses != null && ses.running) continue; // a second run took over: it is still the watch's
             tell(t.getValue(), "/buddy/done", json("chat", t.getKey(), "outcome", ses == null || ses.outcome == null ? "" : ses.outcome));
             tracked.remove(t.getKey());
-            if (ses != null) ses.watch = false;
+            if (ses != null && !WatchCall.in(t.getKey())) ses.watch = false;
         }
         if (tracked.isEmpty()) releaseWake();
     }
 
+    /** A watch call took this chat (main thread): its replies are the call's voice, not the relay's. */
+    static void untrack(String chat) {
+        tracked.remove(chat);
+    }
+
+    static boolean tracks(String chat) {
+        return tracked.containsKey(chat);
+    }
+
+    /** Releases the wake lock unless a watch run or call still needs it (main thread). */
+    static void releaseIfIdle() {
+        if (tracked.isEmpty()) releaseWake();
+    }
+
     /** Keeps the phone's CPU on while a watch run works with the screen off, as notification rules do. */
-    private static void holdWake(Context c) {
+    static void holdWake(Context c) {
         synchronized (WatchLink.class) {
             if (wake == null) {
                 wake = c.getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "buddy:watch");
@@ -175,17 +199,18 @@ public class WatchLink extends WearableListenerService {
     }
 
     private static void releaseWake() {
+        if (WatchCall.on()) return; // a watch call needs the CPU until it ends
         synchronized (WatchLink.class) {
             if (wake != null && wake.isHeld()) wake.release();
         }
     }
 
     /** Fire and forget: the watch notices a lost message with its own status check. */
-    private static void tell(String node, String path, JSONObject body) {
+    static void tell(String node, String path, JSONObject body) {
         Wearable.getMessageClient(app).sendMessage(node, path, body.toString().getBytes(StandardCharsets.UTF_8));
     }
 
-    private static JSONObject json(Object... pairs) {
+    static JSONObject json(Object... pairs) {
         JSONObject o = new JSONObject();
         try {
             for (int i = 0; i < pairs.length; i += 2) o.put((String) pairs[i], pairs[i + 1]);
