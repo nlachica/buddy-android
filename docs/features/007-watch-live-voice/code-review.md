@@ -25,3 +25,14 @@ Validation and coverage:
 - The Google dependency stays confined to the GitHub source set. No additional secret exposure, injection issue, or unnecessary abstraction was found. The per-item speech routing and shared PCM helpers fit the approved scope; the fixes above should stay within those existing components.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+- F1: fixed in 82f3d54. `voiceClosed()` returns right after converting the matching reply, as `sayItself()` does.
+- F2: fixed in 1917959. Cancelling the last queued reply, with no current item, now hangs up the call. `hangUp()` is the retire-thread-and-`close()` step that current-item cancel already did, so now both paths share it. A late `connected()` finds `web != mine` and does nothing, and `startCall` publishes only for the page that is still `web`. A cancel that leaves another queued item or a current one doesn't hang up.
+- F3: fixed in 2c9c2a7. Each `WatchCall` takes a number when its channel opens. `begin()` returns if `finished`, and drops (finish, cancel its channel) a call numbered below the newest one that began. `CodexLive.start` is not reached for a stale call, so B keeps its call, chat flag and wake lock.
+- F4: fixed in 82f3d54. `Speaker` now asks `Listener.audible()` for the claim before writing the first audible block. It returns false if the fallback already won, and then the Speaker stops without sounding. `Talk` makes the claim (`committed`) and the fallback (`fellBack`) one `synchronized (s)` check, so exactly one wins. Tradeoff: the claim happens just before the write, not after.
+- F5: fixed in 82f3d54. A negative `AudioRecord.read()` while the run is alive throws into `talk()`'s existing catch, which runs the identity-checked `finish`, so recorder, channel and wake lock are released. When `close()` caused it (`dead`), the loop just breaks.
+- F6: fixed in bde3bdf. The connected callback's `AudioRoute.use(app)` is guarded with `remote == null`.
+
+**Tests:** none run. This machine has no Android SDK and `javac` doesn't start here (PaX error), so nothing was compiled or run. These edits are unbuilt. The changes are in lifecycle and threading code that has no JVM tests (`PcmOutTest` covers only the transport queue), so the orderings in the findings still need a device run by the Verifier. CI will compile it all once pushed.
