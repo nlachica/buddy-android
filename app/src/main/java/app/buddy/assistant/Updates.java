@@ -119,9 +119,15 @@ public final class Updates extends BroadcastReceiver {
                     Uri.parse("package:" + c.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return NEEDS_PERMISSION;
         }
-        c.startActivity(new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+        boolean opened = false;
+        try {
+            c.startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+            opened = true;
+        } finally {
+            if (!opened) out.delete(); // a file the installer will open later is left as it is
+        }
         cancel(c);
         return OPENED;
     }

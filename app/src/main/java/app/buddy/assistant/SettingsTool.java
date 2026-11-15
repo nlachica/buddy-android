@@ -676,7 +676,8 @@ final class SettingsTool {
     String call(JSONObject a) throws Exception {
         String name = a.optString("name").trim();
         java.util.concurrent.Executor main = svc::runOnMain;
-        if (name.isEmpty()) return onMain(main, this::listing);
+        String here = McpServer.CALLER_CHAT.get(); // a request-thread ThreadLocal: read it before going to the main thread
+        if (name.isEmpty()) return onMain(main, () -> listing(here));
         if (!a.has("value")) {
             return onMain(main, () -> {
                 try {
@@ -728,7 +729,19 @@ final class SettingsTool {
         return null;
     }
 
-    private String listing() {
+    /** The chats section of the listing; here = the calling agent's chat id (or null) gets "(this chat)". */
+    static void chatLines(StringBuilder b, java.util.List<Sessions.Session> all, String here) {
+        int n = 0;
+        for (Sessions.Session c : all) {
+            if (!c.parent.isEmpty() || n++ >= 30) continue;
+            b.append("chat/").append(c.id).append(" \"").append(c.title).append("\"").append(c.id.equals(here) ? " (this chat)" : "")
+                    .append(": linux_tools ").append(c.dev ? "on" : "off").append(", background ")
+                    .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
+                            : c.schedule.paused ? "paused" : "set").append('\n');
+        }
+    }
+
+    private String listing(String here) {
         StringBuilder b = new StringBuilder();
         for (Setting s : scalars(svc)) b.append(s.read()).append('\n');
         b.append("\napp/<package> = hard, smart, trust or default: how freely agents may work in one app. Apps with "
@@ -738,15 +751,7 @@ final class SettingsTool {
         }
         b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off) and "
                 + "chat/<id>/schedule (JSON):\n");
-        String here = McpServer.CALLER_CHAT.get();
-        int n = 0;
-        for (Sessions.Session c : ChatHub.get(svc).sessions.all) {
-            if (!c.parent.isEmpty() || n++ >= 30) continue;
-            b.append("chat/").append(c.id).append(" \"").append(c.title).append("\"").append(c.id.equals(here) ? " (this chat)" : "")
-                    .append(": linux_tools ").append(c.dev ? "on" : "off").append(", background ")
-                    .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
-                            : c.schedule.paused ? "paused" : "set").append('\n');
-        }
+        chatLines(b, ChatHub.get(svc).sessions.all, here);
         b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
         for (Rules.Rule r : Rules.all(svc)) {
             b.append("rule/").append(r.id).append(" = ").append(r.on ? "on" : "off").append("  ").append(r.pkg).append(": ")

@@ -10,3 +10,10 @@ F2 [minor] Clean up the staged update when installer launch fails - `app/src/mai
 Validation: reviewed `git diff main...HEAD`, the touched source/tests, the feature brief/plan/decisions and the relevant existing callers/stores. Re-ran `/tmp/buddy-build-004/check.sh github`: resources and Java compiled, all 18 JUnit tests passed. Re-ran the same script for `fdroid`: resources and Java compiled. These are the local aapt2/javac checks documented by the Coder, not Gradle/CI, full APK packaging or device tests. The tests cover approval rejection, stale writes, rule validation, skill confinement/import locking, MCP address masking and per-attempt APK staging; they do not exercise the real cross-thread listing. The documented CI signing/release/reproducibility checks and device tests (including actual card-tap blocking and update/restart with data intact) remain for verification after the phone switch. No additional blocker/major security or scope finding identified.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in the round-1 fix commit. `call()` now reads `McpServer.CALLER_CHAT` on the request thread and passes it to `listing(here)`. The chats block is a static `chatLines` so a JVM test can check it: `listingMarksTheCallersChatAcrossThreads` captures the caller on one thread, runs the lines on another executor thread (where the ThreadLocal is null) and checks only the caller's chat is marked, with two same-titled chats. The test covers the capture-then-pass pattern and `chatLines`; `call()` itself needs a `BuddyService`, so the one-line capture in it is only compile-checked.
+F2: fixed in the round-1 fix commit. `Updates.install` wraps the installer launch in the same `opened` flag and `finally` delete as `Tools.installApk`; a launched file is kept. Not unit-tested (needs `startActivity`).
+
+Tests: `/tmp/buddy-build-004/check.sh github` compiled and 19 JUnit tests passed; `fdroid` compiled.

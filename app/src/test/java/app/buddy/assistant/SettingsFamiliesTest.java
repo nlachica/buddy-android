@@ -241,4 +241,30 @@ public class SettingsFamiliesTest {
             }
         }
     }
+
+    // ---------------------------------------------------------------- chat listing
+
+    @Test
+    public void listingMarksTheCallersChatAcrossThreads() throws Exception {
+        Sessions.Session a = new Sessions.Session("aaa", "claude");
+        Sessions.Session b = new Sessions.Session("bbb", "claude");
+        a.title = b.title = "New chat"; // same title: only the id tells them apart
+        java.util.List<Sessions.Session> all = java.util.Arrays.asList(a, b);
+        McpServer.CALLER_CHAT.set("bbb"); // as McpServer does on the request thread
+        try {
+            String here = McpServer.CALLER_CHAT.get(); // what call() does before it hands over to the main thread
+            java.util.concurrent.ExecutorService main = java.util.concurrent.Executors.newSingleThreadExecutor();
+            try {
+                assertEquals(null, main.submit(() -> McpServer.CALLER_CHAT.get()).get()); // the trap: null over there
+                StringBuilder out = new StringBuilder();
+                main.submit(() -> SettingsTool.chatLines(out, all, here)).get();
+                assertTrue(out.toString(), out.toString().contains("chat/bbb \"New chat\" (this chat):"));
+                assertFalse(out.toString(), out.toString().contains("chat/aaa \"New chat\" (this chat)"));
+            } finally {
+                main.shutdown();
+            }
+        } finally {
+            McpServer.CALLER_CHAT.remove();
+        }
+    }
 }
