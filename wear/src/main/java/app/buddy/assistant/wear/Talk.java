@@ -111,7 +111,7 @@ public class Talk extends Service {
 
     /** The screen that shows this chat: from the chat list, the ongoing notification or a new talk. */
     static Intent intent(Context c, String chat, String title, int accent) {
-        return new Intent().setClassName(c, "app.buddy.assistant.wear.TalkActivity")
+        return new Intent(c, TalkActivity.class)
                 .putExtra("chat", chat).putExtra("title", title).putExtra("accent", accent);
     }
 

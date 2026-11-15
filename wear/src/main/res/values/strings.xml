@@ -27,4 +27,14 @@
     <string name="talk_stopped">Stopped on your phone</string>
     <string name="talk_ceiling">Still working on your phone after 15 minutes. The answer will be in the chat there.</string>
     <string name="talk_no_voice">This watch can\'t read aloud (no voice installed)</string>
+
+    <!-- The talk screen. The mic button is described for screen readers. -->
+    <string name="talk_speak">Speak</string>
+    <!-- The title of the watch\'s voice screen -->
+    <string name="talk_prompt">Ask Buddy</string>
+    <string name="talk_no_recognizer">This watch has no speech recognizer.</string>
+    <string name="talk_sending">Sending…</string>
+    <!-- What the user said. %1$s = their words -->
+    <string name="talk_you">You: %1$s</string>
+    <string name="talk_sleepy">Still working on your phone. I\'ll read the answer out when it comes.</string>
 </resources>

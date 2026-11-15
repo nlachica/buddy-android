@@ -12,6 +12,9 @@
         <intent>
             <action android:name="android.intent.action.TTS_SERVICE" />
         </intent>
+        <intent>
+            <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
+        </intent>
     </queries>
 
     <application
@@ -35,6 +38,10 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <activity
+            android:name=".TalkActivity"
+            android:exported="false" />
 
         <!-- Passes the user's words to Buddy on the phone and reads the answer out; no runtime permission needed -->
         <service
