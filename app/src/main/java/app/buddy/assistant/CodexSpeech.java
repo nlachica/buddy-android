@@ -4,17 +4,25 @@ import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebView;
 
 import org.json.JSONObject;
 
 import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Buddy's replies read aloud in ChatGPT's voice (the user's ChatGPT plan), through a Codex voice call like
  * {@link CodexDictation}'s. The call only receives: Buddy sends silence, so the microphone isn't used. Each text
  * is given to the voice to read word for word. If anything goes wrong, the phone's own voice reads it instead.
+ * A text can also have a {@link Sink} (a reply for the watch, docs/features/007-watch-live-voice/plan.md): then the
+ * page's voice is muted on the phone and tapped into the Sink as PCM 16-bit mono 16 kHz.
  */
 final class CodexSpeech {
     static final String[][] VOICES = {{"juniper", "Juniper"}, {"maple", "Maple"}, {"ember", "Ember"}, {"cove", "Cove"}};
@@ -23,21 +31,44 @@ final class CodexSpeech {
             + "naturally and warmly. Never add, answer, comment, ask, or hand anything off. Say nothing else.";
 
     private static final Handler main = new Handler(Looper.getMainLooper());
-    private static final ArrayDeque<String> queue = new ArrayDeque<>();
-    private static WebView web;
+    private static final ArrayDeque<Item> queue = new ArrayDeque<>();
+    private static volatile WebView web;
     private static Context app;
-    private static String threadId;
+    private static volatile String threadId;
     private static Process threadServer;
     private static volatile String sessionThread; // the thread with a live call
+    /** Threads of calls cancel() hung up: their late events are claimed here and dropped, not given to dictation. */
+    private static final Set<String> retired = ConcurrentHashMap.newKeySet();
     private static boolean connected, reading, playing;
-    private static String current;
+    /** The item the voice was given, until it has been read and has gone quiet; read: its text was read. */
+    private static volatile Item current;
+    private static boolean read;
     private static long lastSound, sentAt;
-    /** Fallback for what couldn't be spoken (the phone's voice). */
+
+    /** Fallback for what couldn't be spoken (the phone's voice; for a watch reply, the watch's). */
     interface Fallback {
         void say(String text);
     }
 
-    private static Fallback fallback;
+    /** Where a watch reply's voice goes: PCM 16-bit mono 16 kHz blocks (any thread), then close() when it is read. */
+    interface Sink {
+        void pcm(byte[] pcm16k);
+
+        void close();
+    }
+
+    private static final class Item {
+        final String text;
+        final Fallback fallback;
+        final Sink sink;
+        volatile boolean closed;
+
+        Item(String text, Fallback fallback, Sink sink) {
+            this.text = text;
+            this.fallback = fallback;
+            this.sink = sink;
+        }
+    }
 
     private CodexSpeech() {
     }
@@ -47,27 +78,71 @@ final class CodexSpeech {
     }
 
     static boolean owns(String thread) {
-        return thread != null && thread.equals(sessionThread);
+        return thread != null && (thread.equals(sessionThread) || retired.contains(thread));
     }
 
     static void speak(Context c, String text, Fallback f) {
+        speak(c, text, f, null);
+    }
+
+    /** sink: a watch reply (main thread); null: the phone's speaker. */
+    static void speak(Context c, String text, Fallback f, Sink sink) {
         app = c.getApplicationContext();
-        fallback = f;
-        queue.add(text);
+        queue.add(new Item(text, f, sink));
         if (web == null) open();
         else if (connected) next();
     }
 
     static void stop() {
+        Item cur = current;
+        List<Item> rest = new ArrayList<>(queue);
         queue.clear();
         close();
+        closeSink(cur);
+        for (Item i : rest) closeSink(i);
+    }
+
+    /**
+     * Retires one watch reply and nothing else (main thread): a queued one is dropped; the one being read is hung up
+     * on and, when others wait, the call is made again with the queue intact (on a fresh thread, so the old call's late
+     * events can't fail it). A Sink matching no item (already read or dropped) is ignored.
+     */
+    static void cancel(Sink sink) {
+        if (sink == null) return;
+        for (Iterator<Item> it = queue.iterator(); it.hasNext(); ) {
+            Item i = it.next();
+            if (i.sink == sink) {
+                it.remove();
+                closeSink(i);
+                return;
+            }
+        }
+        Item cur = current;
+        if (cur == null || cur.sink != sink) return;
+        String old = sessionThread;
+        if (old != null) retired.add(old);
+        threadId = null;
+        close();
+        closeSink(cur);
+        if (!queue.isEmpty()) open();
+    }
+
+    private static void closeSink(Item i) {
+        if (i != null && i.sink != null && !i.closed) {
+            i.closed = true;
+            i.sink.close();
+        }
+    }
+
+    private static void stale(String what) {
+        Log.i("BuddySpeech", "stale " + what + " ignored");
     }
 
     // ------------------------------------------------------------------ the call
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     private static void open() {
-        connected = reading = playing = false;
+        connected = reading = playing = read = false;
         current = null;
         opened = System.currentTimeMillis();
         web = new WebView(app);
@@ -99,10 +174,20 @@ final class CodexSpeech {
                 });
             }
 
+            /** The voice, tapped for a watch reply (see TAP_JS): 16-bit mono 16 kHz as base64. */
+            @JavascriptInterface
+            public void pcm(String b64) {
+                Item it = current;
+                if (web == mine && it != null && it.sink != null && !it.closed) {
+                    it.sink.pcm(android.util.Base64.decode(b64, android.util.Base64.NO_WRAP));
+                }
+            }
+
             @JavascriptInterface
             public void failed(String why) {
                 main.post(() -> {
                     if (web == mine) fail();
+                    else stale("page failure");
                 });
             }
         }, "Buddy");
@@ -113,13 +198,24 @@ final class CodexSpeech {
     private static void startCall(WebView page, String sdp) {
         try {
             CodexDictation.ensureServer(app);
-            if (threadId == null || threadServer != CodexDictation.server()) {
-                threadId = CodexDictation.newThread();
-                threadServer = CodexDictation.server();
+            String t = threadId;
+            Process srv = threadServer;
+            if (t == null || srv != CodexDictation.server()) {
+                t = CodexDictation.newThread();
+                srv = CodexDictation.server();
             }
-            sessionThread = threadId;
+            synchronized (CodexSpeech.class) { // close() clears web and sessionThread under the same lock
+                if (web != page) {
+                    stale("call start");
+                    return;
+                }
+                if (srv != threadServer) retired.clear(); // a new server knows none of the old threads
+                threadId = t;
+                threadServer = srv;
+                sessionThread = t;
+            }
             JSONObject r = CodexDictation.request("thread/realtime/start", new JSONObject()
-                    .put("threadId", threadId)
+                    .put("threadId", t)
                     .put("transport", new JSONObject().put("type", "webrtc").put("sdp", sdp))
                     .put("version", "v3")
                     .put("outputModality", "audio")
@@ -131,6 +227,7 @@ final class CodexSpeech {
         } catch (Exception e) {
             main.post(() -> {
                 if (web == page) fail();
+                else stale("call failure");
             });
         }
     }
@@ -138,10 +235,15 @@ final class CodexSpeech {
     /** Give the voice the next text (one at a time: it reads, then the next). */
     private static void next() {
         if (reading || queue.isEmpty() || !connected) return;
-        current = queue.poll();
+        final Item item = queue.poll();
+        current = item;
+        read = false;
         reading = true;
         sentAt = System.currentTimeMillis();
-        final String t = sessionThread, text = current;
+        final WebView mine = web;
+        // the page's voice goes to the phone's speaker, or only to the watch's Sink
+        mine.evaluateJavascript("route(" + (item.sink != null) + ")", null);
+        final String t = sessionThread, text = item.text;
         new Thread(() -> {
             try {
                 JSONObject r = CodexDictation.request("thread/realtime/appendText", new JSONObject()
@@ -149,28 +251,39 @@ final class CodexSpeech {
                         .put("text", "Read this aloud exactly, word for word, nothing else:\n\n" + text), 15_000);
                 if (r.has("error")) throw new Exception(r.getJSONObject("error").optString("message"));
             } catch (Exception e) {
-                main.post(CodexSpeech::fail);
+                main.post(() -> {
+                    if (web == mine) fail();
+                    else stale("text failure");
+                });
             }
         }, "codex-speech-text").start();
     }
 
     static void notification(String method, JSONObject p) {
+        final String t = p.optString("threadId");
+        if (!t.equals(sessionThread)) { // a call that was hung up (cancel() retires its thread)
+            stale(method);
+            return;
+        }
         switch (method) {
             case "thread/realtime/sdp": {
                 final String sdp = p.optString("sdp");
                 main.post(() -> {
-                    if (web != null) web.evaluateJavascript("answer(" + JSONObject.quote(sdp) + ")", null);
+                    if (web != null && t.equals(sessionThread)) web.evaluateJavascript("answer(" + JSONObject.quote(sdp) + ")", null);
                 });
                 break;
             }
             case "thread/realtime/transcript/done":
                 if ("assistant".equals(p.optString("role"))) main.post(() -> {
-                    current = null; // read; the audio may still be playing (the watchdog waits for quiet)
+                    if (t.equals(sessionThread)) read = true; // read; the audio may still be playing (the watchdog waits for quiet)
                 });
                 break;
             case "thread/realtime/error":
             case "thread/realtime/closed":
-                main.post(CodexSpeech::fail);
+                main.post(() -> {
+                    if (t.equals(sessionThread)) fail();
+                    else stale(method);
+                });
                 break;
         }
     }
@@ -181,20 +294,23 @@ final class CodexSpeech {
         public void run() {
             if (web == null) return;
             long now = System.currentTimeMillis();
-            if (reading && current == null && !playing && now - lastSound > 700) {
+            if (reading && read && !playing && now - lastSound > 700) {
                 reading = false;
+                Item done = current;
+                current = null;
+                closeSink(done); // a watch reply: the end of its stream
                 if (queue.isEmpty()) {
                     close();
                     return;
                 }
                 next();
-            } else if (reading && current != null && lastSound < sentAt && now - sentAt > 30_000) {
+            } else if (reading && !read && lastSound < sentAt && now - sentAt > 30_000) {
                 fail(); // the voice never started on it
                 return;
-            } else if (reading && current != null && lastSound >= sentAt && !playing && now - lastSound > 8_000) {
+            } else if (reading && !read && lastSound >= sentAt && !playing && now - lastSound > 8_000) {
                 // it spoke, then went quiet without saying it was done: count it as read (a long text can take
                 // minutes to say, so the time since it was sent says nothing)
-                current = null;
+                read = true;
             } else if (!connected && now - opened > 20_000) {
                 fail(); // never connected
                 return;
@@ -205,15 +321,34 @@ final class CodexSpeech {
 
     private static long opened;
 
-    /** Hand whatever wasn't spoken to the phone's voice; a text the voice already started isn't read again. */
+    /**
+     * Hand whatever wasn't spoken on: the phone's texts to the phone's voice, joined into one call (its TTS keeps only
+     * the last text while it starts), each watch reply to its own Fallback. A text the voice already started isn't read
+     * again. Every Sink ends.
+     */
     private static void fail() {
         if (web == null) return;
-        StringBuilder rest = new StringBuilder();
-        if (current != null && lastSound < sentAt) rest.append(current);
-        for (String t : queue) rest.append(rest.length() > 0 ? "\n" : "").append(t);
+        List<Item> all = new ArrayList<>();
+        Item cur = current;
+        if (cur != null) all.add(cur); // handed on only if the voice never started it
+        List<Item> handOn = new ArrayList<>();
+        if (cur != null && !read && lastSound < sentAt) handOn.add(cur);
+        handOn.addAll(queue);
+        all.addAll(queue);
         queue.clear();
         close();
-        if (rest.length() > 0 && fallback != null) fallback.say(rest.toString());
+        for (Item i : all) closeSink(i);
+        StringBuilder phone = new StringBuilder();
+        Fallback phoneFallback = null;
+        for (Item i : handOn) {
+            if (i.sink != null) {
+                if (i.fallback != null) i.fallback.say(i.text);
+            } else {
+                phone.append(phone.length() > 0 ? "\n" : "").append(i.text);
+                if (phoneFallback == null) phoneFallback = i.fallback;
+            }
+        }
+        if (phone.length() > 0 && phoneFallback != null) phoneFallback.say(phone.toString());
     }
 
     private static void close() {
@@ -222,12 +357,15 @@ final class CodexSpeech {
         sentAt = 0;
         reading = false;
         current = null;
-        if (web != null) {
-            web.destroy();
-            web = null;
+        final String t;
+        synchronized (CodexSpeech.class) { // startCall publishes under the same lock, only for the page that is still web
+            if (web != null) {
+                web.destroy();
+                web = null;
+            }
+            t = sessionThread;
+            sessionThread = null;
         }
-        final String t = sessionThread;
-        sessionThread = null;
         connected = false;
         if (t != null) new Thread(() -> {
             try {
@@ -262,7 +400,9 @@ final class CodexSpeech {
 
     /** Sends silence (the call needs audio flowing for the voice to speak) and plays what comes back. */
     private static final String PAGE = "<!doctype html><html><body><audio id=out autoplay></audio><script>\n"
-            + "let pc;\n"
+            + "let pc, fwd = false;\n" // fwd: this item's voice goes to the watch (muted here), not to the phone's speaker
+            + TAP_JS
+            + "function route(on) { fwd = on; const o = document.getElementById('out'); if (o) o.muted = on; }\n"
             + "async function start() {\n"
             + "  try {\n"
             + "    const ctx = new AudioContext(); ctx.resume();\n"
@@ -273,7 +413,8 @@ final class CodexSpeech {
             + "    pc.createDataChannel('oai-events');\n"
             + "    pc.ontrack = e => {\n"
             + "      const s = e.streams[0] || new MediaStream([e.track]);\n"
-            + "      const out = document.getElementById('out'); out.srcObject = s; out.play().catch(() => {});\n"
+            + "      const out = document.getElementById('out'); out.muted = fwd; out.srcObject = s; out.play().catch(() => {});\n"
+            + "      tap(ctx, s, () => fwd);\n"
             + "      const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(s).connect(an);\n"
             + "      const buf = new Float32Array(an.fftSize); let was = false;\n"
             + "      setInterval(() => { an.getFloatTimeDomainData(buf); let m = 0; for (const v of buf) m = Math.max(m, Math.abs(v));\n"
