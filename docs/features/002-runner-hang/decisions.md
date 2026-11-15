@@ -161,3 +161,46 @@
 - Choice: (b). It drops the relay's awk dependency, so busybox and mawk behave the same: a line is passed on as
   soon as it is read, and the loop leaves at the end line. `PIPESTATUS[0]` is still the producer's status.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Merge notes: upstream 2.3.8 + 2.3.9 (branch sync/upstream-2.3.9)
+Upstream 2.3.9 fixed the same hang ("a run always ends"). Rule for this merge: upstream's mechanism wins everywhere,
+and a piece of ours stays only if it covers a symptom upstream's doesn't. The result is that almost all of 002's
+code is gone, so later upstream merges don't conflict on it.
+
+- **Dropped, replaced by upstream's equivalent**
+  - `until_exit` (the read loop and end line) -> upstream's `ended` + `AGENT_END`; all call sites use `ended`.
+  - `fallback_error`, `cut_off`, the `fallback` field -> upstream's `quiet_end` / `quiet` field, handled the same
+    way in ChatHub (dropped when the run already has an outcome). Wording changed to upstream's ("was killed
+    (signal N).", "ended with exit status N and said nothing."). Upstream treats exit 143 as a Stop and says
+    nothing; ours reported it as a fallback. Not kept: a TERM that isn't a Stop is rare, and the run still ends.
+  - The traps (EXIT done, TERM/INT/HUP) and the `cut-off` marker -> upstream's traps (RUN="" first, no marker).
+  - The wrapper's `rs` check on the run section ("cut off" fallback after a `kill -9` of the run section) -> not
+    kept: the run still ends with done, just without an explanation line. That is cosmetic, not a hang.
+  - `Helper.run(c, Runnable, ...)`, `ChatHub.ask()`, `Sessions.asking`, `fail()` -> upstream's
+    `Helper.run(c, IntConsumer gone, ...)`, `Helper.BUSY` (exit 75), `helperGone()` after `HELPER_GONE_MS`, `failRun()`.
+    Upstream's check is keyed to the run id and ignores BUSY, which is the case our F4/F5 review rounds worried about.
+  - The `ses.outcome == null` condition on the auto-start and the `buddy_stopped` guard: upstream has neither, and
+    nothing in upstream's `helperGone` path needs them (the helper is gone, so no late events from it).
+  - The 30-minute sub-agent ceiling (`Helpers.MAX_RUN_MS`, `hub_helper_ceiling`, in 17 string files): the parent's
+    wait is already bounded by `Helpers.WAIT_MS` (8 minutes) and stops its helpers when the parent ends, so a stuck
+    sub-agent can't hold a parent. What is lost: a sub-agent whose helper stays alive but silent keeps its own chat
+    "working" until its parent ends or the user taps Stop. If that shows up on the phone, bring the ceiling back as
+    its own change.
+- **Kept (tests only)**: `linux/test/run.sh` keeps upstream's `run` cases and our harness next to them, with
+  expected files rewritten for upstream's events (checked by hand, not only `--update`). Kept because upstream's
+  tests only use Claude Code and only look at event types: `<backend>_killed` for all five backends (text + done),
+  `claude_error` (an error result, then exit 1: quiet error follows), `claude_agentterm` (143: no extra error),
+  `claude_producer` (the agent's parent shell killed while the agent holds stdout), `claude_term` (also fails if the
+  agent is still alive after the wrapper's TERM), `claude_runkill` (run section killed: wrapper still ends and says
+  done), `claude_busy` (refused with the error, no done, now also exit status 75). Dropped as duplicates of
+  upstream's: `claude_orphan`, `claude_exit3` (and their expected files). The curl stand-in is gone: buddy-run's
+  `BUDDY_TEST_EVENTS` does the same.
+- **HELPER_VERSION=32**. Upstream is 31, but our own 002 build was also 31 with different contents. The app's check
+  (`CheckActivity`) compares for equality, so a phone with our old helper would have counted as current. 32 makes it
+  offer the update. Upstream's next release will also take 32: expect a one-line conflict there, take the higher.
+- **001 / SetupActivity**: Settings is now a menu of pages. The Audio device row sits in `voiceSection()` (the
+  "voice" page) after the ChatGPT voice picker, as merged cleanly. The `AudioDeviceCallback` re-render now runs only
+  when `page` is "voice", like upstream's listeners do for their pages. VoiceBar and AudioRoute are unchanged.
+- Verified: `bash linux/test/run.sh` (15 fixtures, 31 fixtures and runs, 0 failed, twice); compile of FLAVOR=fdroid and
+  github (build.sh steps 1-3) into /tmp/buddy-build-sync.
+- By: Claude (claude-sonnet-5-5)
