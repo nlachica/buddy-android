@@ -99,3 +99,9 @@ Behaviour is unchanged. Tests (Test plan 2): (a) the test holds `Skills.LOCK`, a
 `importBytes` before answering APPROVED, once with a different SKILL.md and once adding only a file. The edit and the
 delete are refused and the imported files kept. The other stores keep main-thread serialization, because their
 writers run there.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No blocker or major findings remain. The revised plan addresses Round 2: per-attempt APK files and URIs retain the checked bytes for the installer's later read, and `Skills.LOCK` serializes the tool's snapshot/commit with Buddy's create/import/delete paths. The planned regression checks cover both failures. Checked these changes against `FilesProvider.java`, `Updates.java`, `Tools.java` and `Skills.java`, and checked the settings, approval and release paths against `ChatHub.java`, `Schedules.java`, `McpServers.java`, `BuddyService.java`, `Guard.java` and `.github/workflows/build.yml`. The plan maps every done-when item to implementation and verification; device checks remain required after the documented switch to the fork, so this approves the plan, not completion of those checks.
+
+VERDICT: APPROVE
