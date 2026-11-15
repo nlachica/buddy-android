@@ -23,4 +23,7 @@ styled like the rest of Buddy, applied everywhere Buddy uses voice. Draft: refin
 - [ ] 
 
 ## Clarifications
-<!-- Nicholas's later answers, dated, appended -->
+- 2026-11-15: Pick the device in Settings AND via a quick switch in the voice/bubble UI.
+- 2026-11-15: One combined choice for mic + speaker together (like a call: Auto / Speaker / Phone / Watch...),
+  not separate pickers.
+- 2026-11-15: Remember the choice; when that device isn't connected, fall back to Auto.
