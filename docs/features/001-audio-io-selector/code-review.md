@@ -1,2 +1,19 @@
 # Code review: 001-audio-io-selector
 <!-- Rounds: "## Round N - Code Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Coder response (round N)" -->
+
+## Round 1 - Code Reviewer (gpt-6-astra)
+
+F1 [major] Switching to Auto retains the previous communication device - `app/src/main/java/app/buddy/assistant/AudioRoute.java:89` resets `applied` before `reconcile()` handles the new preference. For Auto, `reconcile()` calls `drop()`, but `drop()` only calls `clearCommunicationDevice()` when `applied != null` (`:151-154`). Consequently, select Speaker/Watch during live voice and then cycle to Auto: the chip says Auto, yet the explicit device request stays active. Further polls cannot release it because `applied` remains null; only `finish()` eventually clears it after voice ends. During live voice `dropMode()` does not change the mode either. This breaks the mid-call switch and Auto behavior (DW2/DW5, C1/E2), and contradicts the plan's requirement to clear the override immediately while retaining final cleanup. Evidence: an isolated Java harness compiled the unchanged `AudioRoute.java` against minimal Android/voice stubs, selected Speaker, switched the saved preference to Auto through `use()`, then ran 20 additional reconciliations: `clears=0, old device still selected=true` both immediately and afterward. -> Preserve ownership of the existing device until it has actually been cleared. Handle the Auto/drop transition before invalidating the applied-device record, or separately track whether a device request needs releasing; retain the forced reapplication needed by the live connected hook and the `dirty` final cleanup. Add a regression for selected device → Auto while live voice continues, asserting that the device request is cleared immediately and stays cleared before End.
+
+Validation and done-when coverage:
+- Reviewed `git diff main...HEAD -- app` at `dea22ec`, the touched code and its voice/call lifecycle, brief, plan, decisions, and prior plan reviews. There were no earlier code-review rounds.
+- `git diff --check main...HEAD -- app` passed. Fresh `aapt2 compile` and `aapt2 link` against Android API 36 passed; all app Java sources compiled with `javac --release 8` for both `github` and `fdroid` using the freshly generated resources. Only existing deprecated-API notes were emitted. Temporary build output: `/tmp/audio-review-build-fqm6uhgj`; isolated reproduction: `/tmp/audio-route-review-0c3gpwry`.
+- DW1: Settings row, saved selection, sample hook and device callback are implemented; A1-A3 hardware/UI evidence is pending.
+- DW2: the shared VoiceBar chip covers chat/bubble and dictation/live voice; the Auto transition fails as F1 describes. C1-C2 device checks remain pending.
+- DW3: hooks cover all specified voice entry points, including the phone-TTS handoff and live connected callback. Routing of Samsung media/recognizer audio, the Watch link, delayed fallback, and post-live teardown still require A2-A4/B1/C1/C3. The Settings coverage claim cannot yet be validated against those results.
+- DW4: persistence, absent-device messaging and polling-based reconnect are implemented; D1 remains pending.
+- DW5: quiet-tail cleanup and the AutoPause exemption are implemented, with the immediate Auto release defect above. E1-E4 device evidence remains pending.
+- DW6: no green branch `apk` job is recorded in `verify.md`, which is still empty. The local resource/Java checks do not establish Gradle lintVital, APK assembly, or CI success. These remain verifier gates; no push, install or device interaction was performed during this review.
+- No additional security/data, YAGNI or repository-convention findings. The implementation remains within the planned app scope; feature-folder pipeline notes were excluded from the code diff.
+
+VERDICT: REVISE
