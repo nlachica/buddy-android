@@ -73,6 +73,21 @@ final class CodexLive {
         void onStatus(String status);
     }
 
+    /**
+     * A call whose microphone and speaker are elsewhere (the watch): its audio is PCM 16-bit mono 16 kHz. Called from
+     * Buddy's threads, so each method must return quickly. See {@link #start(Context, Sessions.Session, Remote)}.
+     */
+    interface Remote {
+        /** The voice, as the page plays it (JavaBridge thread). */
+        void pcm(byte[] pcm16k);
+
+        /** The call's status line changed (main thread). */
+        void status(String text);
+
+        /** The call ended, with the sentence the chat notes (main thread). */
+        void ended(String text);
+    }
+
     /** The screens showing a live bar (the chat screen, the bubble's panel). */
     private static final List<Ui> uis = new ArrayList<>();
 
@@ -101,6 +116,8 @@ final class CodexLive {
     /** For the voice, waiting for the call to connect. */
     private static final List<String> pending = new ArrayList<>();
     private static BroadcastReceiver screenOff;
+    /** The watch's end of this call, or null (the phone's own call: today's code). */
+    private static volatile Remote remote;
 
     private CodexLive() {
     }
@@ -179,17 +196,27 @@ final class CodexLive {
 
     // ------------------------------------------------------------------ start and end
 
-    /** Go live in this chat (main thread). Returns an error message, or null when starting. */
     static String start(Context c, Sessions.Session s) {
+        return start(c, s, null);
+    }
+
+    /**
+     * Go live in this chat (main thread). Returns an error message, or null when starting. With a Remote the phone's
+     * microphone, audio route and screen-off rule are not used: the watch's audio comes in through {@link #push} and
+     * the voice goes out through {@link Remote#pcm}.
+     */
+    static String start(Context c, Sessions.Session s, Remote r) {
         if (!available(c, s)) return c.getString(R.string.dictation_codex_sign_in);
-        if (!Voice.micAllowed(c)) return c.getString(R.string.voice_mic_needed);
+        if (r == null && !Voice.micAllowed(c)) return c.getString(R.string.voice_mic_needed);
         if (ses != null) end(null);
         Voice.stopListening();
         Voice.stopSpeaking();
         app = c.getApplicationContext();
-        AudioRoute.use(app); // before the call exists: reads the phone's mode as it was, so another call is seen
+        if (r == null) AudioRoute.use(app); // before the call exists: reads the phone's mode as it was, so another call is seen
+        stopCapture(); // an empty queue for the watch's audio
+        remote = r;
         logStartNew();
-        log("start: chat " + s.id);
+        log("start: chat " + s.id + (r != null ? " (watch call)" : ""));
         ses = s;
         connected = sent = awaiting = audible = false;
         started = lastActivity = SystemClock.elapsedRealtime();
@@ -201,16 +228,19 @@ final class CodexLive {
         } catch (Exception e) {
             log("start failed: " + e);
             ses = null;
+            remote = null;
             return c.getString(R.string.dictation_chatgpt_start_failed, e.getMessage());
         }
-        screenOff = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context x, Intent i) {
-                log("screen off");
-                end(app.getString(R.string.live_ended_screen_off));
-            }
-        };
-        app.registerReceiver(screenOff, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+        if (r == null) { // a watch call's microphone is the watch's: the phone going into a pocket doesn't matter
+            screenOff = new BroadcastReceiver() {
+                @Override
+                public void onReceive(Context x, Intent i) {
+                    log("screen off");
+                    end(app.getString(R.string.live_ended_screen_off));
+                }
+            };
+            app.registerReceiver(screenOff, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+        }
         notifyLive();
         main.postDelayed(watchdog, 250);
         ChatHub.get(app).note(s, Bubble.Kind.STEP, app.getString(R.string.live_started, s.brainName()));
@@ -226,6 +256,8 @@ final class CodexLive {
         final Sessions.Session s = ses;
         if (s == null) return;
         log("end: " + (why == null ? "End" : why));
+        final Remote r = remote;
+        remote = null;
         ses = null;
         connected = false;
         main.removeCallbacks(watchdog);
@@ -281,13 +313,19 @@ final class CodexLive {
         pending.clear();
         String left = clean(heard); // said but never sent: shown, not sent
         heard.setLength(0);
+        String ended = why == null ? app.getString(R.string.live_ended) : app.getString(R.string.live_ended_why, why);
         try {
             if (hub.sessions.find(s.id) != null) {
                 if (!left.isEmpty()) hub.note(s, Bubble.Kind.USER, left);
-                hub.note(s, Bubble.Kind.STEP, why == null ? app.getString(R.string.live_ended) : app.getString(R.string.live_ended_why, why));
+                hub.note(s, Bubble.Kind.STEP, ended);
             }
         } catch (Exception e) {
             log("end: note " + e);
+        }
+        if (r != null) try {
+            r.ended(ended);
+        } catch (Exception e) {
+            log("end: remote " + e);
         }
     }
 
@@ -370,7 +408,11 @@ final class CodexLive {
                 : awaiting ? R.string.live_status_thinking
                 : R.string.live_status_listening;
         String t = app.getString(s);
-        if (!t.equals(statusText)) log("status: " + t);
+        if (!t.equals(statusText)) {
+            log("status: " + t);
+            Remote r = remote;
+            if (r != null) r.status(t);
+        }
         statusText = t;
         for (Ui u : new ArrayList<>(uis)) u.onStatus(t);
     }
@@ -649,7 +691,7 @@ final class CodexLive {
             /** The page couldn't open the microphone itself: Buddy records instead (see pull). */
             @JavascriptInterface
             public boolean ownMic() {
-                boolean ok = web == mine && startCapture();
+                boolean ok = web == mine && (remote != null || startCapture()); // a watch call: its audio comes in by push()
                 CodexLive.log("Buddy's own recording (fallback): " + (ok ? "on" : "failed"));
                 return ok;
             }
@@ -658,6 +700,19 @@ final class CodexLive {
             @JavascriptInterface
             public String pull(int bytes) {
                 return web == mine ? android.util.Base64.encodeToString(pullCapture(bytes), android.util.Base64.NO_WRAP) : "";
+            }
+
+            /** Whether this call's microphone and speaker are the watch's (then the page opens no microphone). */
+            @JavascriptInterface
+            public boolean remote() {
+                return web == mine && remote != null;
+            }
+
+            /** The next bit of the voice (16-bit mono, 16 kHz) as base64, for the watch. */
+            @JavascriptInterface
+            public void pcm(String b64) {
+                Remote r = remote;
+                if (web == mine && r != null) r.pcm(android.util.Base64.decode(b64, android.util.Base64.NO_WRAP));
             }
 
             /** Loudness of the microphone or the voice (0..1), for the bar's waveform; voice: the voice is audible. */
@@ -794,6 +849,20 @@ final class CodexLive {
         return true;
     }
 
+    /** Watch audio for the call (any thread; the array is kept): only while r is the current call's Remote. */
+    static void push(Remote r, byte[] pcm) {
+        if (r == null || r != remote) return;
+        synchronized (chunks) {
+            chunks.add(pcm);
+            while (chunks.size() > 125) chunks.poll(); // the same 5 s cap as the phone's own recording
+        }
+    }
+
+    /** Whether r is the Remote of the call that is on. */
+    static boolean on(Remote r) {
+        return r != null && r == remote && ses != null;
+    }
+
     private static byte[] pullCapture(int max) {
         java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream(max);
         synchronized (chunks) {
@@ -819,6 +888,7 @@ final class CodexLive {
      */
     private static final String PAGE = "<!doctype html><html><body><audio id=out autoplay></audio><script>\n"
             + "let pc, ctx, mic, timer, stats;\n"
+            + CodexSpeech.TAP_JS
             + "const L = s => { try { Buddy.log(s); } catch (e) {} };\n"
             + "function meter(stream) {\n"
             + "  const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(stream).connect(an);\n"
@@ -854,7 +924,8 @@ final class CodexLive {
             + "    ctx = new AudioContext(); await ctx.resume().catch(() => {});\n"
             + "    L('audio context ' + ctx.state + ', ' + ctx.sampleRate + ' Hz');\n"
             + "    let stream;\n"
-            + "    try {\n"
+            + "    if (Buddy.remote()) { L('watch call: no microphone here'); stream = await ownTrack(); }\n"
+            + "    else try {\n"
             + "      stream = mic = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});\n"
             + "      const t = stream.getAudioTracks()[0];\n"
             + "      L('mic: ' + t.label + ' ' + JSON.stringify(t.getSettings ? t.getSettings() : {}));\n"
@@ -878,10 +949,11 @@ final class CodexLive {
             + "      L('remote track ' + e.track.kind + ', muted ' + e.track.muted);\n"
             + "      e.track.onunmute = () => L('remote track unmuted'); e.track.onmute = () => L('remote track muted');\n"
             + "      const s = e.streams[0] || new MediaStream([e.track]);\n"
-            + "      const out = document.getElementById('out'); out.muted = false; out.volume = 1; out.srcObject = s;\n"
+            + "      const rem = Buddy.remote(), out = document.getElementById('out'); out.muted = rem; out.volume = 1; out.srcObject = s;\n"
             + "      out.onplaying = () => L('audio element playing'); out.onpause = () => L('audio element paused');\n"
             + "      out.play().then(() => L('audio element play ok')).catch(err => L('audio element play failed: ' + err));\n"
             + "      said = meter(s);\n"
+            + "      if (rem) { tap(ctx, s, () => true); L('voice tapped for the watch'); }\n"
             + "    };\n"
             + "    timer = setInterval(() => { const h = heard(), v = said(), voice = v > 0.02;\n"
             + "      Buddy.level(Math.min(1, Math.max(h, v) * 3), voice); }, 70);\n"

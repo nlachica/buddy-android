@@ -237,6 +237,29 @@ final class CodexSpeech {
         }, "codex-speech-stop").start();
     }
 
+    /**
+     * For both pages: tap(ctx, stream, on) sends the remote track to Buddy.pcm(base64) as PCM 16-bit mono 16 kHz while
+     * on() is true, and the phone stays silent (the processor's output is zeroed). The page's {@code <audio>} keeps the
+     * stream attached, muted: Chromium only feeds a remote WebRTC track into Web Audio through a media element.
+     */
+    static final String TAP_JS = "function tap(ctx, stream, on) {\n"
+            + "  const src = ctx.createMediaStreamSource(stream), proc = ctx.createScriptProcessor(2048, 1, 1);\n"
+            + "  const ratio = ctx.sampleRate / 16000; let pos = 0, prev = 0;\n" // pos: where the next output sample falls, relative to the next block
+            + "  proc.onaudioprocess = e => {\n"
+            + "    e.outputBuffer.getChannelData(0).fill(0);\n"
+            + "    const inp = e.inputBuffer.getChannelData(0), n = inp.length;\n"
+            + "    if (!on()) { pos = 0; prev = 0; return; }\n"
+            + "    const o = new Int16Array(Math.ceil((n - pos) / ratio)); let c = 0, x = pos;\n"
+            + "    for (; x < n - 1 && c < o.length; c++, x += ratio) {\n"
+            + "      const k = Math.floor(x), t = x - k, v = (k < 0 ? prev : inp[k]) * (1 - t) + inp[k + 1] * t;\n"
+            + "      o[c] = Math.max(-1, Math.min(1, v)) * 32767;\n"
+            + "    }\n"
+            + "    pos = x - n; prev = inp[n - 1];\n"
+            + "    if (c > 0) Buddy.pcm(btoa(String.fromCharCode.apply(null, new Uint8Array(o.buffer, 0, c * 2))));\n"
+            + "  };\n"
+            + "  src.connect(proc); proc.connect(ctx.destination);\n"
+            + "}\n";
+
     /** Sends silence (the call needs audio flowing for the voice to speak) and plays what comes back. */
     private static final String PAGE = "<!doctype html><html><body><audio id=out autoplay></audio><script>\n"
             + "let pc;\n"
