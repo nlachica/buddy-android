@@ -560,7 +560,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
                     && !"point_out".equals(tool) && !"wait".equals(tool) && !"list_apps".equals(tool)
                     && !Tools.SCHEDULING.contains(tool)
                     // installing: Android's installer asks the user, the agent doesn't touch the screen
-                    && !"update_buddy".equals(tool) && !"install_apk".equals(tool) && !"wait_for_install".equals(tool)
+                    && !"buddy_settings".equals(tool) && !"update_buddy".equals(tool) && !"install_apk".equals(tool) && !"wait_for_install".equals(tool)
                     && !tool.startsWith("browser_") && !background) { // neither of those is the phone's screen
                 control.onActivity();
             }

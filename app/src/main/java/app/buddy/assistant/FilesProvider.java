@@ -26,13 +26,26 @@ public class FilesProvider extends ContentProvider {
         return Uri.parse("content://" + AUTHORITY + "/a/" + id);
     }
 
-    static Uri apkUri() {
-        return Uri.parse("content://" + AUTHORITY + "/apk/app.apk");
+    /** The installer opens this URI after the tool has returned, so each install attempt gets a file and URI of its own. */
+    static Uri apkUri(File staged) {
+        return Uri.parse("content://" + AUTHORITY + "/apk/" + staged.getName());
     }
 
-    /** An app built in Buddy's Linux, copied here for Android's installer (install_apk). */
-    static File apkFile(android.content.Context c) {
-        return new File(c.getCacheDir(), "install.apk");
+    /**
+     * A new file for an APK on its way to Android's installer (install_apk, update_buddy). Staged APKs older than a day
+     * go; a newer one may still be waiting for the installer, so it stays.
+     */
+    static File newApk(File cacheDir) throws java.io.IOException {
+        File dir = new File(cacheDir, "apk");
+        dir.mkdirs();
+        File[] old = dir.listFiles();
+        if (old != null) for (File f : old) if (f.lastModified() < System.currentTimeMillis() - 24 * 3600_000L) f.delete();
+        return File.createTempFile("install", ".apk", dir);
+    }
+
+    /** The staged APK a URI name stands for, or null for a name that isn't one. */
+    static File apkFor(File cacheDir, String name) {
+        return name.contains("/") || name.startsWith(".") ? null : new File(new File(cacheDir, "apk"), name);
     }
 
     /** A file from Buddy's Linux handed to the share sheet (share): a copy, by its name. */
@@ -56,7 +69,7 @@ public class FilesProvider extends ContentProvider {
         java.util.List<String> p = uri.getPathSegments();
         if (p.size() == 1 && "capture".equals(p.get(0))) return captureFile(getContext());
         if (p.size() == 2 && "a".equals(p.get(0))) return Attachments.file(getContext(), p.get(1));
-        if (p.size() == 2 && "apk".equals(p.get(0))) return apkFile(getContext());
+        if (p.size() == 2 && "apk".equals(p.get(0))) return apkFor(getContext().getCacheDir(), p.get(1));
         if (p.size() == 2 && "share".equals(p.get(0)) && !p.get(1).contains("/") && !p.get(1).startsWith(".")) {
             return new File(new File(getContext().getCacheDir(), "share"), p.get(1));
         }
@@ -101,7 +114,7 @@ public class FilesProvider extends ContentProvider {
         File f = fileFor(uri);
         if (f == null) return null;
         MatrixCursor c = new MatrixCursor(new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE});
-        String name = f.equals(apkFile(getContext())) ? "app.apk"
+        String name = f.getParentFile() != null && "apk".equals(f.getParentFile().getName()) ? "app.apk"
                 : f.getParentFile() != null && "share".equals(f.getParentFile().getName()) ? f.getName()
                 : f.getParentFile() != null && "attachments".equals(f.getParentFile().getName())
                 ? Attachments.name(f.getName()) : "photo.jpg";

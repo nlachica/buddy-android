@@ -43,11 +43,13 @@ final class Tools {
     private final List<AccessibilityNodeInfo> lastNodes = new ArrayList<>();
     private final BrowserTools browser;
     private final PhoneTools phone;
+    private final SettingsTool settings;
 
     Tools(BuddyService svc) {
         this.svc = svc;
         browser = new BrowserTools(svc);
         phone = new PhoneTools(svc);
+        settings = new SettingsTool(svc);
     }
 
     // ---------------------------------------------------------------- schema
@@ -301,9 +303,11 @@ final class Tools {
                             + "the user asks to update Buddy or whether there's a new version.", props()));
         } else {
             t.put(tool("update_buddy",
-                    "Check whether a newer Buddy is out (the official GitHub release) and what's new; with install=true, "
-                            + "download it and open Android's installer. Use it when the user asks to update Buddy or whether "
-                            + "there's a new version. Only the user can tap Update.",
+                    "Check whether a newer Buddy is out (this fork's GitHub release) and what's new; with install=true, "
+                            + "Buddy shows the user an approval card, then downloads it and opens Android's installer. Use it "
+                            + "when the user asks to update Buddy or whether there's a new version. Only the user can approve "
+                            + "and tap Update. To ship your own change to Buddy's code, see \"Updating Buddy on the phone\" in "
+                            + "the buddy-fork repo's AGENTS.md: a version bump and a tag make the fork's CI publish the release.",
                     props().put("install", boolProp("true: download the update and open the installer (after the user said yes)"))));
         }
         t.put(tool("wait_for_install",
@@ -315,6 +319,7 @@ final class Tools {
                         .put("timeout_s", intProp("Default 120, max 300")),
                 "package"));
         PhoneTools.list(t); // the clipboard, alarms, sharing, Downloads, status, camera, location
+        if (!Flavor.FDROID) SettingsTool.list(t); // this fork only: Buddy's own settings, each change on a card
         if (Browser.available(svc)) BrowserTools.list(t); // the background browser (Settings)
         return t;
     }
@@ -533,6 +538,10 @@ final class Tools {
                 return text(phoneShell(a));
             case "point_out":
                 return text(pointOut(a));
+            case "buddy_settings":
+                if (Flavor.FDROID) return text("Not available in this build.");
+                if (ruleRun()) return text("Not available in a notification rule's run. Tell the user what's needed instead.");
+                return text(settings.call(a));
             case "update_buddy":
             case "install_apk":
             case "wait_for_install":
@@ -611,7 +620,7 @@ final class Tools {
      * could tap an approval card), and the second is the user's alone. A tripwire for the plain cases, not a wall:
      * a command line can hide what it does, which is why each one goes to the user first unless they turned that off.
      */
-    private static final java.util.regex.Pattern SHELL_NO = java.util.regex.Pattern.compile(
+    static final java.util.regex.Pattern SHELL_NO = java.util.regex.Pattern.compile(
             "(?:^|[\\s;&|(`])(?:/system/bin/)?(?:input|sendevent|monkey|uiautomator)(?:\\s|$)|cmd\\s+input"
                     + "|app\\.buddy\\.assistant|enabled_accessibility_services|accessibility_enabled");
 
@@ -788,7 +797,7 @@ final class Tools {
 
     /** Not for a helper (see Helpers): what reaches the user, the phone's own settings or a later time. */
     private static final java.util.Set<String> HELPER_NO = new java.util.HashSet<>(java.util.Arrays.asList(
-            "delegate", "subagents", "phone_shell", "install_apk", "update_buddy", "wait_for_install", "schedule_message",
+            "delegate", "subagents", "phone_shell", "buddy_settings", "install_apk", "update_buddy", "wait_for_install", "schedule_message",
             "cancel_scheduled", "notify", "share", "reply_notification", "point_out", "add_calendar_event", "set_alarm",
             "set_timer", "take_photo", "clipboard_write", "save_to_downloads"));
 
@@ -2096,43 +2105,56 @@ final class Tools {
                     + "Settings (it also covers sessions outside Buddy's chats, like this one), wait until they say it's "
                     + "done, then call install_apk again.";
         }
-        java.io.File out = FilesProvider.apkFile(svc);
-        if (path != null && path.matches("http://(127\\.0\\.0\\.1|localhost):\\d+/.*")) {
-            // only from this phone: another app (e.g. Termux) serving an APK it built
-            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(path).openConnection();
-            c.setConnectTimeout(5000);
-            c.setReadTimeout(30000);
-            try (java.io.InputStream in = c.getInputStream(); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
-                copy(in, o);
-            } catch (java.io.IOException e) {
-                return "Couldn't download " + path + ": " + e.getMessage();
-            } finally {
-                c.disconnect();
+        java.io.File out = FilesProvider.newApk(svc.getCacheDir()); // this attempt's own file (the installer opens it later)
+        boolean opened = false;
+        try {
+            if (path != null && path.matches("http://(127\\.0\\.0\\.1|localhost):\\d+/.*")) {
+                // only from this phone: another app (e.g. Termux) serving an APK it built
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(path).openConnection();
+                c.setConnectTimeout(5000);
+                c.setReadTimeout(30000);
+                try (java.io.InputStream in = c.getInputStream(); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
+                    copy(in, o);
+                } catch (java.io.IOException e) {
+                    return "Couldn't download " + path + ": " + e.getMessage();
+                } finally {
+                    c.disconnect();
+                }
+                if (out.length() < 4) return "No APK at " + path + ".";
+            } else {
+                if (path == null || !path.startsWith("/") || !path.endsWith(".apk")) return "Give the full path of an .apk file.";
+                java.io.File root = Linux.root(svc).getCanonicalFile();
+                java.io.File f = new java.io.File(root, path.substring(1)).getCanonicalFile();
+                if (!f.getPath().startsWith(root.getPath() + "/") || !f.isFile()) return "No APK at " + path + ".";
+                try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
+                    copy(in, o);
+                }
             }
-            if (out.length() < 4) return "No APK at " + path + ".";
-        } else {
-            if (path == null || !path.startsWith("/") || !path.endsWith(".apk")) return "Give the full path of an .apk file.";
-            java.io.File root = Linux.root(svc).getCanonicalFile();
-            java.io.File f = new java.io.File(root, path.substring(1)).getCanonicalFile();
-            if (!f.getPath().startsWith(root.getPath() + "/") || !f.isFile()) return "No APK at " + path + ".";
-            try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
-                copy(in, o);
+            if (!Flavor.FDROID) { // Buddy's own APK goes through update_buddy, which shows the user a card first
+                android.content.pm.PackageInfo pi = svc.getPackageManager().getPackageArchiveInfo(out.getPath(), 0);
+                if (pi == null) return "Android can't read that file as an app, so it wasn't opened.";
+                if (svc.getPackageName().equals(pi.packageName)) {
+                    return "That's Buddy itself: use update_buddy with install=true (the user approves it on a card).";
+                }
             }
+            if (!svc.getPackageManager().canRequestPackageInstalls()) {
+                svc.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + svc.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "Buddy isn't allowed to install apps yet. Android's settings page for that is open now: ask the user to "
+                        + "turn on 'Allow from this source' for Buddy, wait until they say it's done, then call install_apk again.";
+            }
+            svc.startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+            opened = true;
+            return "The installer is open. The user must tap Install/Update and confirm (you can't). Call wait_for_install now.";
+        } finally {
+            if (!opened) out.delete(); // a file the installer will open later is left as it is
         }
-        if (!svc.getPackageManager().canRequestPackageInstalls()) {
-            svc.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    android.net.Uri.parse("package:" + svc.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            return "Buddy isn't allowed to install apps yet. Android's settings page for that is open now: ask the user to "
-                    + "turn on 'Allow from this source' for Buddy, wait until they say it's done, then call install_apk again.";
-        }
-        svc.startActivity(new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(FilesProvider.apkUri(), "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
-        return "The installer is open. The user must tap Install/Update and confirm (you can't). Call wait_for_install now.";
     }
 
     /** Buddy's own updates (see {@link Updates}). */
-    private String updateBuddy(boolean install) {
+    private String updateBuddy(boolean install) throws InterruptedException {
         Updates.Release r;
         try {
             r = Updates.latest();
@@ -2145,6 +2167,9 @@ final class Tools {
             return head + " An update is available. What's new:\n" + r.notes + "\n\nAsk the user if they want it now; "
                     + "if yes, call update_buddy with install=true.";
         }
+        String no = SettingsTool.approval(c -> svc.askConfirm(c, false),
+                svc.getString(R.string.tools_card_update, r.version, BuildInfo.VERSION, r.notes));
+        if (no != null) return "Not installed. " + no;
         svc.showStatus(svc.getString(R.string.tools_status_downloading, r.version));
         String res = Updates.install(svc, r);
         if (Updates.NEEDS_PERMISSION.equals(res)) {

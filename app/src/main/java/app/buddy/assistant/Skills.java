@@ -30,6 +30,9 @@ final class Skills {
         }
     }
 
+    /** Held by every Buddy write to the skills folder (here, and the settings tool's), so one can't land between another's check and write. Never held while waiting for anything else. */
+    static final Object LOCK = new Object();
+
     private Skills() {
     }
 
@@ -94,11 +97,13 @@ final class Skills {
         String n = slug(name);
         if (n.isEmpty()) throw new IllegalArgumentException(c.getString(R.string.skills_need_name));
         File d = new File(dir(c), n);
-        if (d.exists()) throw new IllegalArgumentException(c.getString(R.string.skills_exists, n));
-        d.mkdirs();
         String desc = description.replace('\n', ' ').trim();
-        Linux.write(new File(d, "SKILL.md"), "---\nname: " + n + "\ndescription: " + (desc.contains(":") ? "\"" + desc.replace("\"", "'") + "\"" : desc)
-                + "\n---\n\n" + instructions.trim() + "\n");
+        synchronized (LOCK) {
+            if (d.exists()) throw new IllegalArgumentException(c.getString(R.string.skills_exists, n));
+            d.mkdirs();
+            Linux.write(new File(d, "SKILL.md"), "---\nname: " + n + "\ndescription: " + (desc.contains(":") ? "\"" + desc.replace("\"", "'") + "\"" : desc)
+                    + "\n---\n\n" + instructions.trim() + "\n");
+        }
         return n;
     }
 
@@ -119,15 +124,22 @@ final class Skills {
             }
             data = o.toByteArray();
         }
+        return importBytes(dir(c), data, c.getString(R.string.skills_bad_file));
+    }
+
+    /** importUri after the file is read: badFile is the message for a file that isn't a skill. Only the writes hold LOCK. */
+    static String importBytes(File root, byte[] data, String badFile) throws Exception {
         boolean zip = data.length > 4 && data[0] == 'P' && data[1] == 'K';
         if (!zip) { // a SKILL.md
             String md = new String(data, StandardCharsets.UTF_8);
             String[] fm = frontMatter(md);
             String n = slug(fm[0]);
-            if (n.isEmpty() || fm[2].isEmpty()) throw new IllegalArgumentException(c.getString(R.string.skills_bad_file));
-            File d = new File(dir(c), n);
-            d.mkdirs();
-            Linux.write(new File(d, "SKILL.md"), md);
+            if (n.isEmpty() || fm[2].isEmpty()) throw new IllegalArgumentException(badFile);
+            File d = new File(root, n);
+            synchronized (LOCK) {
+                d.mkdirs();
+                Linux.write(new File(d, "SKILL.md"), md);
+            }
             return n;
         }
         // the SKILL.md's folder inside the zip (the top one), and its name
@@ -143,22 +155,24 @@ final class Skills {
                 }
             }
         }
-        if (md == null) throw new IllegalArgumentException(c.getString(R.string.skills_bad_file));
+        if (md == null) throw new IllegalArgumentException(badFile);
         String[] fm = frontMatter(md);
         String n = slug(!fm[0].isEmpty() ? fm[0] : prefix.replaceAll("/+$", "").replaceAll(".*/", ""));
-        if (n.isEmpty()) throw new IllegalArgumentException(c.getString(R.string.skills_bad_file));
-        File d = new File(dir(c), n);
-        d.mkdirs();
-        String root = d.getCanonicalPath() + File.separator;
-        try (ZipInputStream z = new ZipInputStream(new java.io.ByteArrayInputStream(data))) {
-            for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
-                String p = e.getName();
-                if (e.isDirectory() || !p.startsWith(prefix)) continue;
-                File out = new File(d, p.substring(prefix.length()));
-                if (!out.getCanonicalPath().startsWith(root)) continue; // no paths out of the folder
-                out.getParentFile().mkdirs();
-                try (FileOutputStream f = new FileOutputStream(out)) {
-                    f.write(readAll(z));
+        if (n.isEmpty()) throw new IllegalArgumentException(badFile);
+        File d = new File(root, n);
+        synchronized (LOCK) {
+            d.mkdirs();
+            String inside = d.getCanonicalPath() + File.separator;
+            try (ZipInputStream z = new ZipInputStream(new java.io.ByteArrayInputStream(data))) {
+                for (ZipEntry e; (e = z.getNextEntry()) != null; ) {
+                    String p = e.getName();
+                    if (e.isDirectory() || !p.startsWith(prefix)) continue;
+                    File out = new File(d, p.substring(prefix.length()));
+                    if (!out.getCanonicalPath().startsWith(inside)) continue; // no paths out of the folder
+                    out.getParentFile().mkdirs();
+                    try (FileOutputStream f = new FileOutputStream(out)) {
+                        f.write(readAll(z));
+                    }
                 }
             }
         }
@@ -174,7 +188,9 @@ final class Skills {
     }
 
     static void delete(Skill s) {
-        deleteTree(s.dir);
+        synchronized (LOCK) {
+            deleteTree(s.dir);
+        }
     }
 
     private static void deleteTree(File f) {
@@ -183,7 +199,7 @@ final class Skills {
         f.delete();
     }
 
-    private static boolean isLink(File f) {
+    static boolean isLink(File f) {
         return java.nio.file.Files.isSymbolicLink(f.toPath());
     }
 
