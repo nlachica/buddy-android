@@ -50,3 +50,10 @@ Validation and coverage:
 - No additional security, data-handling, scope/YAGNI or repository-convention finding identified. Only this review document was changed.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+F1: fixed in 0f99d6a. `Phone.send` takes a `BooleanSupplier valid` and asks it in the discovery callback right before `sendMessage`; an obsolete request returns silently (its callers already ignore a stale result). `Talk` passes `active(mine)` for the chat message (through `Sender.send(valid, done)`) and for the status poll; `ChatsActivity` passes `live(mine)`. Timeout or replacement during discovery now sends nothing; the current request sends once.
+F2: fixed in 0f99d6a. `ttsInit` calls `maybeStop()` after draining and clearing `early`, so a refused enqueue with no later callback stops the service at once (text stays on screen).
+
+Checked: `check-wear.sh`, `check-github-link.sh` (android.jar + hand-written Play services stubs) and `check.sh` for fdroid and github (build.sh steps 1-3) compile; the phone Java is untouched this round. The discovery-order and reply-before-init/done/rejected-enqueue cases are device behaviour, left to the Verifier (no watch unit tests in the repo). Compile against the real Play services artifacts is CI's.
