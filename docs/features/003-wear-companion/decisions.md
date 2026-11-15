@@ -73,3 +73,52 @@
   reproducibility check passes. (b) leaves CI artifacts uninstallable; (c) debug keys differ per machine and
   wouldn't pair. Done by the orchestrator after his OK, never written into files.
 - By: Planner (claude-opus-5-5); needs Nicholas
+
+## 2026-11-15 - A watch note that becomes a second run stays the watch's; the relay decides "done" one main-loop turn later
+- Options: (a) post the end check from `onChatsChanged`, so it runs after `buddy_done`'s posted note continuation;
+  (b) a runtime Session flag "continuation pending" set and cleared by ChatHub; (c) end at the first `running == false`
+  (round 1's bug).
+- Choice: (a). ChatHub posts the continuation before its `changed()` with no `changed()` in between
+  (`ChatHub.java:701-729`), so the posted check sees either the second run (keep tracking, `ses.watch` kept) or the true
+  end. Failure to start and Stop end through the same check. (b) adds main-code state for the same answer; a comment at
+  ChatHub's post pins the order instead. (c) drops the answer to the watch's question (plan review F1).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The watch's conversation lives in `Talk`, a foreground service from send to the end
+- Options: (a) listener in `TalkActivity` until `onDestroy`; (b) a watch `WearableListenerService` as the receiver;
+  (c) a foreground service started at send holding listener, TTS, deadlines and lines; (d) both (b) and (c).
+- Choice: (c). The wait outlives the screen: the watch face comes back and a stopped activity's process can be
+  reclaimed, so (a) loses replies. (b) restarts the process for each message but leaves it cached right after, so
+  speech can still be cut. (c) starts while the activity is visible (allowed on every Android version), keeps the
+  process for the whole wait, speaks each reply once and keeps the lines for the activity; it ends on done, error,
+  lost contact, 15 minutes or a swipe-away. Type `remoteMessaging` (no runtime permission), `mediaPlayback` as the
+  fallback. (d) is two receivers for one job.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - After `heard`, the watch checks with `/buddy/status` after 30 s of silence; never re-sends
+- Options: (a) a plain timeout; (b) Data Layer connection listeners; (c) an application-level status request.
+- Choice: (c). It covers a lost link (send fails or no answer in 10 s), a dead or restarted Buddy (`running` false,
+  runtime-only), and a lost `done`, with one tiny message per 30 s of silence. (a) can't tell a slow run from a dead
+  one; (b) misses Buddy dying while the link stays up. Re-sending an accepted message would run it twice.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The watch gets every eligible chat (90 KB guard), not the first 20
+- Options: (a) cap at 20; (b) a "More" page; (c) all, titles cut to 40 characters, stopping at 90 KB.
+- Choice: (c). A chat past a cap can't be picked; at about 100 bytes a row, roughly 900 chats fit under
+  MessageClient's 100 KB limit, so paging isn't needed.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Switching the phone to the fork follows a checklist that rides Buddy's own Backup
+- Options: (a) Backup → uninstall → install → Restore as is; (b) new backup code for the missing parts; (c) tar the
+  missing setup into `root/.buddy/work` so the built-in Backup carries it, plus inventory, push, check, Linux setup
+  before Restore, and post-restore checks.
+- Choice: (c). (a) loses setup outside `Backup.java:28-30` and skips the Linux part without Linux set up; (b) is a
+  subsystem for a one-time move. Sign-ins stay out (redone). The uninstall ends this pipeline's own session (it runs
+  in the official Buddy's Linux), so everything is pushed first and Nicholas runs the switch.
+- By: Planner (claude-opus-5-5); the switch itself needs Nicholas
+
+## 2026-11-15 - Fork updates are manual pairs; Update notices off
+- Options: (a) point `Updates` at the fork's releases; (b) document manual updates and turn off Update notices.
+- Choice: (b). The updater only knows the official repository (`Updates.java:41-45`), whose APK Android refuses over the
+  fork, and a fork-aware updater (watch APK included) is its own feature.
+- By: Planner (claude-opus-5-5)

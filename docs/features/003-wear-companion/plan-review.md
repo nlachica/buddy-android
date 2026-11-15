@@ -18,3 +18,40 @@ F6 [minor] Step 1's Wear CI gate precedes the task that builds Wear - `plan.md:1
 F7 [minor] Fork migration leaves the phone updater targeting the incompatible upstream APK - The new signing key and paired-release policy (`plan.md:30-33,255-256`) are not reflected in the existing updater: `app/src/main/java/app/buddy/assistant/Updates.java:41-45,65-77` hard-codes the upstream repository and its `buddy.apk`, and `Updates.java:127-138` can announce those releases on the fork. Those APKs cannot update the fork-signed installation. -> For this feature, document manual updates of the matching fork pair and disabling upstream update notices during migration, including the limitation of the existing update action. A general fork-updater redesign can remain separate.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+F1: accepted - Confirmed in code: `buddy_done` posts `sendNoteAsMessage` (`ChatHub.java:719-722`) before its
+`changed()` (`:729`), with no `changed()` in between. The relay now posts its end check to the main looper instead of
+deciding inside `onChatsChanged`, so the check runs after the continuation's turn: running again → still tracked,
+`ses.watch` kept (the second run's answer goes to the watch, quiet on the phone); idle → `done`. A continuation that
+can't start (its ERROR is relayed) and Stop (the `hub_note_not_sent` step is relayed, outcome `stopped`) end through
+the same check. Step 3 adds a comment at ChatHub's post pinning the order. Test plan 2 adds the
+"long text answer, then the watch note becomes a second run" check and the Stop-while-queued check. A Session flag was
+the other option; it adds main-code state for the same answer.
+F2: accepted (partly) - The listener, TTS, deadlines and lines move out of `TalkActivity` into `Talk`, a watch
+service that is foreground from send until `done`, an error, lost contact, 15 minutes, or the user swiping the talk
+screen away. It starts while the activity is on screen, so it's allowed on every Android version. Each reply is spoken
+once, by `Talk`; the activity only draws, and doesn't auto-listen when `Talk` holds unseen lines for that chat or when
+Android recreates it. Not a `WearableListenerService` as the receiver: its process is cached again as soon as delivery
+returns, so it doesn't bound TTS playback, while the foreground service keeps the process for the whole wait
+(reclamation prevented rather than survived; what's left is Risk 4). Test plan 4 adds a delay past the 120 s
+release with the watch face back, "Don't keep activities", and `am kill` while waiting.
+F3: accepted - After `heard`, `Talk` sends `/buddy/status {chat}` whenever 30 s pass with nothing from the phone;
+`running: false` without `done`, no answer in 10 s, or a failed send each end the wait with a clear message. It
+never re-sends the message. The phone answers from `Session.running` (runtime-only, so a restarted Buddy says false,
+which is true). Removed the claim that `done` always comes. Test plan 4 adds airplane mode and force-stopping Buddy on the
+phone after `heard`.
+F4: accepted - New "Switching the phone to the fork" checklist: an inventory of setup outside `Backup.java:28-30`
+(paths and sign-ins to redo, names only, in `migration.md`), every repo pushed (this pipeline runs inside the official
+Buddy's Linux, so the uninstall ends it), the missing config tarred into `root/.buddy/work` so the built-in Backup
+carries it to Downloads, the zip checked, then Nicholas uninstalls, installs, sets up Linux **before** Restore,
+extracts the extras, reinstalls packages, signs in, and checks chats/repos/config/tools. No new backup code;
+credentials stay out of the archive and the docs.
+F5: accepted - No count cap: every eligible chat, titles cut to 40 characters, with a 90 KB guard (about 900 chats)
+under MessageClient's 100 KB limit, stated as the limit. No "More" paging: all of them fit in one message. Test plan 2
+checks a phone with more than 20 eligible chats.
+F6: accepted - `:wear:assembleRelease` moves into Step 1's commit (`build.yml:59`); Step 2 keeps the APK
+collection, release note and the fdroid gms check.
+F7: accepted - Docs (Step 8) and the checklist (step 10): update by installing the matching fork pair; turn off
+Settings → Update notices and don't use "update Buddy" on the fork, since `Updates.java:41-45,65-77` only knows the
+official repository, whose APK Android refuses over the fork. Risk 11 records it; no updater change.
