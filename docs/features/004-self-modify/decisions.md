@@ -177,3 +177,52 @@
   test can race it. A lock is fewer changes than moving the importer onto the main thread, which would need a
   prepared-import object handed between threads. (Plan review round 2, F2.)
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Gate signature: `change(setting, value, cardFormat, asker, main)`; the asker takes the finished card text
+- Options: `Asker.ask(name, old, new)` building the card inside the production lambda; `Asker.ask(card)` plus the card
+  format passed in (chosen); a hard-coded English format in `SettingsTool`.
+- Choice: `change` gets `getString(R.string.tools_card_setting)` as `cardFormat`, formats it, and hands the finished
+  card to the one-method `Asker`, as the plan's `approval(asker, card)` has it. The card text stays in `strings.xml`
+  like every other card, and the JVM tests pass the same literal format.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - `Setting` is a small abstract class with `get/view/check/prepare/lock/set/card/read`
+- Options: a record of lambdas; an abstract class (chosen).
+- Choice: the families need different snapshot, display, validation and commit rules (an MCP snapshot holds the
+  address and must never be shown; a skill's snapshot adds its mtime and its commit holds `Skills.LOCK`), so each
+  family is one small anonymous subclass. `prepare` is the hook for the MCP `discover` that follows the approval, off
+  the main thread (plan gate step 5). `check` returns the normalised value, so "Already" compares like with like.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Antigravity's pre-approved tool list gets `buddy_settings`; OpenCode's naming hint does not
+- Options: leave `linux/buddy-run` alone (plan said nothing); add the name to `AGY_PHONE_TOOLS` (chosen); also add
+  `phone_buddy_settings` to OpenCode's hint.
+- Choice: `AGY_PHONE_TOOLS` is the list Antigravity pre-approves; without the name its own permission prompt (which
+  nobody can answer in a Buddy chat) would stop the tool. The script is shared with the F-Droid flavor, but a listed
+  name for a tool that isn't offered there does nothing. Claude Code and Codex allow the whole `phone` server, and
+  OpenCode's hint is a generic "phone_ prefix" note, so they need no change. `mcp-bridge/tools.json` (the public
+  registry listing of upstream's tools) is left alone.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - `buildRule` takes the list of agents that can run rules; `install_apk` gives an unreadable APK its own message
+- Options: `buildRule` reads `Account.ALL` itself; the caller passes the list (chosen). One refusal text for Buddy's own
+  package and an unreadable APK (plan wording); two texts (chosen).
+- Choice: `Account`'s static initialiser uses Android classes, so reading it inside `buildRule` would make the rule
+  checks untestable in the JVM; `rule()` passes `ruleAgents()` (the editor's own set). For `install_apk` an unreadable
+  file gets "Android can't read that file as an app" rather than "That's Buddy itself", which would mislead; both
+  still refuse and delete that attempt's file.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - A new MCP server is saved with key `""`, not `null`
+- Options: `McpServers.save(c, s, null)` (plan wording: "keeps the saved one"); `save(c, s, "")` (removes any).
+- Choice: `""`. `remove` already deletes a server's key, so there is none to keep; passing `""` guarantees that a stale
+  secret under the same name can never follow the new address, which is the point of "keyless".
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Unit tests were run with `javac` + JUnitCore here, not Gradle
+- Options: install Gradle and the Android Gradle plugin on the phone; compile `app/src/test` against `android.jar` and
+  run JUnit directly (chosen, `/tmp/buddy-build-004/check.sh`).
+- Choice: no Gradle is installed and the on-device toolchain is `aapt2` + `javac` + `d8`. The tests only touch
+  Context-free code, and the real `org.json` jar is put before `android.jar` as Gradle's `testImplementation` does. CI
+  (`testGithubReleaseUnitTest`) is the first Gradle run of these tests and has not happened yet.
+- By: Coder (claude-sonnet-5-5)
