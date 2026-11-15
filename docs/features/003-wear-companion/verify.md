@@ -6,7 +6,9 @@
 | Speech path A gate (probe) | Watch4 SM-R870 over wireless adb, com.buddyapps.watchprobe: SpeechRecognizer available; RECOGNIZE_SPEECH handled by Google (com.google.android.tts) and Samsung keyboard (resolver shown when both); recognized "hello this is me talking"; TTS init ok, engine com.google.android.tts | pass: path A confirmed, B not needed |
 | 2-4. Talk, busy-chat continuation, TTS, locked phone, wrist down | 2026-11-15 on v2.3.9-fork.2 (phone + watch): chat list loads live from the phone (busy chat shows "working"); Nicholas picked the "Buddy" chat, asked the time: the reply showed as text and was spoken a few seconds later. Busy-chat continuation, locked phone and wrist-down not exercised | pass (core talk path) |
 | 5. F-Droid APK has no Google code | CI step added in this branch ran green in run 43701551913 | pass (CI) |
-| Quick talk (double-press Home → last chat listening) | CI run 43711299593 green with the change; device check pending (watch off Wi-Fi) | pending |
+| Quick talk (double-press Home → last chat listening) | 2026-11-15: watch setting `setting_home_key_double_press` was `lastapp`; set via adb to `app.buddy.assistant/app.buddy.assistant.wear.ChatsActivity`; Nicholas's real double-press opened Buddy listening | pass |
+| Locked phone + wrist down | 2026-11-15: phone locked in pocket, quick talk "write a 200-word story about a lighthouse", wrist lowered at once → whole story spoken | pass |
+| Busy-chat continuation via quick talk | 2026-11-15: long story asked, then a second quick talk "what is two plus two" while working → only "four" spoken; the story was never spoken (relaunch finishes the old talk screen and its wait, the cost noted in decisions) | fail vs done-when 2 |
 | 6. Screenshots of the watch screens | watch-chats.png (chat list) | pass |
 
 VERDICT: SHIP - talk path verified on the Watch4; edge cases (busy chat, locked phone, wrist down, double-press) left for real use.
