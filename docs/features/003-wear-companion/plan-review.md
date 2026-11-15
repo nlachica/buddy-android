@@ -98,3 +98,23 @@ counts what is left to say. `Talk` now finishes in two steps:
 The lines are kept either way. Test plan 3 adds the cold-engine test: watch TTS engine and watch app force-stopped,
 three quick replies, `done` during the first, wrist down. All three must be spoken in order, once, with `Talk`
 foreground until the last word.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No blocker or major findings remain. The revised plan covers all six done-when items, with concrete build,
+device, failure-path and migration checks.
+
+Round 2 is addressed: `plan.md:161-171` orders sending after successful listener registration and holds a bounded
+partial wake lock while `Talk` is foreground; `plan.md:173-194` retains every utterance through TTS initialization
+and keeps the service foreground through playback, with bounded cleanup. The wake-lock choice is supported by
+[AOSP Android 11's PowerManagerService](https://github.com/aosp-mirror/platform_frameworks_base/blob/android11-release/services/core/java/com/android/server/power/PowerManagerService.java#L3209-L3219): its device-idle disabling condition excludes processes at foreground-service importance. This supports the design; it does not replace the planned Watch4 screen-off verification or resolve Samsung-specific power management by assumption.
+
+Rechecked the earlier fixes against the code: `ChatHub.java:699-729,797-807` supports the deferred completion check
+across a queued-note continuation; `Backup.java:28-30,88-89,111-116` supports the extras inventory and Linux-before-
+Restore checklist. The source-set isolation matches `build.sh:35-36` and the existing Gradle flavor configuration.
+
+Approval is for the plan. The existing speech/TTS probe gate, any required return to the Planner for path B or missing
+TTS, signing/migration approvals, CI checks and real-device verification remain required before claiming the feature
+done. No additional scope or review round is requested.
+
+VERDICT: APPROVE
