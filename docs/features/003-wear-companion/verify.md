@@ -6,6 +6,7 @@
 | Speech path A gate (probe) | Watch4 SM-R870 over wireless adb, com.buddyapps.watchprobe: SpeechRecognizer available; RECOGNIZE_SPEECH handled by Google (com.google.android.tts) and Samsung keyboard (resolver shown when both); recognized "hello this is me talking"; TTS init ok, engine com.google.android.tts | pass: path A confirmed, B not needed |
 | 2-4. Talk, busy-chat continuation, TTS, locked phone, wrist down | Needs the phone on a fork build signed with the new key (Nicholas: "not yet") | pending |
 | 5. F-Droid APK has no Google code | CI step added in this branch ran green in run 43701551913 | pass (CI) |
+| Quick talk (double-press Home → last chat listening) | CI run 43711299593 green with the change; device check pending (watch off Wi-Fi) | pending |
 | 6. Screenshots of the watch screens | pending with 2-4 | pending |
 
 VERDICT: PARTIAL - code and build verified; on-device run waits for the phone switch to the fork.
