@@ -37,4 +37,16 @@
     <!-- What the user said. %1$s = their words -->
     <string name="talk_you">You: %1$s</string>
     <string name="talk_sleepy">Still working on your phone. I\'ll read the answer out when it comes.</string>
+
+    <!-- Calls (live voice) from the watch. %1$s = the chat -->
+    <string name="call_channel">Calls with Buddy</string>
+    <string name="call_notif">Call with Buddy · %1$s</string>
+    <string name="call_connecting">Connecting…</string>
+    <string name="call_end">End</string>
+    <string name="call_close">Close</string>
+    <string name="call_button">Call Buddy</string>
+    <string name="call_lost">Lost contact with your phone.</string>
+    <string name="call_cap">The call ended after 30 minutes.</string>
+    <string name="call_no_mic">This watch\'s microphone isn\'t available.</string>
+    <string name="call_needs_mic">Calls need the microphone.</string>
 </resources>

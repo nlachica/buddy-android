@@ -99,6 +99,7 @@ public class Talk extends Service {
 
     /** Starts the conversation: the listener first, then {@code send}, so a fast answer can't come before anyone listens. */
     static void begin(Context c, String chat, String title, int accent, Sender send) {
+        Call.hangUp(); // the last one started owns the speaker
         Talk.chat = chat;
         Talk.title = title;
         Talk.accent = accent;
@@ -186,6 +187,7 @@ public class Talk extends Service {
     // ---------------------------------------------------------------- from the phone
 
     private void onPhone(MessageEvent e) {
+        if (e.getPath().startsWith(Phone.LIVE)) return; // a call's (Call listens): not an answer, nothing to reset
         if (!waiting || !e.getPath().startsWith(PATHS)) return;
         JSONObject in;
         try {

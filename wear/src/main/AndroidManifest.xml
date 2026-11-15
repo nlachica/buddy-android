@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Calls: the watch's microphone goes to the live voice on the phone -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
 
     <queries>
         <intent>
@@ -43,6 +46,17 @@
         <activity
             android:name=".TalkActivity"
             android:exported="false" />
+
+        <activity
+            android:name=".CallActivity"
+            android:launchMode="singleTop"
+            android:exported="false" />
+
+        <!-- A live voice call: the microphone streams to the phone while the screen may be off -->
+        <service
+            android:name=".Call"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
 
         <!-- Passes the user's words to Buddy on the phone and reads the answer out; no runtime permission needed -->
         <service
