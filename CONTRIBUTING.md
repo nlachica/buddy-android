@@ -51,6 +51,8 @@ Buddy is [Apache-2.0](LICENSE). By opening a pull request with a translation you
 | `.../SshServer.java` | SSH from Termux: the server in Buddy's Linux and the one-time code that lets a key in |
 | `app/src/main/res/values/strings.xml` | Every text Buddy shows, in English; `values-<language>/` holds the translations |
 | `app/src/main/jniLibs/arm64-v8a/` | proot and its libraries (see [third_party](third_party/README.md)) |
+| `wear/` | The Galaxy Watch app (Wear OS): the chat list, the talk screen and `Talk`, the service that waits for and reads out the answer |
+| `app/src/watchlink/` | The phone's end of the watch link (`WatchLink.java`); only in the GitHub build, because it needs Google Play services |
 | `linux/buddy-run` | Runs the agent with the phone tools and streams events back |
 | `linux/codex-remote` | Codex's app-server with remote control and the phone tools; makes pairing codes in the same proot |
 | `linux/system-prompt.md` | Buddy's instructions for the agent |

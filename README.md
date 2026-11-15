@@ -90,6 +90,23 @@ What to expect, from tests on an RTX 2060 Super (8 GB): Qwen3 8B and Qwen3 4B ha
 
 Install the new APK over the old one: chats, settings and sign-ins stay (don't uninstall first). You can also ask Buddy to *"update yourself"*, or let [Obtainium](https://obtainium.imranr.dev) or F-Droid do it ([how](docs/GUIDE.md#updating)).
 
+## Galaxy Watch (Wear OS)
+
+`buddy-watch.apk` is a small Buddy app for a Wear OS 3+ watch (made for the Galaxy Watch4). On the watch you pick one of your chats, tap and speak; the words go to that chat on your phone and run like a typed message, and Buddy's answer comes back to the watch, which shows it and reads it out with its own speaker. It works with the phone locked in a pocket. It needs Buddy running on the phone, so it does nothing alone. Approvals, settings and live voice are not on the watch (yet).
+
+It talks to the phone over Google's Wear OS link, which only connects apps with the same package name and the same signing key. So:
+- the phone needs `buddy.apk` (the GitHub version, not F-Droid's) **from the same release** as `buddy-watch.apk`, signed with the same key. The official Buddy can't talk to the watch app;
+- install both from the same release when you update (phone: open `buddy.apk`; watch: `adb install -r buddy-watch.apk`). Buddy's own updater only knows the official repository, so turn off Settings → Update notices and don't ask Buddy to update itself on a build you signed yourself;
+- an APK made with `build.sh` has no watch link.
+
+Install on the watch with adb over Wi-Fi: on the watch, Settings → Developer options → ADB debugging and Wireless debugging. Then, on a computer on the same network:
+
+```
+adb pair <ip:port>            # the pairing address and code are shown on the watch (Wear OS 4+)
+adb connect <ip:port>         # the address on the Wireless debugging screen
+adb -s <ip:port> install buddy-watch.apk
+```
+
 ## Security
 
 An accessibility service is powerful, so please read this.
@@ -132,7 +149,7 @@ git clone --recurse-submodules https://github.com/ghorbelhamdi/buddy-android.git
 ./build.sh                    # on the phone in Termux, no Gradle → build/buddy-release.apk
 ```
 
-proot and libandroid-shmem are git submodules in `third_party/` (`git submodule update --init` in an existing clone). `build.sh` needs `pkg install openjdk-17 aapt2 d8 apksigner python clang make` and android.jar from platform-36 at `~/android-sdk/android-36/android.jar`. It creates a signing key at `~/.buddy-keys/release.jks` on first run: back it up, since updates must be signed with the same key. Gradle release signing reads `BUDDY_KEYSTORE` and `BUDDY_KEYSTORE_PASSWORD` (optionally `BUDDY_KEY_ALIAS`, `BUDDY_KEY_PASSWORD`). The version lives in `BuildInfo.java`, and the project layout is in [CONTRIBUTING.md](CONTRIBUTING.md#project-layout).
+proot and libandroid-shmem are git submodules in `third_party/` (`git submodule update --init` in an existing clone). `build.sh` needs `pkg install openjdk-17 aapt2 d8 apksigner python clang make` and android.jar from platform-36 at `~/android-sdk/android-36/android.jar`. It creates a signing key at `~/.buddy-keys/release.jks` on first run: back it up, since updates must be signed with the same key. Gradle release signing reads `BUDDY_KEYSTORE` and `BUDDY_KEYSTORE_PASSWORD` (optionally `BUDDY_KEY_ALIAS`, `BUDDY_KEY_PASSWORD`). `build.sh` builds the phone app without the watch link (it needs Google Play services, which `build.sh` can't fetch); Gradle's GitHub build and `wear/` have it. The version lives in `BuildInfo.java`, and the project layout is in [CONTRIBUTING.md](CONTRIBUTING.md#project-layout).
 
 ## License
 

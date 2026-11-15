@@ -43,6 +43,10 @@ You sign in with these services yourself; Buddy never sees your passwords. Their
 
 If you use the microphone, your voice is turned into text by the engine you choose in Settings: your phone's speech recognizer, Claude's dictation (Anthropic) or ChatGPT's (OpenAI). Replies read aloud use the phone's voice or ChatGPT's voices (OpenAI).
 
+## Watch
+
+If you use Buddy's watch app (GitHub version only), the chat titles, your words and Buddy's replies pass between your phone and your watch through Google Play services' Wear OS link: over Bluetooth, or, when the watch is out of range, through Google's servers, encrypted. The watch's speech recognizer turns your voice into text on the watch. Buddy has no servers of its own and gets nothing from this.
+
 ## Data stored on your phone
 
 Your chats, settings, sign-ins and the agent's files are stored only in Buddy's private storage on your phone. Uninstalling Buddy deletes them. You can delete a chat at any time in the app.
