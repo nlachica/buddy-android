@@ -28,10 +28,14 @@ final class WatchCall implements CodexLive.Remote {
     private static final Handler main = new Handler(Looper.getMainLooper());
     /** The watch call that is on (main thread writes). */
     private static volatile WatchCall live;
+    /** Channels are numbered as they open; begun is the newest number that started (main thread): an older one is stale. */
+    private static final java.util.concurrent.atomic.AtomicLong opened = new java.util.concurrent.atomic.AtomicLong();
+    private static long begun;
 
     private final Context app;
     private final ChannelClient.Channel channel;
     private final String node;
+    private final long seq = opened.incrementAndGet();
     /** The call's out stream: 2 s, dropping the oldest. */
     private final PcmOut out = new PcmOut(64_000, true, 60_000, () -> main.post(this::hangUp));
     private String chat = "";
@@ -104,6 +108,13 @@ final class WatchCall implements CodexLive.Remote {
 
     /** The checks of a talk, in their order, then the call (main thread). */
     private void begin() {
+        if (finished) return;
+        if (seq < begun) { // its header came late: a newer call is already on
+            finished = true;
+            out.cancel();
+            return;
+        }
+        begun = seq;
         Sessions.Session ses = ChatHub.get(app).sessions.find(chat);
         String err;
         if (ses == null) err = app.getString(R.string.watch_chat_gone);
