@@ -153,3 +153,8 @@
   One API-36 call (`setShortCriticalText`) is blanked in a scratch copy of the sources, never in the repo. Not Gradle: CI
   is the first Gradle run of these tests.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Code review round 3 F3 closed by the orchestrator
+- F3 was only the CI gate: `pipe ci` dispatched to the upstream parent (gh's default repo on a fork). Fixed in the
+  playbook (`GH_REPO` from origin); CI run 43756642973 on 79a3e73 is green (unit tests + github, fdroid, wear builds).
+  No code finding was open. By: Orchestrator (claude-opus-5-5)
