@@ -1,6 +1,7 @@
 package app.buddy.assistant.wear;
 
 import android.app.Activity;
+import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -49,6 +50,12 @@ public class ChatsActivity extends Activity {
         scroll.addView(body);
         setContentView(scroll);
         header();
+        // opening the app means "I want to say something": straight to the last chat; the list is one Back away
+        SharedPreferences last = getSharedPreferences("last", MODE_PRIVATE);
+        if (b == null && last.contains("chat")) {
+            startActivity(Talk.intent(this, last.getString("chat", ""), last.getString("title", ""),
+                    last.getInt("accent", Look.ACCENT)));
+        }
     }
 
     @Override
@@ -138,6 +145,8 @@ public class ChatsActivity extends Activity {
     }
 
     private void open(String id, String title, int accent) {
+        getSharedPreferences("last", MODE_PRIVATE).edit()
+                .putString("chat", id).putString("title", title).putInt("accent", accent).apply();
         startActivity(Talk.intent(this, id, title, accent));
     }
 

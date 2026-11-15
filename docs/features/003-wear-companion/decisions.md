@@ -175,3 +175,15 @@
 - `Talk` shows "Buddy is speaking · <chat>" in its ongoing notification once the wait has ended and speech is still
   going, so the notification doesn't say "Waiting" while the watch talks.
 - New `watch_*` phone strings are English only; the other languages fall back to it (CONTRIBUTING, "Translations").
+
+## 2026-11-15 - Opening the watch app goes straight to the last chat (brief, last clarification)
+- Options: (a) a launcher-only trampoline activity; (b) `ChatsActivity.onCreate` starts `TalkActivity` itself when a last
+  chat is saved; (c) a tile.
+- Choice: (b). The last chat (id, title, accent) is kept in plain SharedPreferences `last`, written when a chat is tapped
+  in the list. `TalkActivity` already starts listening on a fresh open, and Back from it lands on the list, so no new
+  screen. Only a fresh create (`savedInstanceState == null`) redirects, so Android recreating the list doesn't. No saved
+  chat (first launch) shows the list as before. If the saved chat was deleted on the phone, the send fails with the
+  usual error; the list is one Back away.
+- Known limit: if the app's task is still alive, the launcher resumes whatever was on top (the talk screen, not
+  listening) instead of recreating the list; the mic button is there.
+- By: Coder (claude-sonnet-5-5)
