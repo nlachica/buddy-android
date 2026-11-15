@@ -5,3 +5,101 @@
 - Choice: ... because ...
 - By: <role/model or Nicholas>
 -->
+
+## 2026-11-15 - Every new setting is a `Scalar` row; families are Scalars built per item; the gate is untouched
+- Options: a `Setting` subclass per row; a generic Prefs key editor; 004's `Scalar` (getter, setter, choices) with
+  `check`/`card` overrides, and families built in `find()` like `chatSwitch`.
+- Choice: `Scalar` rows, as the orchestrator asked ("004's style, table-driven rows"). Every new control is a value
+  with choices and a screen-side rule, which a `check` override expresses (as `phone_commands` does for pairing).
+  Family factories take the item's get/set, which is the `Scalar` constructor's own shape, so JVM tests can drive the real
+  check, card and stale-write path with in-memory state. No new abstraction. `change()` stays as 004 has it.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - `Scalar` choices may be supplied lazily and match ignoring case (stored in the choice's spelling)
+- Options: fixed varargs choices only (004); a `Supplier<String[]>` read at check/list time; separate subclasses for
+  the dynamic rows.
+- Choice: a supplier, with the varargs constructor wrapping its array. Two rows need it: `audio_device` (the devices
+  connected now; mixed-case keys like `7:Galaxy Buds2`) and `download_server` (`custom` only once saved). It also
+  keeps `scalars(null)` from loading `CodexSpeech`, which creates a `Handler` when it loads. All of 004's choices are
+  lower case, so their behaviour doesn't change.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Named values for "nothing chosen" (`default`, `auto`); `""` keeps meaning delete / off the list
+- Options: accept `""` for the stored-empty choices; name them and map to `""` in the setter.
+- Choice: name them (`default_model`, `reviewer_model`, `live_agent`, `download_server` → `default`; `audio_device`
+  → `auto`), as 004 did with `app/<pkg> = default`. The gate reads a checked `""` as "delete" (old must be null for
+  "Already"), so `""` would always show a card. `""` stays the item value for delete or take off a list
+  (`button/…`).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Scope: the eight Settings pages plus the chat's "Allowed without asking"; not the chat's model, effort, keep-awake, incognito
+- Options: Settings pages only; plus the brief's named chat item; plus everything on the chat screen (research
+  suggested model, effort, keep-awake, incognito).
+- Choice: Settings pages plus `chat/<id>/allowed/<pkg>`. The brief's goal is "every setting on Buddy's Settings
+  pages", its non-goal "only what the Settings screens already offer", and it names only "a chat's 'Allowed
+  without asking'" from the chat screen. "Models" in its gap list means the Agents and models page (default models)
+  and the reviewer's models. The other chat-screen switches are one row each if Nicholas wants them (open question).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Settings that lower protection stay changeable, each on its card with the effect spelled out
+- Options: treat never-ask buttons, built-in words off, a chat's allowed apps and the reviewer as the approval gate
+  (read-only, like `phone_commands_ask`); allow them on the card.
+- Choice: allow them, each card naming the effect ("never ask; agents tap “Pay” without a card in every app"). This
+  is 004's stance for per-app trust and a rule's approval mode. None of them reaches the gate: the settings and
+  install cards come only from code, `Guard.offLimits`/`Ui.protect` run before any list (`Tools.java:1612`), never-ask
+  is skipped in rule runs (`:1623`), and `phone_commands_ask` stays the one read-only switch. Nicholas's ask is
+  "all the permissions … where Buddy can modify its own settings".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Download server: the presets, and switching back to a saved custom server; its address is never shown or set
+- Options: presets only; presets plus entering a custom address; presets plus `custom` when one is saved.
+- Choice: presets plus `custom` when the user has saved one, shown as `custom` only. `Mirrors.address` allows a
+  path, where a token can sit, so the address follows 004's MCP rule (no part of a stored address in any output).
+  Entering one stays the user's (non-goal 1). The setter repeats the screen: `setMirror`, then `Mirrors.apply` on a thread.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - API key services: on/off and the shown-models list are covered; keys, addresses, add/edit/remove are not
+- Options: exclude the whole API keys screen; on/off only (research's lean); on/off plus shown models.
+- Choice: `service/<id>` (on/off) and `service/<id>/models` (`all` or ids from the service's list). Neither is a
+  secret, and `Providers.save(…, null)` keeps the saved key untouched, so no non-goal excludes them, and the brief
+  asks for every such control. The listing shows the id, name and model counts, never a host, address or key (as
+  for MCP).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Voice languages are one setting: a comma-separated list whose first entry is the one Buddy listens for
+- Options: `voice_languages` + `voice_language_default` (two gestures on screen); one csv.
+- Choice: one csv. Prefs already documents "first = default". The setter writes the list and `setVoiceLang(first)`,
+  and the current value shows `voiceLang` first. One name means one card, and the change can't be left half done.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Setters repeat the screen's state changes, not its UI feedback; `theme` gains `Theme.changed`
+- Options: repeat each handler exactly (toasts, voice sample, sign-in screen); state changes only.
+- Choice: state changes only: `Mirrors.apply` and `Browser.install`/`stop` on their threads, `ChatHub.changed()`
+  after a default model, `Theme.changed(svc)` after theme/accent/surface, `svc.applyFace()`, and `Voice.stopSpeaking()`
+  after a voice or device change, so the next speech uses it. No toast, sample or screen opens from a service
+  call the user didn't make. 004's `theme` row gets the same `Theme.changed` (the screen's own call,
+  `SetupActivity:197`), so the bubble restyles at once.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Availability follows the screen: grey-outs become refusals; "save, then ask the user" becomes a note
+- Options: refuse everything the screen would need the user for; mirror the screen exactly.
+- Choice: what the screen greys out is refused with the reason and who fixes it (agent not signed in or without its
+  plan, Android < 12 for wallpaper, no saved picture, an app `Guard.allowable` rejects). What the screen saves and
+  then sends the user to fix (`pause_media` without notification access) is saved, with a note in the reply. Agents
+  for default models are the union of the two "Chats on Default" screens: signed in, or with a usable service.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Model values: listed options, or a typed name with no spaces (at most 200 characters); `@service/model` only when listed
+- Options: anything typed (the screen's text field); listed options only; listed or a plain typed name.
+- Choice: listed, or a plain typed name, as the picker's "other" field allows, minus spaces and an unlisted
+  `@service/…` that could point at a service the agent can't use. The reviewer gets no `@…` at all: its picker
+  offers no services (`services=false`).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Button rules are named `button/<package or *>/<label>`, values ask, allow or ""
+- Options: whole-list JSON per list; `button/<label>@<pkg>`; `button/<scope>/<label>` with a state value.
+- Choice: one item per button and scope, since a button is on one list at most (`Guard.addRule` enforces it). The scope comes first,
+  so a label may contain `/` or `@`. Set goes through `Guard.addRule`, and `""` removes the matching rule (by
+  `Guard.norm` label and package) from both lists. The snapshot is the list holding it, so a move or removal made
+  on the screen while the card is open is caught.
+- By: Planner (claude-opus-5-5)
