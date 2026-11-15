@@ -43,6 +43,11 @@ final class SettingsTool {
             this.allowed = allowed;
         }
 
+        /** What the setting accepts, for the listing and the refusal text. */
+        String allowed() {
+            return allowed;
+        }
+
         /** Everything the setting holds right now, to compare before and after the card; null when it doesn't exist. */
         abstract String get();
 
@@ -75,7 +80,7 @@ final class SettingsTool {
 
         /** The setting in full, for a read. */
         String read() {
-            return name + " = " + view(get()) + (allowed.isEmpty() ? "" : "  (" + allowed + ")");
+            return name + " = " + view(get()) + (allowed().isEmpty() ? "" : "  (" + allowed() + ")");
         }
     }
 
@@ -83,15 +88,24 @@ final class SettingsTool {
     static class Scalar extends Setting {
         private final Supplier<String> get;
         private final Consumer<String> set;
-        private final String[] values;
+        private final Supplier<String[]> values; // read when checked or listed: a device list, a saved server...
         private final String note;
 
         Scalar(String name, Supplier<String> get, Consumer<String> set, String note, String... values) {
-            super(name, String.join(", ", values));
+            this(name, get, set, note, () -> values);
+        }
+
+        Scalar(String name, Supplier<String> get, Consumer<String> set, String note, Supplier<String[]> values) {
+            super(name, "");
             this.get = get;
             this.set = set;
             this.values = values;
             this.note = note;
+        }
+
+        @Override
+        String allowed() {
+            return String.join(", ", values.get());
         }
 
         @Override
@@ -101,9 +115,9 @@ final class SettingsTool {
 
         @Override
         String check(String value) {
-            String v = value.trim().toLowerCase(Locale.ROOT);
-            if (!Arrays.asList(values).contains(v)) throw new IllegalArgumentException(name + " takes: " + allowed);
-            return v;
+            String v = value.trim();
+            for (String c : values.get()) if (c.equalsIgnoreCase(v)) return c; // stored in the choice's own spelling
+            throw new IllegalArgumentException(name + " takes: " + allowed());
         }
 
         @Override
