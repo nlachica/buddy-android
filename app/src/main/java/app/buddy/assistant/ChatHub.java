@@ -33,6 +33,8 @@ final class ChatHub {
     private final List<Listener> listeners = new ArrayList<>();
     private final List<Sessions.Session> viewing = new ArrayList<>();
     private String flash;
+    /** The chat whose reply the flash shows. */
+    private Sessions.Session flashChat;
     /** Receives buddy_procs / buddy_recent / buddy_transcript replies for the monitor screens. */
     interface MonitorListener {
         void onMonitor(JSONObject ev);
@@ -290,9 +292,11 @@ final class ChatHub {
         BuddyService svc = BuddyService.get();
         // only the user's own message lifts a Stop: a queued rule run must not undo it
         if (svc != null && prompt == null) svc.allowControl();
+        final int[] run = {-1}; // this run's id, once it has started
         try {
             // a rule's run works for someone else's message: no shell, files or web, even with Linux tools on
-            ask(ses, ses.id, ses.backend, rule ? "rule" : devArg(ses), forAgent,
+            Helper.run(app, code -> main.postDelayed(() -> helperGone(ses, run[0], code), HELPER_GONE_MS),
+                    "ask", ses.id, ses.backend, rule ? "rule" : devArg(ses), forAgent,
                     model(ses), hasFiles ? android.text.TextUtils.join(",", files) : "", ses.effort);
         } catch (Exception e) {
             return e.getMessage();
@@ -312,6 +316,7 @@ final class ChatHub {
         ses.status = app.getString(R.string.hub_thinking);
         changed();
         final int id = ses.runId;
+        run[0] = id;
         Providers.P lp = Providers.of(Models.effective(ses));
         final boolean local = lp != null && lp.local();
         final long giveUp = local ? LOCAL_GIVE_UP_MS : GIVE_UP_MS;
@@ -324,10 +329,38 @@ final class ChatHub {
         }, NO_RESPONSE_MS);
         main.postDelayed(() -> {
             if (ses.running && id == ses.runId && SystemClock.elapsedRealtime() - ses.lastEventAt >= giveUp - 100) {
-                fail(ses, app.getString(R.string.hub_no_answer));
+                failRun(ses, app.getString(R.string.hub_no_answer));
             }
         }, giveUp);
         return null;
+    }
+
+    /** After the helper process of a run ended, its last events get this long to arrive. */
+    private static final long HELPER_GONE_MS = 5000;
+
+    /**
+     * The helper that ran this chat's agent is gone. It says buddy_done however it ends, except when it is killed
+     * outright (Android freeing memory, Buddy's Linux crashing): then the chat stayed "working" for good, and a chat
+     * waiting for it as its sub-agent with it. The run ends here, as failed.
+     */
+    private void helperGone(Sessions.Session ses, int runId, int code) {
+        if (!ses.running || ses.runId != runId) return;
+        // the chat's earlier run is still going (this helper only said so): that run's own end ends the chat's work,
+        // and until then Stop must still reach it
+        if (code == Helper.BUSY) return;
+        failRun(ses, app.getString(R.string.hub_helper_gone));
+    }
+
+    /** The run is over without the helper's buddy_done: ended here as failed, with why and the agent's last error. */
+    private void failRun(Sessions.Session ses, String why) {
+        ses.running = false;
+        ses.status = "";
+        if (!sessions.all.contains(ses)) return; // deleted meanwhile: a message would bring the chat back
+        String err = lastError(ses);
+        add(ses, Bubble.Kind.ERROR, why + (err.isEmpty() ? "" : "\n\n" + ses.brainName() + ": " + err));
+        if (ses.outcome == null) ses.outcome = "failed";
+        runEnded(ses);
+        changed();
     }
 
     private static long read(JSONObject modelUsage) {
@@ -549,7 +582,7 @@ final class ChatHub {
         if (ses == null) return; // unknown chat (deleted, or started outside Buddy)
         ses.lastEventAt = SystemClock.elapsedRealtime();
         String type = ev.optString("type");
-        if (!ses.running && ses.outcome == null && (("system".equals(type) && !"model".equals(ev.optString("subtype"))) || "assistant".equals(type))) startRun(ses);
+        if (!ses.running && (("system".equals(type) && !"model".equals(ev.optString("subtype"))) || "assistant".equals(type))) startRun(ses);
         switch (type) {
             case "system":
                 if ("model".equals(ev.optString("subtype"))) { // Codex, after its turn (see buddy-run)
@@ -670,8 +703,8 @@ final class ChatHub {
                 break;
             }
             case "buddy_error": {
-                // the helper's own guess at why a run ended (buddy-run): dropped when the run already has an outcome
-                if (ev.optBoolean("fallback") && ses.outcome != null) break;
+                // the helper's own word on a run whose agent said nothing: not after the run said why itself
+                if (ev.optBoolean("quiet") && ses.outcome != null) break;
                 if (ses.outcome == null) ses.outcome = "failed";
                 String text = ev.optString("text", app.getString(R.string.hub_something_wrong));
                 add(ses, Bubble.Kind.ERROR, text);
@@ -679,7 +712,6 @@ final class ChatHub {
                 break;
             }
             case "buddy_stopped":
-                if (!ses.running && "failed".equals(ses.outcome)) break; // Buddy already ended it (the ceiling)
                 ses.outcome = "stopped";
                 add(ses, Bubble.Kind.STEP, app.getString(R.string.hub_stopped));
                 break;
@@ -703,7 +735,7 @@ final class ChatHub {
                     runEnded(ses);
                     if (!ses.lastReply.isEmpty()) {
                         Prefs.setHadReply(app);
-                        if (ses.parent.isEmpty()) flash(ses.lastReply);
+                        if (ses.parent.isEmpty()) flash(ses, ses.lastReply);
                     }
                     // what the user added but the agent never got (it made no phone action since): send it now
                     String left;
@@ -798,14 +830,17 @@ final class ChatHub {
 
     /** A note that arrived too late for the run: becomes the next message (already shown in the chat). */
     private void sendNoteAsMessage(Sessions.Session ses, String text) {
+        final int[] run = {-1}; // this run's id, once it has started (as in send)
         try {
-            ask(ses, ses.id, ses.backend, devArg(ses),
+            Helper.run(app, code -> main.postDelayed(() -> helperGone(ses, run[0], code), HELPER_GONE_MS),
+                    "ask", ses.id, ses.backend, devArg(ses),
                     "(Added while you were working; if it asks something, answer it:) " + text, model(ses), "", ses.effort);
         } catch (Exception e) {
             add(ses, Bubble.Kind.ERROR, e.getMessage());
             return;
         }
         startRun(ses);
+        run[0] = ses.runId;
         ses.status = app.getString(R.string.hub_thinking);
         changed();
     }
@@ -862,26 +897,45 @@ final class ChatHub {
     String pillText() {
         int n = runningCount();
         if (n > 0) {
-            Sessions.Session latest = null;
-            for (Sessions.Session s : sessions.all)
-                if (s.running && (latest == null || s.lastEventAt > latest.lastEventAt)) latest = s;
+            Sessions.Session latest = latestWorking();
             String st = latest == null || latest.status.isEmpty() ? app.getString(R.string.chat_working) : latest.status;
             return n > 1 ? app.getResources().getQuantityString(R.plurals.hub_pill_chats, n, n, st) : st;
         }
         return flash;
     }
 
+    /**
+     * The chat the pill's text is about (see pillText), or null: the working chat with the latest step (a sub-agent's
+     * step: the chat it works for), else the one whose reply shows.
+     */
+    Sessions.Session pillChat() {
+        Sessions.Session latest = latestWorking();
+        if (latest == null) return flash != null && sessions.all.contains(flashChat) ? flashChat : null;
+        Sessions.Session parent = latest.parent.isEmpty() ? null : sessions.find(latest.parent);
+        return parent != null ? parent : latest;
+    }
+
+    /** The working chat or sub-agent with the latest step: the one whose status the pill shows. */
+    private Sessions.Session latestWorking() {
+        Sessions.Session latest = null;
+        for (Sessions.Session s : sessions.all)
+            if (s.running && (latest == null || s.lastEventAt > latest.lastEventAt)) latest = s;
+        return latest;
+    }
+
     boolean anyUnread() {
         return sessions.anyUnread();
     }
 
-    private void flash(String reply) {
+    private void flash(Sessions.Session ses, String reply) {
+        flashChat = ses;
         final String text = Ui.linkText(reply).replace('\n', ' ');
         flash = text.length() > 60 ? text.substring(0, 59) + "…" : text;
         final String mine = flash;
         main.postDelayed(() -> {
             if (mine.equals(flash)) {
                 flash = null;
+                flashChat = null;
                 changed();
             }
         }, 8000);
@@ -889,31 +943,6 @@ final class ChatHub {
 
     /** After its run a background chat's screen stays this long (for a follow-up, or Show on my screen), then closes. */
     private static final long BACKGROUND_RELEASE_MS = 60_000;
-
-    /**
-     * Starts the helper for a chat's run. When the last of the chat's helpers is gone and the chat still shows
-     * working, the run is over: buddy-run says done itself, so this only happens when it was killed (feature 002).
-     */
-    private void ask(Sessions.Session ses, String... args) {
-        String[] full = new String[args.length + 1];
-        full[0] = "ask";
-        System.arraycopy(args, 0, full, 1, args.length);
-        Helper.run(app, () -> main.post(() -> {
-            if (--ses.asking == 0 && ses.running) fail(ses, app.getString(R.string.hub_agent_stopped, ses.brainName()));
-        }), full);
-        ses.asking++;
-    }
-
-    /** Ends a run as failed because Buddy gave up on it (no answer, the helper gone, the sub-agent ceiling). */
-    private void fail(Sessions.Session ses, String why) {
-        ses.running = false;
-        ses.status = "";
-        String err = lastError(ses);
-        add(ses, Bubble.Kind.ERROR, why + (err.isEmpty() ? "" : "\n\n" + ses.brainName() + ": " + err));
-        ses.outcome = "failed";
-        runEnded(ses);
-        changed();
-    }
 
     private void startRun(Sessions.Session ses) {
         ses.running = true;
@@ -925,17 +954,6 @@ final class ChatHub {
         Tools.runStarted(ses.id);
         StepLog.runStarted(app, ses);
         Prefs.setBusy(app, ses.id, true);
-        if (!ses.parent.isEmpty()) { // a sub-agent run has a ceiling: ended as failed, and its leftovers stopped
-            final int id = ses.runId;
-            main.postDelayed(() -> {
-                if (!ses.running || ses.runId != id) return;
-                fail(ses, app.getString(R.string.hub_helper_ceiling, Helpers.MAX_RUN_MS / 60_000));
-                try {
-                    Helper.run(app, "stop", ses.id);
-                } catch (Exception ignored) {
-                }
-            }, Helpers.MAX_RUN_MS);
-        }
     }
 
     /**

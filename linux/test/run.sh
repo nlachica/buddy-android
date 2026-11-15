@@ -16,14 +16,9 @@ mkdir -p "$H/bin"
 for t in jq cat sed sort paste find rm mv mkdir tail head grep awk pgrep wc tee ln basename readlink env timeout sleep; do
   p=$(command -v "$t") && ln -s "$p" "$H/bin/$t"
 done
-# Stand-ins for the run cases: a curl that keeps the events buddy-run posts (no listener, so the app's own port 8765 is
-# left alone), and one agent under all five names that dies the way $BUDDY_FAKE says.
-export EVENTS=$H/events BUDDY_FAKE_DIR=$H
-cat >"$H/bin/curl" <<'EOF'
-#!/bin/bash
-for a; do last=$a; done
-case $last in */event) { cat; echo; } >>"$EVENTS" ;; esac
-EOF
+# Stand-in for the run cases (the cases of feature 002): one agent under all five names that dies the way $BUDDY_FAKE says.
+# Events go to a file (buddy-run's BUDDY_TEST_EVENTS), so the app's own port 8765 is left alone.
+export BUDDY_TEST_EVENTS=$H/events BUDDY_FAKE_DIR=$H
 cat >"$H/agent" <<'EOF'
 #!/bin/bash
 case ${1:-} in inspect|--version) exit 0 ;; esac
@@ -31,16 +26,15 @@ echo $$ >>"$BUDDY_FAKE_DIR/pids"
 echo '{"type":"system","session_id":"abc"}'
 bg() { sleep 60 & echo $! >>"$BUDDY_FAKE_DIR/pids"; }
 case $BUDDY_FAKE in
-  orphan) echo '{"type":"result","subtype":"success","result":"ok"}'; bg ;;
+  orphan) bg ;;
   killed) bg; kill -9 $$ ;;
-  exit3) exit 3 ;;
   error) echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Rate limited"}'; exit 1 ;;
   agentterm) kill -TERM $$ ;;
   producer) bg; kill -9 $PPID; sleep 60 ;;
   hang) exec sleep 60 ;;
 esac
 EOF
-chmod +x "$H/bin/curl" "$H/agent"
+chmod +x "$H/agent"
 for a in claude codex opencode agy grok; do ln -s "$H/agent" "$H/bin/$a"; done
 
 update=${1:-}
@@ -72,9 +66,41 @@ for f in fixtures/*/*.jsonl; do
   rm -rf "$H/.buddy" "$H/.codex"
   check "$f" "${f%.jsonl}.expected.jsonl" "$got"
 done
+echo "$n fixtures, $failed failed"
 
-# The run cases. Processes are killed by pid, never with pkill -f: that also matches the live Buddy helpers on a phone.
+# Runs: the whole of a run, with a stand-in for Claude Code that ends badly. Whatever happens to the agent or to the
+# helper, the chat must hear buddy_done (and why, when the agent said nothing), and soon.
+for t in bash sleep wc pgrep tr readlink ln env date basename dirname cut awk ls touch chmod cp id; do
+  p=$(command -v "$t") && ln -sf "$p" "$H/bin/$t"
+done
+mkdir -p "$H/.local/bin"
+run() { # run <case> <seconds allowed> <what the stand-in does after its first line> → the events' types, in a line
+  local name=$1 allowed=$2 ev="$H/events-$1" start=$SECONDS
+  printf '#!%s\necho '"'"'{"type":"system","session_id":"abc"}'"'"'\n%s\n' "$H/bin/bash" "$3" > "$H/.local/bin/claude"
+  chmod +x "$H/.local/bin/claude"
+  : > "$ev"
+  HOME=$H BUDDY_TEST_EVENTS=$ev bash ../buddy-run test ask "run$name" claude 0 hi >/dev/null 2>&1 &
+  local pid=$!
+  if [ "$name" = term ]; then sleep 2; kill -TERM "$pid"; fi
+  wait "$pid" 2>/dev/null
+  took=$((SECONDS - start))
+  got=$(jq -r '.type + (if .quiet then ":quiet" else "" end)' "$ev" 2>/dev/null | paste -sd, -)
+  n=$((n + 1))
+  if [ "$got" = "$4" ] && [ "$took" -le "$allowed" ]; then echo "ok   run $name"
+  else echo "FAIL run $name: got '$got' in ${took}s, expected '$4' within ${allowed}s"; failed=$((failed + 1)); fi
+}
+run exit3 20 'exit 3' 'system,buddy_error:quiet,buddy_done'
+run killed 20 'kill -9 $$' 'system,buddy_error:quiet,buddy_done'
+run said 20 'echo "no credit left" >&2; exit 1' 'system,buddy_error,buddy_done'
+# what it started keeps its output open for a minute: the run ends when the agent does
+run orphan 20 '(sleep 60 &) ; exit 0' 'system,buddy_done'
+# the helper itself is stopped from outside mid-run
+run term 20 'sleep 60' 'system,buddy_done'
+
+# More run cases, on a stand-in that ends in more ways (feature 002): the agent killed on every backend, exit codes, an
+# agent's shell killed, the wrapper stopped. Processes are killed by pid, never with pkill -f: that also matches the live Buddy helpers on a phone.
 mkdir -p fixtures/run
+rm -rf "$H/.local" "$H/.buddy" "$H/events" # the cases above put their own claude in .local/bin, which comes first
 P=$H/.buddy/sessions/run/pid
 finish() { # <case> [problem]: compare the events, then kill what the agent left and clear the home
   [ -s "$H/pids" ] && kill -9 $(cat "$H/pids") 2>/dev/null
@@ -102,14 +128,12 @@ start_hang() { # a wrapper in the background on an agent that waits; ready when 
   return 1
 }
 
-run_case claude_orphan orphan claude
 for b in claude codex opencode agy grok; do run_case "${b}_killed" killed $b; done
-run_case claude_exit3 exit3 claude
 run_case claude_error error claude
 run_case claude_agentterm agentterm claude
 run_case claude_producer producer claude
 
-# TERM to the wrapper: it stops the agent, reports it was cut off, and says done
+# TERM to the wrapper: it stops the agent (not just the events: the agent must be gone) and says done
 start_hang || echo "the stand-in agent did not start"
 kill -TERM "$w" 2>/dev/null
 problem=""
@@ -117,22 +141,25 @@ gone "$w" 100 || { problem="the wrapper did not end"; kill -9 "$w" 2>/dev/null; 
 gone "$(head -1 "$H/pids" 2>/dev/null)" 20 || problem="the agent is still running"
 finish claude_term "$problem"
 
-# the run section killed (the process in the session's pid file): the wrapper still reports and says done
+# the run section killed (the process in the session's pid file): the wrapper still ends, and says done
 start_hang || echo "the stand-in agent did not start"
 kill -KILL "$(cat "$P")" 2>/dev/null
 problem=""
 gone "$w" 100 || { problem="the wrapper did not end"; kill -9 "$w" 2>/dev/null; }
 finish claude_runkill "$problem"
 
-# a session that is still working: the new request is refused with an error, and no done (the run in progress owns it)
+# a session that is still working: the new request is refused with an error and exit status 75 (Helper.BUSY), and no
+# done (the run in progress owns it)
 mkdir -p "${P%/pid}"
 (sleep 60 >/dev/null 2>&1 & echo $! >"$P")
 busy=$(cat "$P")
 problem=""
 HOME=$H BUDDY_FAKE=orphan timeout 5 bash ../buddy-run test ask run claude 0 hi >"$H/out" 2>&1
-[ $? = 124 ] && problem="timed out"
+rc=$?
+[ "$rc" = 124 ] && problem="timed out"
+[ "$rc" != 75 ] && [ "$rc" != 124 ] && problem="exit status $rc, not 75"
 kill -9 "$busy" 2>/dev/null
 finish claude_busy "$problem"
 
-echo "$n fixtures and cases, $failed failed"
+echo "$n fixtures and runs, $failed failed"
 [ "$n" -gt 0 ] && [ "$failed" -eq 0 ]
