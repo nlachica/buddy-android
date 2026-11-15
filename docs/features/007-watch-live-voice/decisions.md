@@ -132,3 +132,23 @@
   stays while any watch call is on or any run is tracked. Otherwise chat A, already untracked, would stay muted on the
   phone with nothing left to clear it.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Coder: details the plan left open
+- Options / Choice (all small, none changes the design):
+  - `Speaker` (watch): a live call that is over 1 s behind drops the **newest** audio (non-blocking `AudioTrack.write`,
+    1 s track) instead of flushing the old: no playback-head rebasing, same bound. "Audible now" is the last audible
+    block's play-out time (write time + the track's lag), not 300 ms after its write, so the call's half-duplex gate
+    (+300 ms) covers audio still queued in the track. At EOF the Speaker lets the buffered audio play out before it
+    reports `eof`; on a break (`closed`) it stops at once.
+  - `PcmOut` takes its stream late (`attach(OutputStream, Closer)`) so audio written while the channel opens waits in
+    its queue; it has no header (the header is the watch's, on the other direction). `broken()` lets the owner fail it
+    (the channel never opened). A reply's channel callback is one `ChannelCallback` registered on first use and keyed by
+    the channel path.
+  - `TAP_JS` is `tap(ctx, stream, on)`: `on()` decides per block whether to forward, so CodexSpeech's page flips it with
+    `route()` and CodexLive's is always on. The page's `<audio>` is muted (not `volume = 0`) as the plan says; Risk 2's
+    fallback is unchanged and unexercised (needs a device).
+  - CodexSpeech: `current` stays set until the item has been read and has gone quiet (a `read` flag replaces
+    `current == null` as "text read"), so `cancel(sink)` and the tap can find the item.
+  - Watch `Call`: state for the screen is static (like `Talk`); the newest `start()` closes the older `Run` before it
+    publishes its own, so `onStartCommand` only has to begin `current`.
+- By: Coder (claude-sonnet-5-5)
