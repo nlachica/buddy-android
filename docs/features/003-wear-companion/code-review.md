@@ -57,3 +57,23 @@ F1: fixed in 0f99d6a. `Phone.send` takes a `BooleanSupplier valid` and asks it i
 F2: fixed in 0f99d6a. `ttsInit` calls `maybeStop()` after draining and clearing `early`, so a refused enqueue with no later callback stops the service at once (text stays on screen).
 
 Checked: `check-wear.sh`, `check-github-link.sh` (android.jar + hand-written Play services stubs) and `check.sh` for fdroid and github (build.sh steps 1-3) compile; the phone Java is untouched this round. The discovery-order and reply-before-init/done/rejected-enqueue cases are device behaviour, left to the Verifier (no watch unit tests in the repo). Compile against the real Play services artifacts is CI's.
+
+## Round 3 - Code Reviewer (gpt-6-astra)
+
+Reviewed `main...HEAD` at `7b31ed7`, the brief, plan, decisions, earlier review rounds and Coder responses, and the touched implementation, resources, manifests, build configuration and documentation. This final round reports only blocker/major findings, as instructed by the orchestrator. No blocker or major finding remains open.
+
+Prior findings:
+- Round 2 F1 is resolved: `Phone.send` checks the supplied request validity after discovery and immediately before `sendMessage`. Talk's initial send and status poll supply `active(mine)`; the chat list supplies `live(mine)`. A deterministic harness using the unchanged current production `Phone.java` and controllable Task fakes passed both delayed-discovery cases: timeout sends nothing; replacement sends nothing for the obsolete request and sends exactly once for the current request. This directly checks the previously reproduced race without requiring a device.
+- Round 2 F2 is resolved by the `maybeStop()` after `ttsInit` drains and clears `early`. In the previously reported done-before-init/rejected-enqueue path, both queues are now empty when cleanup is checked. This conclusion is from control-flow inspection; actual TTS lifecycle behavior still needs device verification.
+- The round 1 fixes remain in place: status acknowledgments do not redraw/reset the screen deadline, initial response deadlines are armed before dispatch, and hushing clears buffered speech.
+
+Validation and done-when coverage:
+- `bash linux/test/run.sh`: 28 fixtures/cases, 0 failures. These cover the existing helper, not the new watch lifecycle.
+- Compiled all current Wear Java and GitHub phone/link Java with `javac --release 8`, Android 36's real `android.jar`, generated resource classes, and the real Play services wearable/base/basement/tasks JARs retained from round 1: both passed. Compilation and the discovery-race harness outputs are under `/tmp/wear-review-r3-amt6gn4i/`.
+- `git diff --check main...HEAD` reports only the previously recorded trailing whitespace in feature research/verification documents. No style finding raised.
+- The implementation covers the planned chat list, recognizer path A, typed-message dispatch, reply display/speech, foreground wait and reachability handling. The phone's relay and queued-note continuation, speech/notification suppression, GitHub-only source set, Wear module and CI artifact changes fit the approved scope. No additional major security, privacy, YAGNI or convention issue identified.
+- `verify.md` still has no evidence. Done-when 1 requires a green full Gradle/CI build, matching APK signing certificates and Watch4 installation; 2-4 require the planned recognizer, busy-chat continuation, TTS, locked-phone and wrist-down/lost-link tests; 5 requires F-Droid APK isolation and reproducibility checks; 6 still needs watch screenshots. Java compilation and the local callback harness do not establish these device/APK results. These remain Verifier gates; this verdict approves the code review stage, not shipment or completion of those checks. The recorded path-A decision and signing/migration gates are unchanged.
+
+Only this review document was modified in the repository.
+
+VERDICT: APPROVE
