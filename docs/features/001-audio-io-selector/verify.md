@@ -15,9 +15,15 @@ Phone: S21 FE (SM-G990W), Galaxy Watch4 connected.
 | 5. Auto unchanged, cleanup | After tests: `mode: NORMAL`, Buddy route off, comm device back to earpiece (probe status line) | pass |
 | 6. CI | Fork run 43684188418: helper-tests ✓, assembleGithubRelease/assembleFdroidRelease ✓ (lintVital); only "F-Droid APK is reproducible" fails because the fork has no signing secrets (unsigned APK has no META-INF), same on 002 | pass (env limit noted) |
 
-Note (watch): `dumpsys bluetooth_manager` shows the Watch4 connected with HEADSET policy allowed, but no active
-hands-free (HFP) connection (no HeadsetStateMachine for it), so Android doesn't offer it in
-getAvailableCommunicationDevices() and no app can route to it then. When Android does connect it as a headset it
-appears automatically (key = type:name), per design.
+Note (watch), checked on device 2026-11-15: Settings → Bluetooth shows "Nicholas's Watch4 · Connected for calls",
+yet Android's audio policy lists no Bluetooth SCO device at all (`dumpsys media.audio_policy`, available outputs:
+Earpiece, Speaker, Telephony Tx; inputs: built-in mics only), and `getAvailableCommunicationDevices()` returns only
+Phone and Speaker. Samsung handles watch calls through its own call relay, not as a standard hands-free audio device,
+so no app (Buddy included) can route its own audio to the Watch4. Platform limit, not a code gap: any real headset
+(e.g. Buds2, a car kit) that Android exposes appears in the list automatically (key = type:name).
 
-VERDICT: pending (watch path unverified)
+Not exercised on device (needs the fork installed in place of the official app): the Settings row and voice-bar chip
+UI themselves, the live-voice WebView path, reconnect/fallback, AutoPause. These are covered by plan + 2 Codex code
+reviews (isolated harness for the Auto transition) and should be re-checked when Nicholas switches to the fork.
+
+VERDICT: SHIP (with the watch limitation documented; device checks of the UI pending the switch to the fork)
