@@ -93,3 +93,11 @@ the case timeout. On main's helper it misses the error: the reviewer's reproduct
 for the system event, so neither case can race the first event. App half: walkthrough (g) in the Test plan (the
 fallback lands while `outcome` is null, so it shows and sets "failed", then done ends the run failed and releases the
 parent). `claude_producer` and `claude_term` stay as they are.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No open blocker or major findings. The round 2 response closes the recorded-run-wrapper failure path: the run section explicitly exits 0 after handling its outcome, and the outer wrapper checks its wait status and sends the cut-off fallback before the EXIT trap sends done (`plan.md:66-80,87-98`). Isolated checks using the proposed relay and wait-status handling produced exactly error then done for a SIGKILLed run section, a `set -u` abort, and a killed producer with a descendant holding stdout; each completed within 0.2 seconds. A normal section ending with explicit `exit 0` produced done without an error. Scratch processes were cleaned up; no live chat was touched.
+
+Checked the remaining changes against the launch, event, completion, and parent-wait code. The plan retains single ownership of done for busy rejection, tracks both ask launch paths, prevents late events from restarting failed runs, and arms the sub-agent ceiling at the shared `startRun` point. Earlier findings are addressed, and the test plan covers the brief's done-when items. Approval is of the plan; implementation, regression tests, and CI verification remain required.
+
+VERDICT: APPROVE
