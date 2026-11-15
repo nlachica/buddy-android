@@ -61,3 +61,22 @@ VERDICT: REVISE
 - F2: fixed in 0584532. `hangUp()` is now `synchronized` on the class lock, the same one `startCall` publishes under and `close()` clears under (re-entrant). The worker either publishes first and has its id retired and cleared, or finds `web != page` and publishes nothing. Phone-only reuse (`fail()`, watchdog) doesn't go through `hangUp()` and is unchanged.
 
 **Tests:** none run, same as round 1: no Android SDK here and `javac` doesn't start (PaX). CI compiles after push; the orderings still need the Verifier's device run. I did not repeat the reviewer's stub harnesses.
+
+## Round 3 - Code Reviewer (gpt-6-astra)
+
+Reviewed `main...0cedf01db203aacae38f3abb1bc6f725bc2d313e`, the touched implementation and tests, brief, plan, decisions and earlier review/coder responses. This final round reports only blocker/major findings, as instructed. No blocker or major finding remains open.
+
+- Round 2 F1 is addressed: `Speaker.sounded()` remains false when the first audio write fails or accepts zero bytes. After the reader has finished, `Talk.streamEnded()` releases an unsuccessful claim under the same reply lock and takes the existing TTS fallback path. The exclusive claim still prevents a competing fallback from writing audible output through both voices.
+- Round 2 F2 is addressed: `CodexSpeech.hangUp()` now holds the class lock throughout retirement, clearing the reusable thread id, and invalidating the page/session. Publication either precedes retirement and is retired, or observes the obsolete page and returns. The ordinary phone-only reuse path remains unchanged.
+- Earlier fixes remain in place: channel-close fallback exits its mutating iteration, stale delayed call headers are rejected before starting a call, microphone read errors take identity-checked cleanup, and both phone audio-route calls are excluded for remote calls.
+
+Validation and coverage:
+
+- Exact-head [CI run 43775991469](https://github.com/nlachica/buddy-android/actions/runs/43775991469) succeeded: helper tests, GitHub unit tests, GitHub/F-Droid/watch release builds, no-Google-code check and F-Droid reproducibility.
+- Independently compiled the current `PcmOut.java` and `PcmOutTest.java` with Java 17 and ran JUnit: **8 tests passed**.
+- Temporary harnesses outside the repository (`/tmp/review007-r3-yrogqnlv`) compiled the current Speaker and CodexSpeech against Android stubs. Speaker checks passed for a negative first write, a zero-byte first write, successful audio acceptance, and a denied claim causing no audio writes. Code inspection confirmed Talk consumes the resulting `sounded` flag only after the reader ends; these checks do not execute Android TTS or prove physical playback.
+- The retirement harness exercised the actual `startCall()` publication while cancellation waited for the class lock, then checked that cancellation cleared and retired that id. A subsequent stale start was rejected, the replacement used a fresh id, and an old closed event was ignored. Cancelling a queued watch item also preserved a queued phone item and its page. These are local lifecycle checks, not device/WebRTC tests.
+- Done-when 1 and 2 still need the plan's device verification: locked-phone/throughput gate, call replacement and cleanup, once-only fallback, ordered playback, and phone voice regressions. `verify.md` remains empty. Done-when 3's battery/latency estimate or measurement must be recorded there. Done-when 4 has passing CI/F-Droid evidence; the 003/006 device regressions remain for the Verifier. Code approval does not establish these device outcomes or complete the feature's verification gate.
+- No additional blocker/major security, data, scope or convention issue found. Google-dependent code remains confined to the GitHub source set; the shared PCM helpers and per-item routing fit the approved plan without an additional abstraction.
+
+VERDICT: APPROVE
