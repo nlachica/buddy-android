@@ -133,3 +133,16 @@
 - Choice: (a). A queued note's run gets its ceiling too, and so does any future start path. Still 30 minutes,
   keyed to that run's `runId`, and still fail now, then "stop".
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The wrapper checks how the run section ended: it ends with `exit 0`, and any other wait status sends the cut-off fallback (review round 2 F1)
+- Options: (a) an explicit `exit 0` closes the run section; the wrapper keeps `wait "$RUN"`'s status and, if it is
+  non-zero, sends `cut_off()` (the TERM trap's fallback, now a function with two uses) before the EXIT trap's done;
+  (b) move the error rule into the wrapper, with `status` and `name` passed through files; (c) leave it (the
+  round 1 plan, where killing the pid in `$S/pid` ended the run as a success).
+- Choice: (a), two lines and no new files. A non-zero status means the section never reached its error rule
+  (killed: 137 or 143; `set -u` abort: 1). The existing app-side drop of fallbacks when the run already has an
+  outcome covers Stop ("stopped") and an error already reported ("failed"). The outer TERM trap `exit`s before
+  the check runs, so "cut off" is still sent once. Prototyped on the phone: SIGKILL of the `$S/pid` process and a
+  `set -u` abort each gave system, fallback, done. A failing last command followed by `exit 0` gave no error.
+  Proven by the new `claude_runkill` case.
+- By: Planner (claude-opus-5-5)

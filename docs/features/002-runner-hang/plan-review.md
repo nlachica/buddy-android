@@ -70,3 +70,26 @@ error rule when that file exists. On the phone, 5 of 5 runs gave exactly "cut of
 F1 [major] Killing the recorded run wrapper still reports successful completion - The revised supervisor catches death of `run_x`, but the enclosing run subshell remains another failure boundary. `plan.md:61` retains `wait "$RUN"` without checking its status, and `plan.md:59` makes the outer EXIT trap send only `buddy_done`. The process recorded in `$S/pid` is that enclosing subshell (`linux/buddy-run:921,994-998`), which also owns the error-classification code (`:989-993`). Killing it bypasses that code; its failed wait is then discarded by the outer wrapper. Reproduced in an isolated scratch run using the current script with the planned relay, EXIT trap and `RUN`/wait changes, a fake Claude that emits a system event then sleeps, and local event capture: SIGKILL to the pid from the session pid file made the outer wrapper exit 0 with exactly `system`, `buddy_done`, and no `buddy_error`. No real chat or agent was touched; the isolated process group was cleaned up. The proposed app callback cannot repair this: `buddy_done` has already cleared `running` (`ChatHub.java:703-707`; `plan.md:95-100`), so the interrupted run is reported as successful and its parent receives no failure. This is a separate wrapper-death path from round 1 F2's producer-shell death, and violates the failed-run/error requirement in `brief.md:28-30,43-44`. -> Capture and classify the enclosing run subshell's wait status before emitting done, reporting a fallback error for unexpected termination. Preserve the existing fallback suppression for explicit Stop and avoid duplicating the outer TERM trap's error. Add a regression that kills the pid actually stored in `$S/pid`, requiring bounded error + done and a failed app outcome; keep the existing producer-shell and outer-wrapper cases too.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - the wrapper now checks how the run section ended. The run section (`( … ) &`) gets an explicit
+`exit 0` as its last line, so every normal end gives 0: a finished or failed agent, a "not installed" exit, a `curl`
+that failed on its last event. Any other status means it never reached its end: its pid in `$S/pid` was killed
+(137 on SIGKILL, 143 on TERM) or it aborted (`set -u`: 1). After `) &`:
+`RUN=$!; echo "$RUN" > "$S/pid"; wait "$RUN" 2>/dev/null; rs=$?; rm -f "$S/pid"; if [ "$rs" -ne 0 ]; then cut_off; fi`.
+`cut_off()` is the TERM trap's existing "The run was cut off: Buddy's helper in Linux was stopped." fallback, now a
+function next to `fallback_error` because it has two uses (it also removes the `'\''` quoting from the trap). Then
+the EXIT trap sends done. No new suppression is needed. Explicit Stop: `stop` TERMs that pid, so 143 gives the
+fallback, and the app drops it because `outcome` is already "stopped". The outer TERM trap: it `exit`s inside the trap,
+so the line after `wait` never runs and "cut off" is still sent once (`claude_term` stays deterministic). A run section
+that reported an error and was killed before its `exit 0`: the app drops the second fallback (`outcome` "failed").
+Prototyped on the phone (a scratch copy of the structure with a file for `post`, killed by pid). SIGKILL of the
+`$S/pid` process gave `system`, the cut-off fallback, then `buddy_done`. A `set -u` abort in the run section gave
+the same. A failing last command followed by `exit 0` gave `system`, then done, with no error. New harness case
+`claude_runkill`: the fake agent runs `hang`, the harness waits for the system event and `$S/pid`, then
+`kill -KILL "$(cat "$H/.buddy/sessions/run/pid")"`. It expects the system line, the cut-off fallback and done within
+the case timeout. On main's helper it misses the error: the reviewer's reproduction. `claude_term` uses the same wait
+for the system event, so neither case can race the first event. App half: walkthrough (g) in the Test plan (the
+fallback lands while `outcome` is null, so it shows and sets "failed", then done ends the run failed and releases the
+parent). `claude_producer` and `claude_term` stay as they are.

@@ -1,6 +1,6 @@
 # Plan: 002-runner-hang
 <!-- Planner writes: Goal, Design, Steps, Test plan, Risks, Open questions -->
-<!-- Revised after plan review round 1 (F1-F5, see plan-review.md). -->
+<!-- Revised after plan review round 1 (F1-F5) and round 2 (F1), see plan-review.md. -->
 
 ## Goal
 A dead or killed agent, on any backend, must never leave a Buddy chat stuck in "working", and must never leave
@@ -54,17 +54,30 @@ ends that run; for a top-level chat, Stop does (`kill_tree` from the pid file ta
 - `fallback_error()` goes next to `event()` (`:266`):
   `jq -cn --arg text "$1" --arg s "$SID" '{type:"buddy_error",text:$text,fallback:true,buddy_session:$s}' | post`.
   It is the helper's own account of how a run ended. The app shows it only if the run reported no error and
-  wasn't stopped (C).
+  wasn't stopped (C). Next to it:
+  `cut_off() { fallback_error "The run was cut off: Buddy's helper in Linux was stopped."; }`. It has two uses: the
+  TERM trap, and the wait check below.
 - The traps go right **after** the busy check (`:269-272`), before the API-key check:
   `trap 'event buddy_done' EXIT`, and
-  `trap '[ -n "${RUN:-}" ] && { touch "$S/cut-off"; kill_tree "$RUN"; rm -f "$S/pid"; }; fallback_error "The run was cut off: Buddy'\''s helper in Linux was stopped."; exit 1' TERM INT HUP`,
-  then `rm -f "$S/cut-off"`. After `) &` comes `RUN=$!; echo "$RUN" > "$S/pid"; wait "$RUN"`. The run section
-  skips its own error rule when `$S/cut-off` exists. It can reach that rule only after `kill_tree` has started, so
-  the trap's error is the only one, and `claude_term` is deterministic. Otherwise the run section could also report
-  the TERM it gets, racing the trap. The last line `event buddy_done` (`:998`) goes away. Every exit after the traps sends done exactly once: the normal end, the "API key no longer in Buddy"
-  exit (`:276`, which sends no done today), a `set -u` abort, and a TERM (the agent's tree is stopped, then error,
-  then done; prototyped). The test hook (`:914`) gets `trap - EXIT` so fixture output is unchanged. `( … ) &` and
-  the pipeline subshells don't inherit the EXIT trap (checked).
+  `trap '[ -n "${RUN:-}" ] && { touch "$S/cut-off"; kill_tree "$RUN"; rm -f "$S/pid"; }; cut_off; exit 1' TERM INT HUP`,
+  then `rm -f "$S/cut-off"`. The run section skips its own error rule when `$S/cut-off` exists. It can reach that
+  rule only after `kill_tree` has started, so the trap's error is the only one, and `claude_term` is deterministic.
+  Otherwise the run section could also report the TERM it gets, racing the trap.
+- *The wrapper checks how the run section ended* (review round 2). The run section gets an explicit `exit 0` as its
+  last line, so every normal end gives 0: a finished or failed agent, a "not installed" exit, a last `post` whose
+  `curl` failed. After `) &`:
+  `RUN=$!; echo "$RUN" > "$S/pid"; wait "$RUN" 2>/dev/null; rs=$?; rm -f "$S/pid"; if [ "$rs" -ne 0 ]; then cut_off; fi`.
+  A non-zero `rs` means the run section never reached its end and its error rule never ran: the pid in `$S/pid` was
+  killed (137, or 143 on TERM) or the section aborted (`set -u`, 1). Explicit Stop TERMs that pid, and the app drops
+  the fallback because the outcome is "stopped". On a wrapper TERM, the trap `exit`s, so this line never runs. If the
+  section had already reported an error, the app drops the second error (outcome "failed"). Prototyped on the phone
+  with a scratch copy of the structure: SIGKILL of the `$S/pid` process gave system, cut-off fallback, done. A
+  `set -u` abort gave the same. A failing last command followed by `exit 0` gave system, then done.
+- The last line `event buddy_done` (`:998`) goes away. Every exit after the traps sends done exactly once: the normal
+  end, the "API key no longer in Buddy" exit (`:276`, which sends no done today), a `set -u` abort, a kill of the run
+  section (cut-off error, then done), and a TERM (the agent's tree is stopped, then error, then done; prototyped).
+  The test hook (`:914`) gets `trap - EXIT` so fixture output is unchanged. `( … ) &` and the pipeline subshells
+  don't inherit the EXIT trap (checked).
 - The busy branch stays as it is: the "still working" error, then `exit 0` with no done and no wait. The run still
   in progress owns the chat's done (review F5). Today's "Tap Stop first" flow is kept by the app's helper count (C).
 - Error rule (replaces `:989-993`). Classification is by the agent's exit status only. 0 means finished, even with
@@ -81,6 +94,7 @@ ends that run; for a top-level chat, Stop does (`kill_tree` from the pid file ta
     if [ -s "$S/last-error.log" ] && [ "$status" -ne 143 ]; then event buddy_error "$name failed: $why"
     else fallback_error "$name failed: $why"; fi
   fi
+  exit 0   # the wrapper reads any other status as "this section was cut short"
   ```
   Stderr text with a status other than 143 is reported as today. Every other failure is a fallback: an empty
   stderr (Claude Code may exit 1 after its own error result, which the app then doesn't repeat) and any 143 (Stop
@@ -133,7 +147,7 @@ ends that run; for a top-level chat, Stop does (`kill_tree` from the pid file ta
   `running` and calls `runEnded` (which closes the sub-agent's screen), and nothing turns it back on (F4). The
   parent's own hang is fixed by A and B, and when the parent ends, `await` stops its helpers.
 - *No N-minute idle timer.* "No event for N minutes and no live pid" is covered in two places. While the helper is
-  alive, A and B catch a dead agent or a killed `run_x` shell, then report error + done. When the helper itself is
+  alive, A and B catch a dead agent, a killed `run_x` shell or a killed run section, then report error + done. When the helper itself is
   gone, the exit callback ends the run at once (N = 0). An idle limit while the helper is alive would end legitimate
   silent stretches: 10-minute tool calls, and local models that can take 15 minutes (research, Constraints). The
   one-shot give-up timer stays as it is.
@@ -154,6 +168,8 @@ Alternatives considered:
 - A busy-rejected `ask` that waits for the old run before it sends done (round 0): that is a second, unowned done
   (F5).
 - The exit callback keyed to `runId` (round 0): restarts and busy rejections detach it (F4, F5).
+- Move the error rule into the outer wrapper so a killed run section can't skip it (round 2): `status` and `name`
+  would have to cross the subshell through files. The `exit 0` plus wait status needs two lines.
 
 ## Steps
 1. **Regression harness, red first.** `linux/test/run.sh` and `linux/test/fixtures/run/*.expected.jsonl`.
@@ -175,9 +191,12 @@ Alternatives considered:
      timeout, sleep, as needed).
    - Cases, each `bash ../buddy-run test ask run <backend> 0 hi` with `HOME=$H` under `timeout 20` (a timeout is a
      FAIL): `claude_orphan`, `<backend>_killed` for all five backends, `claude_exit3`, `claude_error`,
-     `claude_agentterm`, `claude_producer`, `claude_term`, `claude_busy`. `claude_term` uses `hang`: the wrapper runs
-     in the background, the harness waits up to 10 s for the agent pid, sends `kill -TERM` to the wrapper, and
-     `wait`s. It also FAILs if the agent pid is still alive. `claude_busy` writes the pid of a background
+     `claude_agentterm`, `claude_producer`, `claude_term`, `claude_runkill`, `claude_busy`. `claude_term` and
+     `claude_runkill` use `hang`: the wrapper runs in the background, and the harness waits up to 10 s for the system
+     event in `$EVENTS` and for `$H/.buddy/sessions/run/pid`, so neither case races the first event. `claude_term`
+     then sends `kill -TERM` to the wrapper, `wait`s, and also FAILs if the agent pid is still alive.
+     `claude_runkill` sends `kill -KILL` to the pid read from that pid file (the run section, review round 2) and
+     `wait`s for the wrapper. `claude_busy` writes the pid of a background
      `sleep 60` to `$H/.buddy/sessions/run/pid` first, and FAILs unless the wrapper exits within 5 s.
      The events go through `jq -S -c` and are compared with `fixtures/run/<case>.expected.jsonl`. After each case,
      kill the pids in `$BUDDY_FAKE_DIR/pids` and clear `$H/.buddy $H/.claude $H/.gemini $H/.grok $EVENTS`. Kill
@@ -186,13 +205,15 @@ Alternatives considered:
      then `{"type":"buddy_error","fallback":true,"text":"Claude Code failed: it was killed (signal 9).",…}`, then
      `buddy_done`. `claude_exit3` ends with "…it exited with status 3." `claude_error` has the result line, then the
      fallback "…it exited with status 1." `claude_agentterm` ends with "(signal 15)". `claude_producer` ends with
-     "(signal 9)". `claude_term` has the "cut off" fallback, then done. `claude_busy` is the "still working"
+     "(signal 9)". `claude_term` and `claude_runkill` have the system line, the "cut off" fallback, then done.
+   `claude_busy` is the "still working"
      `buddy_error` alone (no `fallback`, no done). Backends whose stream drops the system line just have no event
      for it. On the current helper the run cases fail (timeouts, or a missing error or done). That is the
      reproduction evidence for done-when 1.
 2. **Stream ends when the agent or its shell exits.** `linux/buddy-run`: add `until_exit` and wrap the 11 call sites.
-3. **Done always, error whenever the agent failed.** `linux/buddy-run`: `fallback_error()`; the EXIT and
-   TERM/INT/HUP traps after the busy check (the busy branch itself unchanged), with the `cut-off` marker; `RUN=$!`; removal of the last
+3. **Done always, error whenever the agent failed.** `linux/buddy-run`: `fallback_error()` and `cut_off()`; the EXIT and
+   TERM/INT/HUP traps after the busy check (the busy branch itself unchanged), with the `cut-off` marker; `RUN=$!`;
+   the `exit 0` that ends the run section and the wait check (`rs`) after it; removal of the last
    `event buddy_done` (the pid file is still removed before done goes out, as today, so a note sent right after
    done isn't refused as "still working"); `trap - EXIT` in the test hook; the new error rule; and
    `HELPER_VERSION=31`. After this step, `bash linux/test/run.sh` passes, the stream fixtures included.
@@ -208,8 +229,8 @@ Alternatives considered:
 | Done-when | Proof |
 |---|---|
 | 1 Reproduced | research.md, Reproduction 1-4 (exit 3, kill -9, orphan holding the pipe, TERM to the wrapper). The Verifier also runs the new `run.sh` against main's `buddy-run` (a scratch worktree of `main` with the new `linux/test/` copied in): the run cases time out or miss events. The result goes in verify.md. |
-| 2 buddy-run error+done, every backend | `run.sh` cases: `<backend>_killed` for all five backends (kill -9 with an orphan holding stdout gives a fallback error, then done, with no hang); `claude_producer` (run_claude's shell is SIGKILLed while the agent holds stdout, and error + done still arrive in bounded time); `claude_exit3` and `claude_agentterm` (a non-zero exit with empty stderr, and a TERM that isn't a Stop, both give an error); `claude_error` (after the agent's own error result, the helper's error carries `fallback`); `claude_orphan` (a clean exit gives done and no error); `claude_term` (wrapper TERM gives error, then done, and the agent is gone); `claude_busy` (a rejected `ask` sends no done). INT and HUP share the TERM trap line (reviewed by reading it; optionally `kill -HUP` by hand). The retry call sites use the same `until_exit` (reviewed by reading them). |
-| 3 App ends a run whose helper is gone; sub-agent end releases parent | CI `apk` job compiles. The Code Reviewer traces these orders against the code (no Java test setup exists): **(a)** normal end: done, then the callback: `running` is already false, so it does nothing. **(b)** give-up fails the run, then a late `system` event (`outcome` is "failed", so no `startRun`), then the wrapper is SIGKILLed: callback, `asking` = 0, not running, so the run stays failed and the parent's `await` has already returned. **(c)** ceiling: `fail` + "stop", then a late `assistant` event (no restart), then `buddy_stopped` (guard: stays "failed", no "Stopped."), then the 143 fallback error (dropped: outcome set), then done (ignored: not running), then the callback (no-op). **(d)** busy rejection: an old run that the give-up ended is still alive, and the user sends: `startRun` (running) and `asking` = 2. The rejected helper sends the error and exits: `asking` = 1, still running, Stop shown. The old run's done ends it; the old helper exits: `asking` = 0, no-op. **(e)** queued note: done of run 1, then `sendNoteAsMessage` (`asking` + 1, run 2), then run 1's helper exits: run 2 stays running until its own done. **(f)** user Stop: `outcome` "stopped", so the run's 143 fallback is dropped. If the orchestrator OKs installing a build on the phone: `kill -9` a chat's outer `buddy-run` (by pid), and the chat shows "<agent> stopped." within seconds. Do the same to a sub-agent's helper, and the parent's `subagents` wait returns with that sub-agent reported as failed. |
+| 2 buddy-run error+done, every backend | `run.sh` cases: `<backend>_killed` for all five backends (kill -9 with an orphan holding stdout gives a fallback error, then done, with no hang); `claude_producer` (run_claude's shell is SIGKILLed while the agent holds stdout, and error + done still arrive in bounded time); `claude_exit3` and `claude_agentterm` (a non-zero exit with empty stderr, and a TERM that isn't a Stop, both give an error); `claude_error` (after the agent's own error result, the helper's error carries `fallback`); `claude_orphan` (a clean exit gives done and no error); `claude_term` (wrapper TERM gives error, then done, and the agent is gone); `claude_runkill` (SIGKILL of the pid in `$S/pid`, the run section, gives the cut-off error, then done); `claude_busy` (a rejected `ask` sends no done). INT and HUP share the TERM trap line (reviewed by reading it; optionally `kill -HUP` by hand). The retry call sites use the same `until_exit` (reviewed by reading them). |
+| 3 App ends a run whose helper is gone; sub-agent end releases parent | CI `apk` job compiles. The Code Reviewer traces these orders against the code (no Java test setup exists): **(a)** normal end: done, then the callback: `running` is already false, so it does nothing. **(b)** give-up fails the run, then a late `system` event (`outcome` is "failed", so no `startRun`), then the wrapper is SIGKILLed: callback, `asking` = 0, not running, so the run stays failed and the parent's `await` has already returned. **(c)** ceiling: `fail` + "stop", then a late `assistant` event (no restart), then `buddy_stopped` (guard: stays "failed", no "Stopped."), then the 143 fallback error (dropped: outcome set), then done (ignored: not running), then the callback (no-op). **(d)** busy rejection: an old run that the give-up ended is still alive, and the user sends: `startRun` (running) and `asking` = 2. The rejected helper sends the error and exits: `asking` = 1, still running, Stop shown. The old run's done ends it; the old helper exits: `asking` = 0, no-op. **(e)** queued note: done of run 1, then `sendNoteAsMessage` (`asking` + 1, run 2), then run 1's helper exits: run 2 stays running until its own done. **(f)** user Stop: `outcome` "stopped", so the run's 143 fallback is dropped, and so is the wrapper's cut-off fallback when the TERM reaches the run section before its `exit 0`. **(g)** run section killed (`claude_runkill`): the cut-off fallback arrives while `outcome` is null, so it shows and sets "failed". Then done clears `running` and calls `runEnded`, the parent's `await` returns, and `Helpers.lastError` reports that error. If the orchestrator OKs installing a build on the phone: `kill -9` a chat's outer `buddy-run` (by pid), and the chat shows "<agent> stopped." within seconds. Do the same to a sub-agent's helper, and the parent's `subagents` wait returns with that sub-agent reported as failed. |
 | No regression: "still working" | Walkthrough (d) above, and `claude_busy`. Optionally on the phone, with a build installed: a run that the give-up timer ended while its agent still works, then a new message, gives "still working". The chat stays working with Stop, and Stop ends both. |
 | 4 Ceiling | Code review: `startRun` is the only place a run starts, and both `send` and `sendNoteAsMessage` call it. Each run's timer is keyed to its own `runId`. Optionally, a local build with `MAX_RUN_MS` lowered to 1 minute (not committed): a sub-agent ends with the ceiling message, then again after a note sent to it starts a second run. `stop` leaves no agent process (`buddy-run procs`). |
 | 5 run.sh + CI | `bash linux/test/run.sh` on the phone (Alpine, busybox awk) and in CI `helper-tests` (Ubuntu, mawk). The `apk` job is green. |
@@ -232,8 +253,11 @@ Alternatives considered:
   questions).
 - Orphans keep running until buddy-run exits. In the app, proot's `--kill-on-exit` then kills them. Outside
   the app (the tests), the harness kills them by pid.
+- After a kill of the run section, its pipeline (agent, watcher, stream) is orphaned while the wrapper reports and
+  exits. In the app, proot's `--kill-on-exit` kills it. In the tests, the agent pids are killed and the rest then
+  ends on its own (the watcher's `wait` returns, awk exits, the stream gets EOF).
 - The "bash in state R" spin was not reproduced. It is covered from outside: a killed `run_x` shell by the
-  watcher, sub-agents by the ceiling, a killed helper by helper-gone, a top-level chat by Stop (`kill_tree` from
+  watcher, a killed run section by the wrapper's wait check, sub-agents by the ceiling, a killed helper by helper-gone, a top-level chat by Stop (`kill_tree` from
   the pid file).
 - The 16 translations of one string are machine-made by the Coder, as in past releases.
 
