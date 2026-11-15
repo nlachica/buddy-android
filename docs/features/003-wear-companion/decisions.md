@@ -198,3 +198,11 @@
   it away, `TalkActivity.onDestroy`); the new talk screen shows the lines so far and listens.
 - Not checked here: the actual Watch4 launcher/double-press behaviour (compile only); for the Verifier.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Quick-talk launch with an unseen reply shows the reply first (review round 5 F1 closed)
+- Options: (a) a "speak now" extra that starts listening even when a background reply is unseen; (b) keep the
+  plan's rule: an unseen reply is shown first, and one tap on the mic talks.
+- Choice: (b). An unread answer to the user's own question is what they want to see when they raise the watch; starting
+  the mic over it would talk over or hide it. Every other launch goes straight to listening. Two review rounds were
+  used; this is the orchestrator's call at the bound.
+- By: Orchestrator (claude-opus-5-5)
