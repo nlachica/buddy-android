@@ -17,3 +17,16 @@ F1: fixed in the round-1 fix commit. `call()` now reads `McpServer.CALLER_CHAT` 
 F2: fixed in the round-1 fix commit. `Updates.install` wraps the installer launch in the same `opened` flag and `finally` delete as `Tools.installApk`; a launched file is kept. Not unit-tested (needs `startActivity`).
 
 Tests: `/tmp/buddy-build-004/check.sh github` compiled and 19 JUnit tests passed; `fdroid` compiled.
+
+## Round 2 - Code Reviewer (gpt-6-astra)
+
+No new findings. Round 1 F1 and F2 are closed:
+
+- F1: `SettingsTool.call()` captures `McpServer.CALLER_CHAT` on the request thread and passes it through `listing(here)` to `chatLines`. The new regression test uses a separate executor thread and duplicate chat titles, and verifies that only the caller's ID receives the marker. As the Coder notes, the test exercises the capture/pass pattern and formatter rather than the Android-dependent `call()`; inspection confirms the production wiring.
+- F2: `Updates.install()` now deletes its staged APK in `finally` if launching the installer fails, and retains it after a successful launch. This closes the reported launch-failure leak without changing another attempt's file. The Android launch path still needs device verification.
+
+Validation: read the brief, plan, decisions and previous review/response; reviewed `git diff main...HEAD`, the touched files and relevant stores, approval and UI guard code, with particular attention to commit `0774760`. Re-ran `/tmp/buddy-build-004/check.sh github`: resources and Java compiled, all 19 JUnit tests passed. Re-ran `/tmp/buddy-build-004/check.sh fdroid`: resources and Java compiled. No additional correctness, security, scope or convention issue requiring revision identified.
+
+Coverage limits remain as recorded in round 1: these local checks use aapt2/javac/JUnitCore, not Gradle or full APK packaging. CI unit/build/signing/release/reproducibility checks and the planned device tests remain for the verifier, including actual card-tap blocking, approved changes across settings families, install-side-door checks, and update/restart with chats and settings intact. This code-review approval does not claim those done-when proofs are complete.
+
+VERDICT: APPROVE
