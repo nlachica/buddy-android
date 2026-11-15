@@ -25,6 +25,8 @@ import java.util.concurrent.TimeUnit;
 final class Helpers {
     /** A tool call may take 10 minutes (buddy-run sets that for every agent): the wait ends before that. */
     private static final long WAIT_MS = 8 * 60_000;
+    /** A sub-agent's run is ended as failed after this long (ChatHub.startRun). */
+    static final long MAX_RUN_MS = 30 * 60_000;
 
     private Helpers() {
     }
