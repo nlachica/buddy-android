@@ -191,6 +191,7 @@ final class SettingsTool {
             else Prefs.setUpdateNotified(svc, ""); // notify again about a version muted before
         }));
         agentsModels(svc, l);
+        voice(svc, l);
         return l;
     }
 
@@ -211,6 +212,103 @@ final class SettingsTool {
         for (Mirrors.M m : Mirrors.ALL) if (!m.id.isEmpty()) ids.add(m.id);
         if (custom) ids.add(Mirrors.CUSTOM);
         return ids.toArray(new String[0]);
+    }
+
+    /** Settings → Voice. */
+    private static void voice(BuddyService svc, List<Setting> l) {
+        l.add(new Scalar("voice_input", () -> Prefs.voiceEngine(svc), v -> Prefs.setVoiceEngine(svc, v), "",
+                "phone", "claude", "chatgpt").ready(v -> plan(svc, v.equals("claude") ? "claude" : v.equals("chatgpt") ? "codex" : null)));
+        l.add(new Scalar("voice_output", () -> Prefs.speechEngine(svc), v -> Prefs.setSpeechEngine(svc, v), "",
+                "phone", "chatgpt").ready(v -> plan(svc, v.equals("chatgpt") ? "codex" : null)));
+        l.add(new Scalar("chatgpt_voice", () -> Prefs.speechVoice(svc), v -> {
+            Prefs.setSpeechVoice(svc, v);
+            Voice.stopSpeaking(); // the next speech uses it
+        }, "", () -> {
+            List<String> ids = new ArrayList<>();
+            for (String[] v : CodexSpeech.VOICES) ids.add(v[0]);
+            return ids.toArray(new String[0]);
+        }) {
+            @Override
+            String allowed() {
+                return super.allowed() + "; used while voice_output = chatgpt";
+            }
+        });
+        l.add(new Scalar("audio_device", () -> Prefs.audioDevice(svc).isEmpty() ? "auto" : Prefs.audioDevice(svc), v -> {
+            Prefs.setAudioDevice(svc, v.equals("auto") ? "" : v);
+            Voice.stopSpeaking();
+        }, "", () -> {
+            List<String> ids = new ArrayList<>();
+            ids.add("auto");
+            String[][] devices = AudioRoute.choices(svc); // Android 12+ lists the devices connected now
+            for (int i = 1; i < devices.length; i++) ids.add(devices[i][0]);
+            return ids.toArray(new String[0]);
+        }));
+        l.add(voiceLanguages(() -> {
+            List<String> all = new ArrayList<>(Arrays.asList(Prefs.voiceLangs(svc).split(",")));
+            all.remove(Prefs.voiceLang(svc));
+            all.add(0, Prefs.voiceLang(svc));
+            return String.join(",", all); // the one Buddy listens for first
+        }, v -> {
+            Prefs.setVoiceLangs(svc, v);
+            Prefs.setVoiceLang(svc, v.split(",")[0]);
+        }));
+        l.add(new Scalar("assist_mode", () -> Prefs.assistMode(svc), v -> Prefs.setAssistMode(svc, v), "", "talk", "live"));
+        l.add(new Scalar("live_agent", () -> Prefs.liveAgent(svc).isEmpty() ? "default" : Prefs.liveAgent(svc),
+                v -> Prefs.setLiveAgent(svc, v.equals("default") ? "" : v), "", "default", "claude", "codex", "opencode", "agy",
+                "grok").ready(v -> {
+            if (!v.equals("default")) signedIn(svc, v);
+        }));
+        l.add(onOff("live_continue", () -> Prefs.liveContinue(svc), on -> Prefs.setLiveContinue(svc, on)));
+        // the screen saves it too, then sends the user to grant notification access
+        l.add(new Scalar("pause_media", () -> Prefs.pauseMediaForSpeech(svc) ? "on" : "off",
+                v -> Prefs.setPauseMediaForSpeech(svc, v.equals("on")), "", "on", "off") {
+            @Override
+            String set(String value) {
+                super.set(value);
+                return !value.equals("on") ? "" : (NotificationWatcher.enabled(svc) ? ""
+                        : " It can't work yet: notification access is off, and only the user grants it.")
+                        + (Prefs.speakReplies(svc) ? "" : " It only acts while read_aloud is on.");
+            }
+        });
+    }
+
+    static Scalar voiceLanguages(Supplier<String> get, Consumer<String> set) {
+        return new Scalar("voice_languages", get, set, "", () -> {
+            List<String> tags = new ArrayList<>();
+            for (String[] t : Voice.LANGUAGES) tags.add(t[0]);
+            return tags.toArray(new String[0]);
+        }) {
+            @Override
+            String allowed() {
+                return "comma-separated, at least one, from " + super.allowed() + "; the first is the one Buddy listens for";
+            }
+
+            @Override
+            String check(String value) {
+                return languages(value);
+            }
+        };
+    }
+
+    /** The comma-separated languages as stored: listed tags (any case), no duplicates, at least one. */
+    static String languages(String csv) {
+        java.util.Set<String> out = new java.util.LinkedHashSet<>();
+        for (String t : csv.split(",")) {
+            String want = t.trim(), got = null;
+            if (want.isEmpty()) continue;
+            for (String[] l : Voice.LANGUAGES) if (l[0].equalsIgnoreCase(want)) got = l[0];
+            if (got == null) throw new IllegalArgumentException("unknown language \"" + want + "\"; voice_languages takes tags like en-US, fr-FR");
+            out.add(got);
+        }
+        if (out.isEmpty()) throw new IllegalArgumentException("voice_languages needs at least one language");
+        return String.join(",", out);
+    }
+
+    /** Voice input/output that uses an agent's plan: it must be signed in with it (agent null: no need). */
+    private static void plan(BuddyService svc, String agent) {
+        if (agent != null && !SetupState.planSignedIn(svc, agent)) {
+            throw new IllegalArgumentException(Account.nameOf(agent) + " isn't signed in with its plan; only the user signs in (Settings → Agents and models)");
+        }
     }
 
     /** An agent that isn't signed in is greyed out on the screens: say who fixes it. */

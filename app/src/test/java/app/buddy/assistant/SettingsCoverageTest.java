@@ -262,4 +262,55 @@ public class SettingsCoverageTest {
             assertEquals(0, saves.get());
         }
     }
+
+    // ---------------------------------------------------------------- voice
+
+    @Test
+    public void theVoiceScalarsExistAndRefuseABadShape() {
+        for (String n : new String[]{"voice_input", "voice_output", "chatgpt_voice", "audio_device", "voice_languages", "assist_mode",
+                "live_agent", "live_continue", "pause_media"}) {
+            assertTrue(n, SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals(n)));
+        }
+        refused(named("voice_input"), "siri");
+        refused(named("voice_output"), "claude");
+        refused(named("assist_mode"), "shout");
+        refused(named("live_agent"), "nobody");
+        refused(named("live_continue"), "maybe");
+        refused(named("pause_media"), "maybe");
+        assertEquals("live", named("assist_mode").check("LIVE"));
+        assertEquals("on", named("live_continue").check("ON"));
+        assertEquals("phone", named("voice_input").check(" Phone "));
+    }
+
+    @Test
+    public void languagesAreListedTagsInTheirCanonicalCase() {
+        assertEquals("fr-FR,en-US", SettingsTool.languages("fr-fr, en-US, fr-FR"));
+        for (String bad : new String[]{"", " , ", "xx-XX", "en-US,xx-XX"}) {
+            try {
+                SettingsTool.languages(bad);
+                throw new AssertionError(bad);
+            } catch (IllegalArgumentException expected) {
+                // refused
+            }
+        }
+    }
+
+    @Test
+    public void voiceLanguagesCardShowsTheDefaultFirstAndRefusesAStaleWrite() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("en-US,fr-FR");
+        SettingsTool.Scalar s = SettingsTool.voiceLanguages(now::get, now::set);
+        List<String> cards = new ArrayList<>();
+        assertEquals("Changed voice_languages: en-US,fr-FR → fr-FR,en-US,de-DE", edit(s, "fr-fr,en-us,DE-de", card -> {
+            cards.add(card);
+            return YES;
+        }));
+        assertEquals("fr-FR,en-US,de-DE", now.get());
+        assertTrue(cards.get(0), cards.get(0).contains("Now: en-US,fr-FR\nNew: fr-FR,en-US,de-DE"));
+        String r = edit(s, "en-US", card -> {
+            now.set("de-DE,fr-FR"); // the screen made another the default meanwhile
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        assertEquals("de-DE,fr-FR", now.get());
+    }
 }
