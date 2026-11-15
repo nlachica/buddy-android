@@ -1,30 +1,150 @@
 package app.buddy.assistant.wear;
 
 import android.app.Activity;
-import android.graphics.Color;
+import android.content.Intent;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.Gravity;
+import android.view.View;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
+import android.widget.ScrollView;
 import android.widget.TextView;
 
-/** The watch's home screen: Buddy's chats on the phone, to pick one and talk to. */
+import com.google.android.gms.wearable.MessageClient;
+import com.google.android.gms.wearable.MessageEvent;
+import com.google.android.gms.wearable.Wearable;
+
+import org.json.JSONArray;
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.nio.charset.StandardCharsets;
+
+/** The watch's home screen: the chats on the phone, to pick one and talk to. */
 public class ChatsActivity extends Activity {
+    private static final long NO_ANSWER_MS = 8000;
+
+    private final Handler main = new Handler(Looper.getMainLooper());
+    private final Runnable noAnswer = () -> showError(getString(R.string.chats_no_answer));
+    private ScrollView scroll;
+    private LinearLayout body;
+    private boolean listening;
+    private final MessageClient.OnMessageReceivedListener listener = this::onMessage;
+
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
-        LinearLayout root = new LinearLayout(this);
-        root.setOrientation(LinearLayout.VERTICAL);
-        root.setGravity(Gravity.CENTER);
-        root.setBackgroundColor(Color.BLACK);
+        scroll = new ScrollView(this);
+        scroll.setBackgroundColor(Look.BG);
+        scroll.setFocusableInTouchMode(true); // the Watch4's bezel scrolls what has focus
+        body = new LinearLayout(this);
+        body.setOrientation(LinearLayout.VERTICAL);
+        body.setGravity(Gravity.CENTER_HORIZONTAL);
+        int side = Look.sidePad(this), top = Look.dp(this, getResources().getConfiguration().isScreenRound() ? 28 : 12);
+        body.setPadding(side, top, side, top);
+        scroll.addView(body);
+        setContentView(scroll);
+        header();
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        load();
+    }
+
+    @Override
+    protected void onStop() {
+        super.onStop();
+        main.removeCallbacks(noAnswer);
+        if (listening) Wearable.getMessageClient(this).removeListener(listener);
+        listening = false;
+    }
+
+    private void header() {
+        body.removeAllViews();
         ImageView face = new ImageView(this);
         face.setImageResource(R.drawable.bubble_face);
-        root.addView(face);
-        TextView title = new TextView(this);
-        title.setText(R.string.app_name);
-        title.setTextColor(0xFFF3EFE8);
-        title.setTextSize(18);
-        root.addView(title);
-        setContentView(root);
+        body.addView(face);
+        TextView title = Look.text(this, getString(R.string.app_name), 18, Look.TEXT);
+        title.setGravity(Gravity.CENTER);
+        body.addView(title);
+        scroll.requestFocus();
+    }
+
+    /** Asks the phone for its chats: listening first, so that a quick answer can't come before anyone is there. */
+    private void load() {
+        header();
+        main.removeCallbacks(noAnswer);
+        if (listening) Wearable.getMessageClient(this).removeListener(listener);
+        listening = true;
+        Wearable.getMessageClient(this).addListener(listener)
+                .addOnSuccessListener(v -> Phone.send(this, Phone.CHATS, new JSONObject(), error -> {
+                    if (error != null) showError(error);
+                    else main.postDelayed(noAnswer, NO_ANSWER_MS);
+                }))
+                .addOnFailureListener(e -> showError(getString(R.string.phone_unreachable)));
+    }
+
+    private void onMessage(MessageEvent e) {
+        if (!Phone.CHATS.equals(e.getPath())) return;
+        try {
+            JSONObject in = new JSONObject(new String(e.getData(), StandardCharsets.UTF_8));
+            runOnUiThread(() -> {
+                main.removeCallbacks(noAnswer);
+                showChats(in.optJSONArray("chats"), in.optInt("accent", Look.ACCENT));
+            });
+        } catch (JSONException x) {
+            // not for us
+        }
+    }
+
+    private void showChats(JSONArray chats, int accent) {
+        header();
+        if (chats == null || chats.length() == 0) {
+            body.addView(note(getString(R.string.chats_empty), Look.TEXT2));
+            return;
+        }
+        for (int i = 0; i < chats.length(); i++) {
+            JSONObject chat = chats.optJSONObject(i);
+            if (chat == null) continue;
+            final String id = chat.optString("id"), title = chat.optString("title");
+            TextView row = Look.text(this, title, 15, Look.TEXT);
+            if (chat.optBoolean("running")) row.append("\n" + getString(R.string.chats_working));
+            row.setPadding(Look.dp(this, 14), Look.dp(this, 10), Look.dp(this, 14), Look.dp(this, 10));
+            row.setBackground(Look.pill(this, Look.CARD, 16));
+            row.setOnClickListener(v -> open(id, title, accent));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+            lp.topMargin = Look.dp(this, 6);
+            body.addView(row, lp);
+        }
+    }
+
+    private void open(String id, String title, int accent) {
+        startActivity(new Intent().setClassName(this, "app.buddy.assistant.wear.TalkActivity")
+                .putExtra("chat", id).putExtra("title", title).putExtra("accent", accent));
+    }
+
+    private void showError(String text) {
+        main.removeCallbacks(noAnswer);
+        header();
+        body.addView(note(text, Look.ERR));
+        TextView retry = Look.text(this, getString(R.string.retry), 15, Look.BG);
+        retry.setGravity(Gravity.CENTER);
+        retry.setPadding(Look.dp(this, 14), Look.dp(this, 8), Look.dp(this, 14), Look.dp(this, 8));
+        retry.setBackground(Look.pill(this, Look.ACCENT, 20));
+        retry.setOnClickListener(v -> load());
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = Look.dp(this, 10);
+        body.addView(retry, lp);
+    }
+
+    private TextView note(String text, int color) {
+        TextView t = Look.text(this, text, 14, color);
+        t.setGravity(Gravity.CENTER);
+        t.setPadding(0, Look.dp(this, 8), 0, 0);
+        return t;
     }
 }

@@ -2,4 +2,16 @@
 <!-- Every text of Buddy's watch app, in English. -->
 <resources>
     <string name="app_name" translatable="false">Buddy</string>
+
+    <!-- The chat list -->
+    <string name="chats_empty">No chats on your phone yet.</string>
+    <!-- Under a chat's title when Buddy is working in it -->
+    <string name="chats_working">working</string>
+    <string name="chats_no_answer">Buddy on your phone isn\'t answering.</string>
+    <string name="retry">Retry</string>
+
+    <!-- Finding the phone and sending to it -->
+    <string name="phone_unreachable">Can\'t reach your phone. Check Bluetooth.</string>
+    <string name="phone_no_link">Buddy\'s watch link isn\'t on your phone. It needs Buddy\'s GitHub version, from the same release as this watch app.</string>
+    <string name="phone_send_failed">Couldn\'t send. Is your phone nearby?</string>
 </resources>
