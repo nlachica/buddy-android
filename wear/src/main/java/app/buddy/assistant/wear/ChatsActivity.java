@@ -30,6 +30,9 @@ public class ChatsActivity extends Activity {
     private ScrollView scroll;
     private LinearLayout body;
     private boolean listening;
+    /** Waiting for the phone's chat list; {@code loads} counts requests so a late callback of an older one is ignored. */
+    private boolean pending;
+    private int loads;
     private final MessageClient.OnMessageReceivedListener listener = this::onMessage;
 
     @Override
@@ -60,6 +63,7 @@ public class ChatsActivity extends Activity {
         main.removeCallbacks(noAnswer);
         if (listening) Wearable.getMessageClient(this).removeListener(listener);
         listening = false;
+        pending = false;
     }
 
     private void header() {
@@ -79,12 +83,23 @@ public class ChatsActivity extends Activity {
         main.removeCallbacks(noAnswer);
         if (listening) Wearable.getMessageClient(this).removeListener(listener);
         listening = true;
+        pending = true;
+        final int mine = ++loads;
+        main.postDelayed(noAnswer, NO_ANSWER_MS); // armed before sending; the list or an error cancels it
         Wearable.getMessageClient(this).addListener(listener)
-                .addOnSuccessListener(v -> Phone.send(this, Phone.CHATS, new JSONObject(), error -> {
-                    if (error != null) showError(error);
-                    else main.postDelayed(noAnswer, NO_ANSWER_MS);
-                }))
-                .addOnFailureListener(e -> showError(getString(R.string.phone_unreachable)));
+                .addOnSuccessListener(v -> {
+                    if (!listening) Wearable.getMessageClient(this).removeListener(listener); // left meanwhile
+                    if (live(mine)) Phone.send(this, Phone.CHATS, new JSONObject(), error -> {
+                        if (error != null && live(mine)) showError(error);
+                    });
+                })
+                .addOnFailureListener(e -> {
+                    if (live(mine)) showError(getString(R.string.phone_unreachable));
+                });
+    }
+
+    private boolean live(int load) {
+        return pending && load == loads;
     }
 
     private void onMessage(MessageEvent e) {
@@ -93,6 +108,7 @@ public class ChatsActivity extends Activity {
             JSONObject in = new JSONObject(new String(e.getData(), StandardCharsets.UTF_8));
             runOnUiThread(() -> {
                 main.removeCallbacks(noAnswer);
+                pending = false;
                 showChats(in.optJSONArray("chats"), in.optInt("accent", Look.ACCENT));
             });
         } catch (JSONException x) {
@@ -127,6 +143,7 @@ public class ChatsActivity extends Activity {
 
     private void showError(String text) {
         main.removeCallbacks(noAnswer);
+        pending = false;
         header();
         body.addView(note(text, Look.ERR));
         TextView retry = Look.text(this, getString(R.string.retry), 15, Look.BG);

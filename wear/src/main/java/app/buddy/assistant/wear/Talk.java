@@ -58,6 +58,8 @@ public class Talk extends Service {
     static int accent = Look.ACCENT;
     static final List<Line> lines = new ArrayList<>();
     static boolean waiting, heard;
+    /** Counts conversations: a send or registration callback from an earlier one must not touch the current one. */
+    private static int run;
     /** The latest step of the run ("Opening Calendar"), shown while it works. */
     static String status = "";
     /** Lines that came while no screen showed them: reopening the chat just shows them, it doesn't listen again. */
@@ -105,6 +107,7 @@ public class Talk extends Service {
         status = "";
         unseen = false;
         sender = send;
+        run++;
         c.startForegroundService(new Intent(c, Talk.class)); // the screen is showing, so this is allowed
         changed();
     }
@@ -142,7 +145,6 @@ public class Talk extends Service {
         h.removeCallbacksAndMessages(null);
         Wearable.getMessageClient(this).removeListener(listener);
         hush();
-        early.clear();
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, getString(R.string.talk_channel), NotificationManager.IMPORTANCE_LOW));
         startForeground(1, notification(R.string.talk_notif_waiting));
@@ -154,13 +156,23 @@ public class Talk extends Service {
         h.postDelayed(ceiling, CEILING_MS);
         if (tts == null) tts = new TextToSpeech(this, this::ttsInit);
         final Sender send = sender;
+        final int mine = run;
+        h.postDelayed(noHeard, NO_HEARD_MS); // armed before anything is sent; any answer from the phone cancels it
         Wearable.getMessageClient(this).addListener(listener)
-                .addOnSuccessListener(v -> send.send(error -> {
-                    if (error != null) fail(error);
-                    else h.postDelayed(noHeard, NO_HEARD_MS);
-                }))
-                .addOnFailureListener(e -> fail(R.string.talk_connect));
+                .addOnSuccessListener(v -> {
+                    if (active(mine)) send.send(error -> {
+                        if (error != null && active(mine)) fail(error);
+                    });
+                })
+                .addOnFailureListener(e -> {
+                    if (active(mine)) fail(R.string.talk_connect);
+                });
         return START_NOT_STICKY;
+    }
+
+    /** Whether conversation {@code r} is still the one being waited for. */
+    private static boolean active(int r) {
+        return waiting && r == run;
     }
 
     private Notification notification(int text) {
@@ -181,10 +193,10 @@ public class Talk extends Service {
             return;
         }
         if (!chat.equals(in.optString("chat"))) return;
+        h.removeCallbacks(noHeard); // whatever it is, the phone got the message
         String text = in.optString("text");
         switch (e.getPath()) {
             case Phone.HEARD:
-                h.removeCallbacks(noHeard);
                 heard = true;
                 lines.add(new Line(YOU, text));
                 break;
@@ -209,7 +221,10 @@ public class Talk extends Service {
                     fail(R.string.talk_stopped_working); // running is false and no done came: the answer is lost
                     return;
                 }
-                break;
+                // only a sign of life: not news for the screen (it would never be released), but keep asking
+                h.removeCallbacks(quiet);
+                h.postDelayed(quiet, QUIET_MS);
+                return;
             default:
                 return;
         }
@@ -222,9 +237,10 @@ public class Talk extends Service {
 
     private void askStatus() {
         h.postDelayed(noStatus, STATUS_MS);
+        final int mine = run;
         try {
             Phone.send(this, Phone.STATUS, new JSONObject().put("chat", chat), error -> {
-                if (error != null) noStatus.run();
+                if (error != null && active(mine)) noStatus.run();
             });
         } catch (JSONException x) {
             throw new IllegalStateException(x);
@@ -290,7 +306,12 @@ public class Talk extends Service {
     private void speak(String text) {
         String id = "u" + utterances++;
         pending.add(id);
-        tts.speak(text, TextToSpeech.QUEUE_ADD, null, id);
+        if (tts.speak(text, TextToSpeech.QUEUE_ADD, null, id) == TextToSpeech.ERROR) { // no callback will come for it
+            pending.remove(id);
+            lines.add(new Line(ERROR, getString(R.string.talk_no_voice)));
+            changed();
+            maybeStop();
+        }
     }
 
     private void ttsInit(int status) {
@@ -338,6 +359,7 @@ public class Talk extends Service {
 
     private void hush() {
         pending.clear();
+        early.clear(); // replies buffered before the engine was ready are silenced too
         if (tts != null && ttsReady) tts.stop();
         maybeStop();
     }
