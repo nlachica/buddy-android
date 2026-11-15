@@ -21,3 +21,17 @@ matters. `PIPESTATUS[0]` is still the producer's status. Checked: `bash linux/te
 `claude_killed` and the other orphan cases included. A producer that prints `hello`, sleeps 3 s and prints `bye`
 delivers `hello` at 0 s. I could not run mawk here (no mawk on the phone, no install), but nothing in the relay
 uses awk any more.
+
+## Round 2 - Code Reviewer (gpt-6-astra)
+
+No open blocker or major findings. Round 1 F1 is closed: `linux/buddy-run:50-57` now relays with Bash builtins, eliminating the mawk input-buffering dependency while retaining the producer's `PIPESTATUS[0]`. The change follows the simpler alternative requested in round 1 and is recorded in decisions.md.
+
+Review evidence:
+- Reviewed the brief, plan, decisions, prior review and Coder response, `git diff main...HEAD`, and the affected runner, test harness, app lifecycle, and resource code. No new correctness, security/data, YAGNI, or convention findings.
+- `bash linux/test/run.sh`: **28 fixtures and cases, 0 failed**, including killed agents on all five backends, orphan-held stdout, producer-shell death, run-section death, wrapper TERM, nonzero exits, and busy rejection.
+- Independently exercised the exact HEAD `until_exit` function with a producer that prints a line, sleeps two seconds, prints another line, and returns 3. The first line arrived in **0.022 seconds while the producer was still alive**; the final line was intact and the relay returned **3**. Combined with the orphan/killed cases, this verifies the round 1 correction without relying on any awk implementation.
+- `bash -n linux/buddy-run linux/test/run.sh` passed. Resource compilation/linking with aapt2 and all GitHub-flavor Java compilation with `javac --release 8` passed in a temporary output directory. The initial scratch compile omitted generated R.java from its precomputed source list; correcting the review command's source discovery after resource linking resolved it without repository changes.
+- Rechecked app test-plan orders (a)-(g): done is queued before the exit callback; the helper count preserves busy rejection and queued-note ownership; late events cannot restart failed/stopped runs; ceiling-triggered stop/fallback/done events preserve failure; explicit Stop suppresses fallback errors; a killed run section reports failure before done. Both ask launch paths are counted, all run starts arm the sub-agent ceiling, and clearing `running` releases the parent's `Helpers.await` loop.
+- Full APK/native build, CI, and the planned main-versus-branch regression evidence remain for the Verifier. App lifecycle checks here are code walkthroughs, as the accepted plan specifies; no installed-app test was performed. Only this review file was changed.
+
+VERDICT: APPROVE
