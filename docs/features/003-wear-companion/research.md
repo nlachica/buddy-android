@@ -69,3 +69,10 @@ Paths from repo root.
 
 ## Answers to open questions
 None (no `plan.md` open questions yet).
+
+## Orchestrator notes (2026-11-15)
+- Consequence of the same-key rule: the official Buddy now on the phone is signed with upstream's key, which we don't
+  have, and has no watch code anyway. So the watch app can only talk to a fork build signed with Nicholas's own key,
+  i.e. it is usable once he switches the phone to the fork. The fork needs its own release keystore (also stored as
+  the fork's BUDDY_KEYSTORE_* secrets, which also fixes the CI reproducibility check).
+- Speech on the watch will be probed on the real Watch4 before the plan is final (orchestrator, separate probe APK).
