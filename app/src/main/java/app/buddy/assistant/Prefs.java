@@ -727,6 +727,15 @@ final class Prefs {
         sp(c).edit().putString("speech_voice", v).apply();
     }
 
+    /** The audio device Buddy's voice uses (see AudioRoute): "" = Auto, else type:name of a communication device. */
+    static String audioDevice(Context c) {
+        return sp(c).getString("audio_device", "");
+    }
+
+    static void setAudioDevice(Context c, String k) {
+        sp(c).edit().putString("audio_device", k).apply();
+    }
+
     /** The user's voice languages, comma-separated BCP-47 tags (first = default). */
     static String voiceLangs(Context c) {
         String d = java.util.Locale.getDefault().toLanguageTag();
