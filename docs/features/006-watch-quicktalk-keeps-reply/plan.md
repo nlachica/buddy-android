@@ -67,9 +67,11 @@ sent. So:
 - a join while earlier words are still in flight (registration, discovery, or `heard` not back yet) just queues: the
   earlier send's callbacks stay valid, and they keep going in order;
 - `heard` can only confirm the words in flight. There is still one `heard` flag, and it now means "nothing in flight";
-- `run` goes up only on a new conversation (`begin`, as today), in `settle` (below) and in `end()`. So late callbacks
-  of words already given up can't send them after "didn't answer" or settle the next words, and callbacks of an ended
-  wait can't act after a join starts waiting again.
+- two counters guard late callbacks (plan-review F3). `run` belongs to the conversation: it goes up only on a new
+  conversation (`begin`, as today) and in `end()`, so callbacks of an ended wait (sends, status checks) can't act after
+  a join starts waiting again. `sends` belongs to the words: `next()` and `settle` (below) bump it, so callbacks of
+  words already given up can't send them after "didn't answer" or settle the next words. Word callbacks check both;
+  status checks (`askStatus`, unchanged) check only `run`, so giving up words never cancels a status check.
 
 Registration is no longer guessed from `waiting`. `register()` stores the `Task` from `addListener` in a field
 `registration`. Its failure ends the wait (`talk_connect`, as today) only if it is still the current registration while
@@ -95,9 +97,12 @@ starts a new one as before.
 phone took words of this conversation (`heard`) and hasn't sent `done` since, so a run of ours is still going and will
 send replies and a `done`.
 - Failures that belong to the words in flight go through `settle(error)`: a failed send (the `Sent` callback),
-  `/buddy/error`, and `noHeard` ("Buddy on your phone didn't answer."). `settle` does `run++`, `heard = true`, removes
+  `/buddy/error`, and `noHeard` ("Buddy on your phone didn't answer."). `settle` does `sends++`, `heard = true`, removes
   `noHeard`, and shows and says the error. Then, if words are queued, `next()`. Otherwise, if `accepted`, the wait goes
-  on with the listener, speech, `quiet`/status checks and `ceiling` untouched. Otherwise `end()`. Nothing is resent.
+  on with the listener, speech, a status check in progress and `ceiling` untouched, and `settle` re-arms `quiet`: while
+  words are in flight nothing re-arms it (the `heard` that sent them skips the `if (heard)` re-arm, and a `status
+  running:false` ignored for them re-arms nothing), and the accepted run must stay watched (plan-review F3). Otherwise
+  `end()`. Nothing is resent.
 - Failures that belong to the conversation still `fail` and `end()` as in 003: registration failure, `ceiling`, lost
   contact (`noStatus`), and `status running:false` with nothing in flight. So does the screen being closed (`left()`).
 - `end()` also clears `queue` (words not yet sent go with the wait) and `accepted`, and bumps `run`.
@@ -138,22 +143,29 @@ Because the join rule is on `Talk`'s state, a mic tap while waiting also keeps t
 - Send joined words at once and count unacknowledged ones (`unheard`): no order between two sends in flight, and a late
   failure needs per-send ids anyway; one in flight at a time is simpler and keeps order (plan-review F1).
 - Refuse or replace new words while earlier ones are in flight: drops words, or the first answer, in a 1-10 s window.
+- Keep `run++` in `settle` and have it cancel and reissue the status check it kills: ties word failures to monitoring;
+  a separate `sends` counter keeps them apart (plan-review F3).
+- Re-arm `quiet` on every message while `accepted` instead of in `settle`: still leaves no check after a `status
+  running:false` ignored while words are in flight (T12).
 
 ## Steps
 1. **`Talk`: new words join a live conversation, sent one at a time** (`wear/src/main/java/app/buddy/assistant/wear/Talk.java`).
-   - Statics: `sender` becomes `private static final List<Sender> queue`. Add `static boolean accepted`. Docs: `heard`
-     means "nothing in flight (the latest words were heard, refused or given up)"; `run` "goes up on a new conversation,
-     an ended wait and words given up: callbacks from before must not touch what follows".
+   - Statics: `sender` becomes `private static final List<Sender> queue`. Add `static boolean accepted` and `private
+     static int sends`. Docs: `heard` means "nothing in flight (the latest words were heard, refused or given up)"; `run`
+     "goes up on a new conversation and an ended wait: their callbacks (sends, status checks) must not touch what
+     follows"; `sends` "goes up with each words sent and words given up: their callbacks must not send them late or
+     settle the next words".
    - `begin`: compute `join = instance != null && chat.equals(Talk.chat)` and `wasWaiting = waiting` first. If not
      joining: set chat/title/accent, `lines.clear()`, `queue.clear()`, `heard = false`, `accepted = false`, `run++`.
      Always: `waiting = true`, `status = ""`, `unseen = false`, `queue.add(send)`. Then `instance.join(wasWaiting)` if
      joining, else `startForegroundService` as today; `changed()`.
    - Service: `private Task<Void> registration` and `register()`, which stores `addListener(listener)` and fails with
      `talk_connect` on its failure only if `waiting && registration == thatTask`. `next()`: take `queue.remove(0)`,
-     `heard = false`, re-arm `noHeard`, and in `registration.addOnSuccessListener` send it with
-     `valid = () -> active(mine)` (`mine = run`, captured, not bumped) and `error -> { if (error != null &&
-     active(mine)) settle(error); }`. `settle(String)` as in Design B. `noHeard` becomes `() -> settle(getString(
-     R.string.talk_no_answer))`.
+     `heard = false`, re-arm `noHeard`, capture `mine = run` (not bumped) and `w = ++sends`, and in
+     `registration.addOnSuccessListener` send it with `valid = () -> active(mine) && w == sends` and `error -> { if
+     (error != null && active(mine) && w == sends) settle(error); }`. `settle(String)` as in Design B (`sends++`, never
+     `run`; re-arms `quiet` when it keeps the wait). `noHeard` becomes `() -> settle(getString(R.string.talk_no_answer))`.
+     `askStatus` is unchanged.
    - `onStartCommand`: keep the 003 reset, channel, `startForeground`, wake lock, `ceiling` and TTS lines; replace the
      listener/send block with `register(); next();`. Add `void join(boolean wasWaiting)` as in Design B.
    - `end()`: also `queue.clear(); accepted = false; run++;`. `stop()`: `if (instance == this) instance = null;` first.
@@ -179,8 +191,12 @@ Because the join rule is on `Talk`'s state, a mic tap while waiting also keeps t
      `boolean speak = getIntent().getBooleanExtra("speak", false); boolean news = chat.equals(Talk.chat) && (Talk.waiting
      ? !speak : Talk.unseen);` and update its comment.
    Commit: "Watch: opening the app again keeps the wait and listens (feature 006)".
-3. **Compile and CI.** Push the branch; CI (`.github/workflows/build.yml`: `:wear:assembleRelease` with the phone
-   builds) must be green. Optional local check: `javac --release 8` against `/tmp/buddy-build-005/lib/android.jar` plus
+3. **Compile and CI.** Push the branch (when the orchestrator allows), then start CI on it by hand: `build.yml` runs on
+   pushes only to `main` and `v*` tags, and on PRs (plan-review F4). `gh workflow run build.yml --ref
+   feat/006-watch-quicktalk-keeps-reply`; find the run with `gh run list --workflow build.yml --branch
+   feat/006-watch-quicktalk-keeps-reply --limit 1` and `gh run watch <id>`. It (`:wear:assembleRelease` with the phone
+   builds) must be green; its artifact `buddy-apk` holds `buddy-watch-feat-006-watch-quicktalk-keeps-reply.apk` for the
+   device check. Once a PR exists, its run counts too. Optional local check: `javac --release 8` against `/tmp/buddy-build-005/lib/android.jar` plus
    stubs or the Play services jars (as in 003 reviews); CI is the authority. No version bump is needed for the device
    check (`adb install -r` takes the same version code); bump `BuildInfo` only if the orchestrator ships a release
    (AGENTS.md).
@@ -196,11 +212,11 @@ answer is said once and shows once on the talk screen; check the phone chat afte
 | 1 | (a) Screen showing: "write a 400-word story about a fox", keep looking; while it works, double-press Home; say "what is two plus two" → the story is said, then "four", each once; screen shows both YOU lines and both answers once. (b) Same, but lower the wrist after the first ask, raise it, then double-press (the out-of-sight order). Both: the phone chat has each user message once (the second as a note or the next message) and both answers. |
 | 2 | Ask for the story; double-press Home; cancel the mic → the story is still said and shown. Once with the screen showing, once from the watch face. |
 | 3 | Nothing pending: double-press → mic opens. Ask the time, lower the wrist until the answer is said, raise, double-press → the answer shows, no mic. Regressions: while waiting, swipe the talk screen away → the wait ends (nothing more said, notification goes); tapping the "Waiting" notification shows the lines without the mic. |
-| 4 | `gh run watch` on the branch run: green; `adb install -r` on the Watch4: Success. |
+| 4 | `gh run watch` on the dispatched branch run (Step 3) or the PR's run: green; `adb install -r` on the Watch4: Success. |
 
 Optional (same fix, not a done-when): while waiting, tap the mic and say something → the first answer is still said.
 
-**Event-order traces (from plan-review F1/F2; the Code Reviewer checks each row against the code).** A = earlier
+**Event-order traces (from plan-review F1-F3; the Code Reviewer checks each row against the code).** A = earlier
 words, B = joined words.
 
 | # | Events | Expected |
@@ -213,7 +229,10 @@ words, B = joined words.
 | T6 | `status running:false` while B in flight / with nothing in flight | ignored / "stopped working", wait ends |
 | T7 | Fresh conversation: its only words fail to send, are refused, or get no `heard` | error, wait ends (003) |
 | T8 | Wait over, A still being said; B said | listener registered again, B sent after it succeeds; A's speech goes on |
-| T9 | Words given up by `noHeard`, then their late send failure or `valid` check | no second error line, never sent late (`run` bumped) |
+| T9 | Words given up by `noHeard`, then their late send failure or `valid` check | no second error line, never sent late (`sends` bumped) |
+| T10 | A accepted; `quiet` fired, the status check's discovery pending; B's send fails or `noHeard` gives B up | the status check is still sent (`run` unchanged); its answer clears `noStatus` and re-arms `quiet`; no "lost contact"; A's reply said once |
+| T11 | B queued before A's `heard`; A `heard` sends B (no `quiet` re-armed, `heard` false); B fails | `settle` keeps the wait (accepted) and arms `quiet`; 30 s later a status check, `running:true` re-arms it; A's reply shown and said once; A's `done` ends the wait |
+| T12 | A accepted; B in flight; `status running:false` (ignored); B fails | `settle` arms `quiet`; the next status check says `running:false` with nothing in flight → "stopped working", wait ends (not held to the ceiling) |
 
 **Probe runs on the Watch4 (Verifier; not done-when items).** A throwaway branch `probe/006` off the feature branch
 adds one commit in `Phone.send`, never merged: if the body's text contains "slow", discovery starts 7 s later (main

@@ -75,3 +75,15 @@
   words: their `heard` brings their own `done`, and their failure ends the wait. This replaces the earlier entry "only
   the `noHeard` deadline ends the wait" while words are unconfirmed; its `done` and `status` rules stay.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Giving up words never touches the conversation's monitoring
+- Options: (a) `settle` keeps `run++` and cancels and reissues the status check it kills; (b) a second counter `sends`
+  (bumped by `next()` and `settle`) guards word callbacks, `run` (new conversation, `end()`) guards the conversation
+  and status checks, and `settle` re-arms `quiet` when it keeps an accepted run; (c) as (b) but re-arm `quiet` on every
+  message while `accepted` instead of in `settle`.
+- Choice: (b) (plan-review F3). With `run++` in `settle`, a status check pending across a failure of later words is
+  dropped while its `noStatus` still fires, ending the accepted run as "lost contact"; and after a `heard` that sent the
+  next words, a failure of those words left no `quiet` armed. (a) ties word failures to monitoring in one more place to
+  get wrong. (c) still leaves nothing armed after a `status running:false` ignored while words are in flight. This
+  replaces the part of the "sent one at a time" entry saying `run` goes up when words are given up.
+- By: Planner (claude-opus-5-5)

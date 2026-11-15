@@ -38,3 +38,20 @@ F3 [major] Submission failure can still cancel the accepted conversation through
 F4 [minor] Pushing the feature branch does not start the required CI build - Step 3 says to push the branch and watch its CI (`plan.md:182-184,199`), but `.github/workflows/build.yml:3-8` runs on pushes only to `main` or version tags, plus PRs and manual dispatch. With no PR yet, this produces no branch run or device APK. -> Explicitly dispatch `gh workflow run build.yml --ref feat/006-watch-quicktalk-keeps-reply` after the authorized push, then watch that run and use its APK; the probe instructions already use this mechanism (`plan.md:221`). No workflow change is needed.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F3: accepted - Both cases fixed in `Talk`, watch-side only. (1) Giving up words no longer touches `run`. A second
+counter `sends` (bumped by `next()` for each words sent, and by `settle`) guards the word-send callbacks, which check
+`active(mine) && w == sends`. `run` goes up only on a new conversation and in `end()`, and `askStatus` stays as it is,
+keyed on `run` alone. So a status check whose discovery is pending when B fails is still sent, and its answer clears
+`noStatus` (trace T10). (2) When `settle` keeps the wait for an accepted run, it re-arms `quiet`. That covers the
+`heard`-then-`next()` path you found (T11), and also a `status running:false` ignored while B is in flight, which left
+nothing armed (T12: the next check then ends the wait as "stopped working" instead of waiting for the ceiling). I didn't
+change the `if (heard)` re-arm condition, because re-arming in `settle` alone closes both gaps. Plan: Design B (counters,
+`settle`), Step 1, traces T9-T12, two alternatives, decisions.md.
+
+F4: accepted - Step 3 and Test plan row 4: after the authorized push, run `gh workflow run build.yml --ref
+feat/006-watch-quicktalk-keeps-reply`, find that run with `gh run list`, `gh run watch` it, and use
+`buddy-watch-feat-006-watch-quicktalk-keeps-reply.apk` from its `buddy-apk` artifact. Once a PR exists, the PR's run
+also counts. No workflow change.
