@@ -130,4 +130,38 @@ public class ApprovalGateTest {
             assertTrue(n, names.contains(n));
         }
     }
+
+    @Test
+    public void jsonCardsListOnlyTheFieldsThatDiffer() {
+        String[] d = SettingsTool.diff("{\"approval\":\"ask\",\"on\":true}", "{\"approval\":\"now\",\"on\":true}");
+        assertEquals("approval: ask", d[0]);
+        assertEquals("approval: now", d[1]);
+        d = SettingsTool.diff(null, "{\"on\":true}");
+        assertEquals("(none)", d[0]);
+        assertEquals("on: true", d[1]);
+        d = SettingsTool.diff("{\"on\":true}", "");
+        assertEquals("on: true", d[0]);
+        assertEquals("(deleted)", d[1]);
+    }
+
+    @Test
+    public void scheduleAndAppValuesAreChecked() {
+        SettingsTool.Setting sched = SettingsTool.schedule(null, "c1");
+        assertEquals("", sched.check(" "));
+        for (String bad : new String[]{"nope", "{\"text\":\"\",\"days\":127}", "{\"text\":\"hi\",\"days\":0}"}) {
+            try {
+                sched.check(bad);
+                throw new AssertionError(bad);
+            } catch (IllegalArgumentException expected) {
+                // refused
+            }
+        }
+        assertTrue(sched.check("{\"text\":\"hi\",\"days\":127,\"minutes\":[540]}").contains("\"text\":\"hi\""));
+        try {
+            SettingsTool.app(null, "com.example").check("bogus");
+            throw new AssertionError("bogus mode");
+        } catch (IllegalArgumentException expected) {
+            // refused before the phone is asked about the package
+        }
+    }
 }

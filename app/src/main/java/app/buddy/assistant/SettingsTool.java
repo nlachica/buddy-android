@@ -1,6 +1,7 @@
 package app.buddy.assistant;
 
 import org.json.JSONArray;
+import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -11,8 +12,10 @@ import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executor;
 import java.util.concurrent.FutureTask;
+import java.util.function.BiConsumer;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 
 /**
@@ -123,12 +126,7 @@ final class SettingsTool {
                 v -> Prefs.setPhoneShell(svc, v.equals("on")), "", "on", "off") {
             @Override
             String check(String value) {
-                String v = super.check(value);
-                if (v.equals("on") && !Background.setUp(svc)) {
-                    throw new IllegalArgumentException("background mode isn't set up yet; only the user pairs it "
-                            + "(Settings → Background mode)");
-                }
-                return v;
+                return paired(svc, super.check(value));
             }
         });
         // the approval gate for phone commands: only the user changes it
@@ -161,6 +159,152 @@ final class SettingsTool {
             if (!on) Updates.cancel(svc);
             else Prefs.setUpdateNotified(svc, ""); // notify again about a version muted before
         }));
+        return l;
+    }
+
+    /** "on" for background mode or phone commands waits until the user has paired the phone. */
+    private static String paired(BuddyService svc, String v) {
+        if (v.equals("on") && !Background.setUp(svc)) {
+            throw new IllegalArgumentException("background mode isn't set up yet; only the user pairs it "
+                    + "(Settings → Background mode)");
+        }
+        return v;
+    }
+
+    /** An app's mode: hard, smart or trust, or default (Buddy's suggestion; stored as no choice). */
+    static Setting app(BuddyService svc, String pkg) {
+        return new Setting("app/" + pkg, "hard, smart, trust, default") {
+            @Override
+            String get() {
+                return Prefs.appSafety(svc, pkg);
+            }
+
+            @Override
+            String view(String snapshot) {
+                return snapshot != null ? snapshot : "default (" + Guard.modeWhy(svc, pkg, null)[0] + ")";
+            }
+
+            @Override
+            String check(String value) {
+                String v = value.trim().toLowerCase(Locale.ROOT);
+                if (!Arrays.asList("hard", "smart", "trust", "default").contains(v)) {
+                    throw new IllegalArgumentException(name + " takes: " + allowed);
+                }
+                try {
+                    svc.getPackageManager().getApplicationInfo(pkg, 0);
+                } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                    throw new IllegalArgumentException("no installed app " + pkg);
+                }
+                return v.equals("default") ? "" : v;
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{view(snapshot), value.isEmpty() ? "default (Buddy's suggestion)" : value};
+            }
+
+            @Override
+            String set(String value) {
+                Prefs.setAppSafety(svc, pkg, value.isEmpty() ? null : value);
+                return "";
+            }
+
+            @Override
+            String read() {
+                return name + " = " + view(get()) + "  (" + allowed + ")\n" + Guard.modeWhy(svc, pkg, null)[1];
+            }
+        };
+    }
+
+    private static Sessions.Session chat(BuddyService svc, String id) {
+        return ChatHub.get(svc).sessions.find(id);
+    }
+
+    /** A chat's switch: Linux tools or background mode. */
+    private static Setting chatSwitch(BuddyService svc, String id, String what, Predicate<Sessions.Session> get,
+                                      BiConsumer<Sessions.Session, Boolean> set, String note) {
+        return new Scalar("chat/" + id + "/" + what, () -> {
+            Sessions.Session c = chat(svc, id);
+            return c == null ? null : get.test(c) ? "on" : "off";
+        }, v -> {
+            Sessions.Session c = chat(svc, id);
+            if (c == null) throw new IllegalStateException("that chat is gone");
+            set.accept(c, v.equals("on"));
+        }, note, "on", "off") {
+            @Override
+            String check(String value) {
+                String v = super.check(value);
+                return what.equals("background") ? paired(svc, v) : v;
+            }
+        };
+    }
+
+    /** A chat's scheduled task, as Schedules.Plan's JSON; "" removes it. */
+    static Setting schedule(BuddyService svc, String id) {
+        return new Setting("chat/" + id + "/schedule", "a schedule as JSON, or \"\" to remove it") {
+            @Override
+            String get() {
+                Sessions.Session c = chat(svc, id);
+                return c == null || c.schedule == null ? null : c.schedule.toJson().toString();
+            }
+
+            @Override
+            String check(String value) {
+                if (value.trim().isEmpty()) return "";
+                Schedules.Plan p = Schedules.Plan.of(json(value));
+                if (p == null) {
+                    throw new IllegalArgumentException("not a schedule. Shape: {\"minutes\":[540],\"days\":127,\"text\":"
+                            + "\"the message to send\",\"wake\":false,\"quiet\":false,\"paused\":false}; minutes after "
+                            + "midnight, days as bits (Sunday = 1, Saturday = 64), text required");
+                }
+                return p.toJson().toString();
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return diff(snapshot, value);
+            }
+
+            @Override
+            String set(String value) throws Exception {
+                Sessions.Session c = chat(svc, id);
+                if (c == null) throw new IllegalStateException("that chat is gone");
+                ChatHub.get(svc).setSchedule(c, value.isEmpty() ? null : Schedules.Plan.of(new JSONObject(value)));
+                return "";
+            }
+        };
+    }
+
+    /** A JSON object from the agent's text, or IllegalArgumentException. */
+    static JSONObject json(String text) {
+        try {
+            return new JSONObject(text);
+        } catch (org.json.JSONException e) {
+            throw new IllegalArgumentException("the value isn't a JSON object");
+        }
+    }
+
+    /** {now, new} for JSON items: only the fields that differ (all of a new item's, all of a deleted one's). */
+    static String[] diff(String oldJson, String newJson) {
+        if (newJson.isEmpty()) return new String[]{fields(oldJson, null), "(deleted)"};
+        JSONObject n = json(newJson), o = oldJson == null ? null : json(oldJson);
+        return new String[]{o == null ? "(none)" : fields(oldJson, n), fields(newJson, o)};
+    }
+
+    /** "key: value" lines of json, leaving out the fields whose value equals the same field of other. */
+    private static String fields(String json, JSONObject other) {
+        JSONObject o = json(json);
+        StringBuilder b = new StringBuilder();
+        for (String k : new java.util.TreeSet<>(keys(o))) {
+            if (other != null && String.valueOf(o.opt(k)).equals(String.valueOf(other.opt(k)))) continue;
+            b.append(b.length() == 0 ? "" : "\n").append(k).append(": ").append(o.opt(k));
+        }
+        return b.length() == 0 ? "(nothing)" : b.toString();
+    }
+
+    private static List<String> keys(JSONObject o) {
+        List<String> l = new ArrayList<>();
+        for (java.util.Iterator<String> it = o.keys(); it.hasNext(); ) l.add(it.next());
         return l;
     }
 
@@ -238,7 +382,7 @@ final class SettingsTool {
     }
 
     /** buddy_settings: what the agent is told. */
-    String call(org.json.JSONObject a) throws Exception {
+    String call(JSONObject a) throws Exception {
         String name = a.optString("name").trim();
         java.util.concurrent.Executor main = svc::runOnMain;
         if (name.isEmpty()) return onMain(main, this::listing);
@@ -261,12 +405,43 @@ final class SettingsTool {
     /** The setting with this name, or null (main thread). */
     static Setting find(BuddyService svc, String name) {
         for (Setting s : scalars(svc)) if (s.name.equals(name)) return s;
+        if (name.startsWith("app/") && name.substring(4).matches("[A-Za-z0-9_.]+")) return app(svc, name.substring(4));
+        String[] p = name.split("/");
+        if (p.length == 3 && p[0].equals("chat") && chat(svc, p[1]) != null && chat(svc, p[1]).parent.isEmpty()) {
+            switch (p[2]) {
+                case "linux_tools":
+                    return chatSwitch(svc, p[1], p[2], c -> c.dev, (c, on) -> ChatHub.get(svc).setDev(c, on),
+                            " It applies from the chat's next message.");
+                case "background":
+                    return chatSwitch(svc, p[1], p[2], c -> c.background, (c, on) -> ChatHub.get(svc).setBackground(c, on), "");
+                case "schedule":
+                    return schedule(svc, p[1]);
+                default:
+                    return null;
+            }
+        }
         return null;
     }
 
     private String listing() {
         StringBuilder b = new StringBuilder();
         for (Setting s : scalars(svc)) b.append(s.read()).append('\n');
+        b.append("\napp/<package> = hard, smart, trust or default: how freely agents may work in one app. Apps with "
+                + "your choice:\n");
+        for (java.util.Map.Entry<String, String> e : Prefs.appSafetyAll(svc).entrySet()) {
+            b.append("app/").append(e.getKey()).append(" = ").append(e.getValue()).append('\n');
+        }
+        b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off) and "
+                + "chat/<id>/schedule (JSON):\n");
+        String here = McpServer.CALLER_CHAT.get();
+        int n = 0;
+        for (Sessions.Session c : ChatHub.get(svc).sessions.all) {
+            if (!c.parent.isEmpty() || n++ >= 30) continue;
+            b.append("chat/").append(c.id).append(" \"").append(c.title).append("\"").append(c.id.equals(here) ? " (this chat)" : "")
+                    .append(": linux_tools ").append(c.dev ? "on" : "off").append(", background ")
+                    .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
+                            : c.schedule.paused ? "paused" : "set").append('\n');
+        }
         return b.toString().trim();
     }
 }
