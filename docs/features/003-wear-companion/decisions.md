@@ -151,3 +151,27 @@
   reply takes about 3½ minutes) and the wake lock's 20-minute timeout stop a hung engine keeping the watch awake;
   lines are kept either way. (Plan review round 2, F3.)
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Speech: path A (the watch's RecognizerIntent) is built; path B is not
+- Options: A or B, as in the plan (Open question 1: the Watch4 probe was still pending).
+- Choice: A, on the orchestrator's instruction. `TalkActivity.listen()` is the only speech-specific code. If the probe
+  later shows the Watch4 has no recognizer, the activity says "This watch has no speech recognizer." and B has to be
+  built (plan, "The speech piece"); nothing built here has to change for it.
+- By: Coder (claude-sonnet-5-5), on the orchestrator's instruction
+
+## 2026-11-15 - `Talk.begin` also takes the accent, and its `send` reports success or failure
+- Options: (a) the plan's `begin(context, chat, title, Runnable send)`; (b) `begin(context, chat, title, accent, Sender)`
+  where `Sender.send(Phone.Sent done)` hands back the send result.
+- Choice: (b). With a Runnable, `Talk` could not know the send failed ("Couldn't send. Is your phone nearby?") and would
+  wait 10 s for a `heard` that can never come. The accent is kept so the ongoing notification can reopen the screen in
+  the user's colour. Same behaviour otherwise.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Smaller choices while coding
+- The CI "no Google code in the fdroid dex" step uses `grep -a ... >/dev/null`, not `grep -aq` (as in the plan): with
+  `pipefail`, `grep -q` quitting early can break unzip's pipe and make the negated check pass on a hit.
+- An empty message from the watch is answered with the existing `hub_something_wrong` text, not a new string (the
+  watch never sends one; the check only protects the phone).
+- `Talk` shows "Buddy is speaking · <chat>" in its ongoing notification once the wait has ended and speech is still
+  going, so the notification doesn't say "Waiting" while the watch talks.
+- New `watch_*` phone strings are English only; the other languages fall back to it (CONTRIBUTING, "Translations").
