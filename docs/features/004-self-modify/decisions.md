@@ -226,3 +226,8 @@
   Context-free code, and the real `org.json` jar is put before `android.jar` as Gradle's `testImplementation` does. CI
   (`testGithubReleaseUnitTest`) is the first Gradle run of these tests and has not happened yet.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Known issue: first update_buddy install didn't open the installer
+- On device the first `update_buddy install=true` reported "installer is open" but nothing appeared; the second call
+  worked. Likely Android's background-activity-launch limit (Buddy wasn't in front). Not fixed yet: watch for a
+  repeat; a fix would launch the installer from a notification/the bubble. By: Orchestrator
