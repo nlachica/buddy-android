@@ -69,3 +69,39 @@
   notification buzzes the wrist mid-call and the phone's own call behaviour doesn't change. `prepare()` on `deliver()`
   cuts the cold-server part (~5 s of 7.7 s in `live.log`) of (b)'s first-reply latency; one existing call.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The watch alone decides who says a reply; the voice owns it from its first audible block (round 1, F1)
+- Options: first PCM received; first audible block written to the AudioTrack; AudioTrack playback position; the
+  phone's own `lastSound` sent over.
+- Choice: the first audible block (peak > 0.01 of full scale, the phone page's threshold) written to the not-live
+  Speaker, because the tap streams silence from the moment an item is given, and in reply mode nothing written is ever
+  dropped, so written means heard unless hushed. Playback position adds nothing over that. `/buddy/say` only converts an
+  item that isn't the voice's yet, so the phone and the watch can't both say it.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - CodexSpeech retires one watch reply by its Sink; replaces "a broken Sink calls `stop()`" (round 1, F2)
+- Options: global `stop()` (accepted cutting a phone read-aloud); `cancel(sink)` that lets the current text read into
+  nothing; `cancel(sink)` that hangs up and calls again with the queue kept; a second CodexSpeech instance.
+- Choice: `cancel(sink)` with hang-up and re-call, because the brief keeps the phone's voice behaviour unchanged and a
+  re-call is today's path after an idle hang-up (~1-3 s, only when something waits). A Sink matching no item is
+  ignored. The phone's leftover texts stay joined into one Fallback call, as today (Voice's TTS keeps only the last
+  text while initialising).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - One audio owner on the watch: the last one started wins; a call owns its chat (round 1, F3)
+- Options: a call and a typed talk side by side with a shared mixer; defer typed speech until the call ends; the last
+  started ends the other.
+- Choice: the last started wins (call button: Talk ends and hushes, lines kept; a new talk hangs up the call), as 003
+  already does when a new talk replaces one still being said. On the phone the call takes its chat off the 003 relay
+  (its replies reach the watch through the call's voice, as on the phone) and the relay's voice branch is off during
+  any call, as the phone's own read-aloud is (`ChatHub.java:1006`).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Bounded audio queues: call 2 s drop-oldest, reply 10 s then broken; replies never drop (round 1, F5/F6)
+- Options: unbounded with drain-only close (round 0); large reply buffers (a whole reply, minutes); 10 s.
+- Choice: a call keeps 2 s and drops the oldest (it must stay live; the watch Speaker also drops past 1 s); a reply
+  keeps 10 s and then fails, which the watch turns into its TTS when nothing was audible yet. 10 s, because a queued
+  reply only waits behind the previous reply's tail or a short watch TTS line, and a watch that stopped listening
+  (talk swiped away while the run goes on) then wastes at most 10 s of voice. `cancel()` discards and closes the
+  channel to unblock a stuck write; `finish()` drains for at most the queue's length plus 5 s.
+- By: Planner (claude-opus-5-5)

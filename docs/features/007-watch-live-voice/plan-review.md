@@ -16,3 +16,40 @@ F5 [major] Unbounded output queues and drain-only close defeat bounded shutdown 
 F6 [major] The live catch-up policy can silently delete words from typed replies - The same Speaker handles Call and Talk, and drops audio whenever it is more than about one second behind (`plan.md:60-63`). For a queued reply or a burst after link jitter, buffered speech is still part of the text that must be read; dropping it skips words while the "voice already started" rule prevents TTS recovery (`plan.md:148-152`). This regresses 003's ordered, complete TTS readings (`wear/src/main/java/app/buddy/assistant/wear/Talk.java:307-315`). -> Restrict catch-up dropping to live calls. For reply playback, preserve sample order with bounded buffering/backpressure or a defined failure path; do not silently skip speech. Exercise multiple replies behind an earlier TTS item and a channel delivering more than one second of PCM in a burst, checking that each reply is heard in order without missing words.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+F1: accepted, except playback-position tracking - a reply belongs to the voice from its first *audible* block
+(peak > 0.01 of full scale, the phone page's threshold) written to the not-live Speaker. In reply mode nothing written
+is dropped (F6), so written means heard unless hushed. Silent PCM neither commits the reply nor resets its 35 s
+deadline. The watch alone decides: `/buddy/say` only converts a reply the voice doesn't own yet. Tests: Test plan 2 (i)
+was also wrong, because `ensureServer` restarts a killed server (`CodexDictation.java:249`). It now kills the server
+the moment the text shows (silent stream, then `/buddy/say`/EOF), 3 runs. (ii) covers the stalled stream. The
+Speaker's per-stream log line (`audible never`, ended by) proves there was one TTS reading each time.
+F2: accepted - `CodexSpeech.cancel(sink)` replaces the global `stop()`. A queued item with that Sink is dropped (closed,
+no Fallback). If it is the current item, the call hangs up and calls again with the queue kept (today's path after an
+idle hang-up). A Sink matching no item (retired) is ignored. `stop()` (the phone's own) also closes every Sink; a watch
+reply the voice hadn't started then goes to the watch TTS by F1's rule. PcmOut reports the watch closing a queued
+channel (ChannelCallback), so queued replies are retired before anything is written to them. Risk 8 is now the
+reconnect cost. Also fixed: one Fallback call per item would have changed the phone's own fallback (Voice's TTS keeps
+only the last text while initialising). The phone's leftovers stay joined into one call, as today. Tests added (watch
+hush while a phone read-aloud plays, and the reverse).
+F3: accepted - one watch audio owner, the last one started wins (003 already lets a new talk replace one still being
+said). The call button ends Talk's wait and hushes it (`Talk.left()` + `Talk.silence()`). Its lines stay, so 006's
+reopen is unchanged. `Talk.begin` hangs up a call. Phone: WatchCall takes its chat off the 003 relay
+(`WatchLink.untrack`), so its replies reach the watch only through the call's voice (`agentSaid`). The relay's voice
+branch also needs `!CodexLive.on()`, the phone's own no-read-aloud-in-a-call rule (`ChatHub.java:1006`), so there are
+never two realtime sessions. Tests: call started mid-reply and mid-run, with each engine; a talk during a call.
+F4: accepted - the watch picks a call id. The header is `{chat, call}` and status/end carry it; Call ignores other ids
+and closes a channel that opens after its call was ended or replaced. Phone: `CodexLive.push(remote, pcm)` and the
+input-ending `end` act only while `CodexLive.on(remote)`. A WatchCall's cleanup leaves `ses.watch` and the wake lock
+alone for a replacement call. Tests: End then call within 1 s; call again while connecting; End while connecting.
+F5: accepted - PcmOut is bounded. A call keeps 2 s and drops the oldest (it stays live); a reply keeps 10 s and then
+counts as broken (the watch sees the channel end and, if nothing was audible, says it with TTS). `finish()` drains for
+at most the queue's length plus 5 s. `cancel()` discards the queue and closes the stream and channel, which unblocks a
+stuck write. Flush after the header and after every chunk. Setup bounds: phone header 5 s, reply `openChannel` 10 s,
+watch open+header 10 s. No phone-side stall timer: a queued reply's channel is unread on purpose, so the cap is the
+bound. Proof: a JVM `PcmOutTest` (github test source set, already run by CI), covering a consumer that never reads, a
+blocked write cancelled, and a bounded drain. Device runs can't force those cases.
+F6: accepted - the Speaker gets a `live` flag. Call drops audio more than 1 s behind; Talk never drops, and a full
+AudioTrack pushes back through the channel to F5's bounded queue. Tests: a two-message reply heard in order and whole;
+every Speaker line in the run says `dropped 0`.
