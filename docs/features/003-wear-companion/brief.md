@@ -35,3 +35,6 @@ device to phone apps (Samsung call relay), so routing can't reach it; a watch-si
 - 2026-11-15: Both talk and live voice, talk first, live voice later.
 - 2026-11-15: Pick a chat on the watch.
 - 2026-11-15: Use the Wear Data Layer (Google Play services), GitHub build only.
+- 2026-11-15 Nicholas: wants quick access to talk from a watch button. Long-press Home is reserved (Bixby/Assistant);
+  double-press Home can open any app. Agreed: opening the app goes straight to listening in the last-used chat
+  (the chat list stays one swipe/tap away); no tile for now.
