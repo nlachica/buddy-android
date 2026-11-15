@@ -33,13 +33,20 @@ public class WatchLink extends WearableListenerService {
     private static final int LIST_MAX_BYTES = 90_000;
     private static final int SPOKEN_MAX = 3000;
     private static final long WAKE_MS = 15 * 60_000L;
+    /** A reply's voice (ChatGPT's, through CodexSpeech): its channel path is VOICE + id, the phone's "the watch says it" is SAY. */
+    private static final String VOICE = "/buddy/voice/", SAY = "/buddy/say";
+    private static final int VOICE_CAP = 320_000; // 10 s of PCM 16 kHz; past that the reply is broken
+    private static final long OPEN_MS = 10_000, ABANDON_MS = 60_000;
 
     private static final Handler main = new Handler(Looper.getMainLooper());
     /** Chats whose run answers to a watch: chat id → the watch's node id. Main thread. */
     private static final Map<String, String> tracked = new HashMap<>();
     private static Context app;
     private static PowerManager.WakeLock wake;
-    private static boolean listening;
+    private static boolean listening, channelsWatched;
+    /** Replies being voiced: channel path → its stream, until the channel closes. Main thread. */
+    private static final Map<String, PcmOut> voices = new HashMap<>();
+    private static long voiceSeq = System.currentTimeMillis(); // unique across phone restarts
 
     /** The watch opened a channel: /buddy/live is a call (WatchCall). */
     @Override
@@ -116,6 +123,7 @@ public class WatchLink extends WearableListenerService {
                 refuse(node, chat, err);
                 return;
             }
+            if (voiceOn()) CodexDictation.prepare(app); // Codex is warm by the time the answer comes
             tell(node, "/buddy/heard", json("chat", chat, "text", text));
             tracked.put(chat, node);
             ses.watch = true;
@@ -142,8 +150,10 @@ public class WatchLink extends WearableListenerService {
             } else if (msg.kind == Bubble.Kind.BUDDY || msg.kind == Bubble.Kind.ERROR) {
                 String text = Voice.spoken(app, msg.text); // one text to show and to speak: no markdown, no URLs
                 if (text.length() > SPOKEN_MAX) text = text.substring(0, SPOKEN_MAX) + "…";
-                if (!text.isEmpty())
-                    tell(node, "/buddy/reply", json("chat", ses.id, "text", text, "error", msg.kind == Bubble.Kind.ERROR));
+                if (text.isEmpty()) return;
+                // errors keep the watch's own voice (they often come from the failures that also break ChatGPT's)
+                if (msg.kind == Bubble.Kind.BUDDY && voiceOn() && !CodexLive.on()) speakOnWatch(node, ses.id, text);
+                else tell(node, "/buddy/reply", json("chat", ses.id, "text", text, "error", msg.kind == Bubble.Kind.ERROR));
             }
         }
 
@@ -160,6 +170,62 @@ public class WatchLink extends WearableListenerService {
             }
         }
     };
+
+    /** Whether replies are read aloud in ChatGPT's voice (the test of Voice.speak). */
+    private static boolean voiceOn() {
+        return "chatgpt".equals(Prefs.speechEngine(app)) && SetupState.planSignedIn(app, "codex");
+    }
+
+    /** A watch reply's voice (CodexSpeech.Sink): its own channel, so a reply that is hushed or breaks stops alone. */
+    private static final class VoiceSink implements CodexSpeech.Sink {
+        final PcmOut out = new PcmOut(VOICE_CAP, false, ABANDON_MS, () -> main.post(() -> CodexSpeech.cancel(this)));
+
+        @Override
+        public void pcm(byte[] pcm16k) {
+            out.write(pcm16k);
+        }
+
+        @Override
+        public void close() {
+            out.finish();
+        }
+    }
+
+    /** The text first, then ChatGPT's voice on a channel of its own; if the voice fails the watch says the text. */
+    private static void speakOnWatch(String node, String chat, String text) {
+        final long id = ++voiceSeq;
+        tell(node, "/buddy/reply", json("chat", chat, "text", text, "error", false, "voice", id));
+        final VoiceSink sink = new VoiceSink();
+        final String path = VOICE + id;
+        voices.put(path, sink.out);
+        watchChannels();
+        final Runnable late = () -> { // the channel didn't open in time
+            voices.remove(path);
+            sink.out.broken();
+        };
+        main.postDelayed(late, OPEN_MS);
+        final ChannelClient cc = Wearable.getChannelClient(app);
+        cc.openChannel(node, path).addOnSuccessListener(ch -> cc.getOutputStream(ch).addOnSuccessListener(o -> {
+            main.removeCallbacks(late);
+            sink.out.attach(o, () -> cc.close(ch));
+        }).addOnFailureListener(e -> late.run())).addOnFailureListener(e -> late.run());
+        CodexSpeech.speak(app, text, t -> tell(node, SAY, json("chat", chat, "id", id)), sink);
+    }
+
+    /** One callback for all channels: a reply's channel closed by the watch (hushed, said by itself, link gone). */
+    private static void watchChannels() {
+        if (channelsWatched) return;
+        channelsWatched = true;
+        Wearable.getChannelClient(app).registerChannelCallback(new ChannelClient.ChannelCallback() {
+            @Override
+            public void onChannelClosed(ChannelClient.Channel ch, int reason, int code) {
+                main.post(() -> {
+                    PcmOut p = voices.remove(ch.getPath());
+                    if (p != null) p.peerClosed();
+                });
+            }
+        });
+    }
 
     /** A tracked chat that is not running by now has ended for good: tell the watch. Safe to run more than once. */
     private static void endCheck() {

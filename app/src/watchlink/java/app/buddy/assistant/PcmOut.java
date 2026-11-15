@@ -112,6 +112,11 @@ final class PcmOut {
         if (stop(false) && !wasFinished) onBroken.run();
     }
 
+    /** The audio can't be delivered (the channel never opened): cancel, and tell the owner once. */
+    void broken() {
+        if (stop(true)) onBroken.run();
+    }
+
     /** Whether this was cancelled, broken, or has ended. */
     synchronized boolean done() {
         return done;

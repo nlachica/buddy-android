@@ -186,4 +186,16 @@ public class PcmOutTest {
         p.attach(new ByteArrayOutputStream(), closed::incrementAndGet); // opened late: closed at once
         assertEquals(1, closed.get());
     }
+
+    @Test
+    public void channelThatNeverOpenedIsBrokenOnceAndClosedIfItOpensLate() {
+        AtomicInteger closed = new AtomicInteger(), broken = new AtomicInteger();
+        PcmOut p = new PcmOut(100_000, false, 60_000, broken::incrementAndGet);
+        p.write(new byte[10]);
+        p.broken();
+        p.broken();
+        assertEquals(1, broken.get());
+        p.attach(new ByteArrayOutputStream(), closed::incrementAndGet);
+        assertEquals(1, closed.get());
+    }
 }
