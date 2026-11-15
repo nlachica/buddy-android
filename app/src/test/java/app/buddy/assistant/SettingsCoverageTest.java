@@ -398,4 +398,38 @@ public class SettingsCoverageTest {
         assertTrue(r, r.contains("changed while the card was open (now: (none))"));
         assertEquals(null, l.now);
     }
+
+    // ---------------------------------------------------------------- background and appearance
+
+    @Test
+    public void theAccentIsAPresetWallpaperOrSixHexDigits() {
+        assertEquals("ocean", SettingsTool.accent("Ocean"));
+        assertEquals("ocean", SettingsTool.accent("#4f8bff"));
+        assertEquals("ocean", SettingsTool.accent("4F8BFF"));
+        assertEquals("#123ABC", SettingsTool.accent("#123abc"));
+        assertEquals("wallpaper", SettingsTool.accent(" WALLPAPER "));
+        for (String bad : new String[]{"#12345", "blue", "#GGGGGG", "", "#1234567"}) {
+            try {
+                SettingsTool.accent(bad);
+                throw new AssertionError(bad);
+            } catch (IllegalArgumentException expected) {
+                // refused
+            }
+        }
+        assertEquals("#010203", SettingsTool.accentName(0xFF010203));
+        assertEquals("coral", SettingsTool.accentName(0xFFD97757));
+    }
+
+    @Test
+    public void theAppearanceAndBrowserScalarsRefuseABadShape() {
+        for (String n : new String[]{"background_browser", "accent", "surface", "face"}) {
+            assertTrue(n, SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals(n)));
+        }
+        refused(named("surface"), "purple");
+        refused(named("background_browser"), "maybe");
+        refused(named("face"), "avatar");
+        refused(named("accent"), "blue");
+        assertEquals("black", named("surface").check("Black"));
+        assertEquals("#123ABC", named("accent").check("#123abc"));
+    }
 }

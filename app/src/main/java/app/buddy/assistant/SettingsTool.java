@@ -183,8 +183,10 @@ final class SettingsTool {
         l.add(new Scalar("panel_size", () -> Prefs.panelSize(svc), v -> Prefs.setPanelSize(svc, v), "", "full", "compact"));
         String[] themes = new String[Theme.MODES.length];
         for (int i = 0; i < themes.length; i++) themes[i] = Theme.MODES[i][0];
-        l.add(new Scalar("theme", () -> Prefs.themeMode(svc), v -> Prefs.setThemeMode(svc, v),
-                " Screens pick it up when they next open.", themes));
+        l.add(new Scalar("theme", () -> Prefs.themeMode(svc), v -> {
+            Prefs.setThemeMode(svc, v);
+            Theme.changed(svc); // the bubble restyles now
+        }, " Screens pick it up when they next open.", themes));
         l.add(onOff("update_notices", () -> Prefs.updateNotices(svc), on -> {
             Prefs.setUpdateNotices(svc, on);
             if (!on) Updates.cancel(svc);
@@ -193,6 +195,18 @@ final class SettingsTool {
         agentsModels(svc, l);
         voice(svc, l);
         safety(svc, l);
+        l.add(new Scalar("background_browser", () -> Prefs.browser(svc) ? "on" : "off", v -> {
+            Prefs.setBrowser(svc, v.equals("on"));
+            if (v.equals("on")) Browser.install(svc); // the download, now rather than in the middle of a task
+            else new Thread(Browser::stop).start();
+        }, "", "on", "off") {
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{view(snapshot), value.equals("on") && !Browser.installed(svc)
+                        ? "on: Buddy downloads Chromium (about 300 MB) now" : value};
+            }
+        });
+        appearance(svc, l);
         return l;
     }
 
@@ -213,6 +227,78 @@ final class SettingsTool {
         for (Mirrors.M m : Mirrors.ALL) if (!m.id.isEmpty()) ids.add(m.id);
         if (custom) ids.add(Mirrors.CUSTOM);
         return ids.toArray(new String[0]);
+    }
+
+    /** Settings → Appearance (the theme is among the first rows). */
+    private static void appearance(BuddyService svc, List<Setting> l) {
+        l.add(new Scalar("accent", () -> Prefs.accentFromWallpaper(svc) ? "wallpaper" : accentName(Prefs.accent(svc)), v -> {
+            if (v.equals("wallpaper")) Prefs.setAccentFromWallpaper(svc);
+            else Prefs.setAccent(svc, 0xFF000000 | Integer.parseInt(accentHex(v).substring(1), 16));
+            Theme.changed(svc);
+        }, " The bubble restyles at once.", () -> accentChoices()) {
+            @Override
+            String allowed() {
+                return super.allowed() + ", or #RRGGBB (wallpaper needs Android 12+)";
+            }
+
+            @Override
+            String check(String value) {
+                String v = accent(value);
+                if (v.equals("wallpaper") && android.os.Build.VERSION.SDK_INT < 31) {
+                    throw new IllegalArgumentException("the wallpaper colour needs Android 12 or newer");
+                }
+                return v;
+            }
+        });
+        String[] surfaces = new String[Theme.SURFACES.length];
+        for (int i = 0; i < surfaces.length; i++) surfaces[i] = Theme.SURFACES[i][0];
+        l.add(new Scalar("surface", () -> Prefs.surface(svc), v -> {
+            Prefs.setSurface(svc, v);
+            Theme.changed(svc);
+        }, " Black applies in dark mode only.", surfaces));
+        l.add(new Scalar("face", () -> Face.picture(svc) != null ? "picture" : "buddy", v -> {
+            Prefs.setFace(svc, v);
+            if (v.equals("picture") && Face.picture(svc) == null) { // as the screen: back to Buddy's own
+                Prefs.setFace(svc, "buddy");
+                throw new IllegalStateException("the saved picture can't be read");
+            }
+            svc.applyFace();
+        }, "", "buddy", "picture").ready(v -> {
+            if (v.equals("picture") && !Face.saved(svc)) {
+                throw new IllegalArgumentException("no picture is saved; only the user picks one (Settings → Appearance)");
+            }
+        }));
+    }
+
+    private static String[] accentChoices() {
+        List<String> c = new ArrayList<>();
+        for (String[] a : Theme.ACCENTS) c.add(a[1].toLowerCase(Locale.ROOT));
+        c.add("wallpaper");
+        return c.toArray(new String[0]);
+    }
+
+    /** The accent as a preset's name (any case), wallpaper, or six hex digits (a preset's colour becomes its name). */
+    static String accent(String value) {
+        String v = value.trim();
+        if (v.equalsIgnoreCase("wallpaper")) return "wallpaper";
+        for (String[] a : Theme.ACCENTS) if (a[1].equalsIgnoreCase(v)) return a[1].toLowerCase(Locale.ROOT);
+        if (!v.matches("#?[0-9A-Fa-f]{6}")) {
+            throw new IllegalArgumentException("accent takes: " + String.join(", ", accentChoices()) + ", or #RRGGBB");
+        }
+        return accentName(Integer.parseInt(v.replace("#", ""), 16));
+    }
+
+    /** A colour's preset name, else #RRGGBB. */
+    static String accentName(int color) {
+        String hex = String.format("#%06X", color & 0xFFFFFF);
+        for (String[] a : Theme.ACCENTS) if (a[0].equals(hex)) return a[1].toLowerCase(Locale.ROOT);
+        return hex;
+    }
+
+    /** #RRGGBB for a preset's name or a hex value. */
+    private static String accentHex(String v) {
+        for (String[] a : Theme.ACCENTS) if (a[1].equalsIgnoreCase(v)) return a[0];
+        return v;
     }
 
     /** Settings → Safety and approvals. */
