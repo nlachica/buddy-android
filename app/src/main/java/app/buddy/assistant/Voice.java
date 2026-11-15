@@ -101,6 +101,7 @@ final class Voice {
         if (CodexLive.on()) return c.getString(R.string.live_mic_busy); // the call has the microphone
         stopListening();
         stopSpeaking();
+        AudioRoute.use(c);
         String lang = Prefs.voiceLang(c);
         // Claude's dictation (on the user's Claude plan) for the languages it supports; otherwise the phone's
         if ("claude".equals(Prefs.voiceEngine(c)) && ClaudeDictation.supports(lang)) {
@@ -227,6 +228,7 @@ final class Voice {
                 .trim();
         if (clean.isEmpty()) return;
         SpeechPause.begin(c);
+        AudioRoute.use(c);
         if ("chatgpt".equals(Prefs.speechEngine(c)) && SetupState.planSignedIn(c, "codex")) {
             final Context app = c.getApplicationContext();
             CodexSpeech.speak(app, clean, t -> { // the phone's voice if ChatGPT's fails
@@ -266,6 +268,7 @@ final class Voice {
             java.util.Locale loc = c == null ? null : detectLanguage(c, text);
             new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
                 if (tts == null || !ttsReady) return;
+                AudioRoute.use(c); // the phone voice can start well after speak(): a cold engine, language detection, a fallback
                 if (loc != null && tts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE) {
                     tts.setLanguage(loc);
                     android.speech.tts.Voice best = null;

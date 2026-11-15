@@ -25,10 +25,11 @@ final class VoiceBar extends LinearLayout {
         void send();
     }
 
-    private final TextView heard, status;
+    private final TextView heard, status, device;
     private final Wave wave;
     private long started;
     private String state; // null: recording (timer shows)
+    private int ticks;
 
     VoiceBar(Context c, Actions a) {
         this(c, a, false);
@@ -68,6 +69,25 @@ final class VoiceBar extends LinearLayout {
         status = monoText(c, "", 12, MUTED);
         status.setSingleLine(true);
         row.addView(status, wrap());
+        // the audio device in use: a tap moves to the next one (the bubble has no Activity for a menu)
+        device = monoText(c, "", 12, TEXT);
+        device.setSingleLine(true);
+        device.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        device.setMaxWidth(dp(c, 88));
+        device.setGravity(Gravity.CENTER);
+        device.setMinHeight(dp(c, 34));
+        device.setPaddingRelative(dp(c, 10), 0, dp(c, 10), 0);
+        device.setBackground(rounded(c, CARD2, 10));
+        device.setOnClickListener(v -> {
+            String[][] ch = AudioRoute.choices(c);
+            Prefs.setAudioDevice(c, ch[(Math.max(AudioRoute.indexOf(ch, Prefs.audioDevice(c)), 0) + 1) % ch.length][0]);
+            AudioRoute.use(c);
+            showDevice();
+        });
+        LayoutParams dvp = new LayoutParams(LayoutParams.WRAP_CONTENT, dp(c, 34));
+        dvp.setMarginStart(dp(c, 8));
+        row.addView(device, dvp);
+        showDevice();
         if (live) {
             android.widget.Button end = button(c, c.getString(R.string.live_end), false);
             end.setTextColor(ERR);
@@ -106,6 +126,7 @@ final class VoiceBar extends LinearLayout {
         heard.setText("");
         heard.setVisibility(GONE);
         wave.reset();
+        showDevice();
         tick();
     }
 
@@ -139,6 +160,16 @@ final class VoiceBar extends LinearLayout {
         wave.level = Math.max(wave.level, v);
     }
 
+    /** The device in effect: the saved one if it's connected, otherwise Auto. Hidden when there's only Auto. */
+    private void showDevice() {
+        Context c = getContext();
+        String[][] ch = AudioRoute.choices(c);
+        String label = ch[Math.max(AudioRoute.indexOf(ch, Prefs.audioDevice(c)), 0)][1];
+        device.setVisibility(ch.length > 1 ? VISIBLE : GONE);
+        device.setText(label);
+        device.setContentDescription(c.getString(R.string.voice_audio_device, label));
+    }
+
     private void tick() {
         if (state != null) {
             status.setText(state);
@@ -167,6 +198,7 @@ final class VoiceBar extends LinearLayout {
             if (getVisibility() == VISIBLE) {
                 wave.push();
                 tick();
+                if (++ticks % 14 == 0) showDevice(); // a device lost or back mid-call, within a second
             }
             postDelayed(this, 70);
         }

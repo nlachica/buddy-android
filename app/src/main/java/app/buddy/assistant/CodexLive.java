@@ -187,6 +187,7 @@ final class CodexLive {
         Voice.stopListening();
         Voice.stopSpeaking();
         app = c.getApplicationContext();
+        AudioRoute.use(app); // before the call exists: reads the phone's mode as it was, so another call is seen
         logStartNew();
         log("start: chat " + s.id);
         ses = s;
@@ -687,6 +688,7 @@ final class CodexLive {
                 main.post(() -> {
                     if (web != mine || connected) return; // reported by more than one event
                     connected = true;
+                    AudioRoute.use(app); // the page picked its own device when it opened the mic
                     lastActivity = SystemClock.elapsedRealtime();
                     List<String> waiting = new ArrayList<>(pending);
                     pending.clear();

@@ -139,9 +139,16 @@ final class AutoPause {
         if (active != null) for (StatusBarNotification s : active) onNotification(s, true);
     }
 
+    private long liveUntil;
+
     private boolean callNow() {
+        // Buddy's own communication mode (live voice, its tail while the page lets go, or AudioRoute's) isn't a call
+        long now = SystemClock.elapsedRealtime();
+        if (CodexLive.on()) liveUntil = now + 3000;
+        int mode = svc.getSystemService(AudioManager.class).getMode();
+        boolean own = mode == AudioManager.MODE_IN_COMMUNICATION && (now < liveUntil || AudioRoute.ownsMode());
         // ringing, in a call, or in a call in an app (MODE_IN_COMMUNICATION), screening one…: any mode but normal
-        return svc.getSystemService(AudioManager.class).getMode() > AudioManager.MODE_NORMAL || !calls.isEmpty();
+        return (mode > AudioManager.MODE_NORMAL && !own) || !calls.isEmpty();
     }
 
     private void check() {
