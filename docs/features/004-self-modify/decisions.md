@@ -105,3 +105,53 @@
   `buddy_settings`/`update_buddy` descriptions, which are flavor-gated with the tools. The shared system prompt
   stays as upstream has it.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Gate binds the card to the state it showed: snapshot, then re-check and commit on the main thread
+- Options: validate → card → apply (round-1 plan); lock the store for the card's whole wait; snapshot + compare at
+  commit.
+- Choice: snapshot the whole target on the main thread, show the card, and after the user's APPROVED re-read,
+  compare and write in one main-thread task. If it changed or is gone, nothing is written and the agent asks again.
+  The UI writes on the main thread, so the compare-and-write is serialized with it and with other commits, and the
+  main thread never waits on a card. Holding a lock for up to 5 minutes would freeze the screens. (Plan review F3.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Self-install side doors: `install_apk` refuses Buddy's own package; the sheet's Update is protected
+- Options: a second card in `install_apk` for Buddy's package; refuse that package there and point to
+  `update_buddy`; leave both as upstream has them.
+- Choice: refuse it in `install_apk` (github flavor), and an unreadable APK too. Protect the update sheet's Update
+  button (`Ui.protect`). `Updates.install` and `installApk` write `install.apk` and open the installer under one lock.
+  One carded route meets the brief, and a fork-signed APK comes only from the fork's CI as a release. A second card
+  would add a second card text and a file-swap window during the card's wait. `phone_shell`'s `pm install` stays
+  behind its own per-command card, whose switch is read-only in the tool. (Plan review F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - MCP servers: no stored address in any output; values are `on`/`off`/`""`, or a URL for a new id
+- Options: `{url,on}` JSON (round-1 plan, supersedes that part of "Value formats"); show the host only; show no part
+  of the address.
+- Choice: no part of a stored URL appears in replies, cards or errors. A server shows as id, on/off,
+  `key: set|none` and its tools. Existing servers take `on`, `off` or `""`. A URL is accepted only to add a keyless
+  server under a free id. A URL can carry credentials anywhere, a host included (opaque subdomains), and agents
+  never get addresses today (`McpServers.store`). (Plan review F2.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Rules: the setting name's id is authoritative; checks mirror the rule editor
+- Options: trust the JSON's `id` (round-1 plan); path id wins and a conflicting `id` is refused.
+- Choice: `rule/<id>` must exist, and the value's `id` must be absent or equal. `rule/new` refuses an `id` and gets
+  a fresh unused one. Validation is `RulesActivity.save` plus the editor's choice sets (approval, seconds, limit,
+  agents that run rules). Otherwise `Rules.put` could overwrite a rule other than the one on the card.
+  (Plan review F4.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Skills: one confinement check; linked skills are listed by name only
+- Options: slug check only (round-1 plan); follow links but check the canonical target; refuse links.
+- Choice: refuse a symlinked skill folder or `SKILL.md`, check canonical containment in the skills folder, and do
+  this on every access and again right before the write. This is the simplest rule that keeps reads (which could
+  reach Buddy's private files, e.g. the Prefs token) and writes inside the skills folder. Linked skills stay usable
+  by the agents and in the Skills screen. (Plan review F5.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Tests: add the real `org.json` as a test-only dependency (amends "Tests")
+- Options: keep the tested code to plain strings; `testImplementation("org.json:json:…")`; Robolectric.
+- Choice: `testImplementation("org.json:json:20240303")` (the Coder may take the current release). The rule-id and
+  JSON-diff tests need real JSON parsing, and android.jar only has stubs. It is test-only and never in the APK.
+- By: Planner (claude-opus-5-5)
