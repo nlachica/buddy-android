@@ -122,3 +122,32 @@
 - Choice: (b). The updater only knows the official repository (`Updates.java:41-45`), whose APK Android refuses over the
   fork, and a fork-aware updater (watch APK included) is its own feature.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The watch's `Talk` holds a partial wake lock while it works, so its deadlines run with the screen off
+- Options: (a) partial wake lock `buddy:talk` from `begin` until `Talk` stops, 20-minute timeout; (b) absolute
+  `elapsedRealtime` deadlines rechecked when the activity returns or a message arrives; (c) `AlarmManager` wake-ups.
+- Choice: (a). Handler delays stop during CPU sleep and the screen is allowed to sleep; the user who lowers the
+  wrist is waiting to hear the answer, so only an awake check can tell them the phone is gone (end messages are now
+  spoken). Doze leaves a foreground service's wake locks on, and `Talk` is foreground for exactly that span. (b)
+  says nothing until the user looks and doesn't bound the 15-minute ceiling; it stays as Risk 12's fallback. (c)
+  inexact alarms are deferred in Doze, exact ones need `SCHEDULE_EXACT_ALARM`. Cost: CPU awake for the wait, usually
+  a minute or two. (Plan review round 2, F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Watch requests are sent only after the listener is registered; `Talk.begin` takes the sender
+- Options: (a) `Talk.begin(context, chat, title, send)` runs `send` when `addListener`'s Task succeeds, sends nothing
+  on failure; (b) the activity sends right after `begin` (round 1's design).
+- Choice: (a). Starting a service and adding a listener are both asynchronous, and MessageClient keeps nothing, so a
+  fast `heard` or refusal could beat the listener and end in a false timeout. `ChatsActivity` does the same for
+  `/buddy/chats`. (Plan review round 2, F2.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Watch speech: every utterance waits for TTS init in order; `Talk` stops only after the last one
+- Options: (a) an ordered list until init, then an utterance count, and two-step finish: end of the wait, then stop
+  when nothing is left to say (at most 5 minutes after the end); (b) the phone's single `pending` text
+  (`Voice.java:243-260`); (c) stop at the end of the wait.
+- Choice: (a). Several replies can arrive before a cold engine is ready, and `done` can arrive while a long reply
+  plays; (b) drops all but the last, (c) cuts speech and lets the process go. The 5-minute bound (a 3000-character
+  reply takes about 3½ minutes) and the wake lock's 20-minute timeout stop a hung engine keeping the watch awake;
+  lines are kept either way. (Plan review round 2, F3.)
+- By: Planner (claude-opus-5-5)

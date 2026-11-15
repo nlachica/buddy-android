@@ -1,6 +1,6 @@
 # Plan: 003-wear-companion
 <!-- Planner writes: Goal, Design, Steps, Test plan, Risks, Open questions -->
-<!-- Planner (claude-opus-5-5), 2026-11-15. Revised for plan review round 1 (F1-F7, see plan-review.md). -->
+<!-- Planner (claude-opus-5-5), 2026-11-15. Revised for plan review rounds 1 (F1-F7) and 2 (F1-F3), see plan-review.md. -->
 
 ## Goal
 A Buddy app for Nicholas's Galaxy Watch4 (Wear OS 3+) that talks to Buddy on the phone over Google's Wear Data Layer.
@@ -27,7 +27,7 @@ fork (the switch uses a checklist, updates are manual: Steps, "Switching the pho
  TalkActivity ───┼─ Phone.java ── MessageClient (BT/Wi-Fi) ─►   ├─ /buddy/chats  → ChatHub.sessions
    listen() A|B  │                                               ├─ /buddy/send   → ChatHub.send(ses, text)
  Talk (service) ◄┘  the conversation while it waits:      ◄──   ├─ /buddy/status → ses.running
-   listener, TTS, deadlines, lines                               └─ ChatHub.Listener → heard/step/reply/done
+   listener, wake lock, TTS, deadlines, lines                    └─ ChatHub.Listener → heard/step/reply/done
 ```
 The Data Layer only delivers between apps with the **same package name and the same signing certificate**
 (research, "Data Layer hard rule"). So the watch app's `applicationId` is `app.buddy.assistant`, and both APKs are
@@ -148,38 +148,57 @@ CI run and are installed together (Risks).
   `#C9C3B9`, the phone's accent or coral `#D97757`), padding for the round screen
   (`Configuration.isScreenRound()`), and a text-view helper. Two activities use it.
 - `ChatsActivity`: "Buddy" plus the face (`bubble_face`); asks for `/buddy/chats` with its own MessageClient listener
-  while on screen (a request it only needs while visible). With no answer in 8 s: "Buddy on your phone isn't
-  answering." Errors get a Retry button. The list is a `ScrollView` of rows (title, plus "working" for running
-  chats); it takes focus so the Watch4's bezel scrolls it. Tap → `TalkActivity(chat id, title, accent)`.
-- **`Talk`**, a `Service` that is foreground while a conversation waits for the phone (about 130 lines). It, not the
-  activity, receives and speaks, because the wait outlives the screen: Wear OS returns to the watch face after the
-  wrist goes down, and Android may reclaim a stopped activity's process without `onDestroy`.
+  while on screen (a request it only needs while visible). It sends the request only once `addListener`'s Task
+  succeeds, so a fast answer can't arrive before anyone listens (failure → the error with Retry). With no answer 8 s
+  after sending: "Buddy on your phone isn't answering." Errors get a Retry button. The list is a `ScrollView` of rows
+  (title, plus "working" for running chats); it takes focus so the Watch4's bezel scrolls it. Tap → `TalkActivity(chat id, title, accent)`.
+- **`Talk`**, a `Service` that is foreground while a conversation waits for the phone or is still being spoken
+  (about 170 lines). It, not the activity, receives and speaks, because the wait outlives the screen: Wear OS returns
+  to the watch face after the wrist goes down, and Android may reclaim a stopped activity's process without
+  `onDestroy`.
   - The conversation, process-wide: chat id and title, its lines (you / Buddy / error / status), whether it waits,
     and an `unseen` mark (lines that arrived while no activity showed them). One at a time; a new one replaces it.
-  - `Talk.begin(context, chat, title)`, called by `TalkActivity` right before it sends (A: `/buddy/send`; B: the
-    `/buddy/talk` stream). The activity is on screen then, so starting a foreground service is allowed on every
-    Android version. The service goes foreground at once with a silent ongoing notification ("Waiting for Buddy ·
-    <chat>", tap → `TalkActivity` for that chat), registers the MessageClient listener for `/buddy`, and starts
-    `TextToSpeech`.
-  - Each `reply` is added to the lines and spoken there and then, once (`QUEUE_ADD`, `USAGE_ASSISTANT`); `error`
-    replies too, since the user may not be looking. The activity only draws lines, so showing them again never
-    repeats speech.
+  - `Talk.begin(context, chat, title, send)`, called by `TalkActivity` with the sending step as a `Runnable` (A:
+    `Phone.send("/buddy/send", …)`; B: opening the `/buddy/talk` stream). The activity is on screen then, so starting
+    a foreground service is allowed on every Android version. `Talk` goes foreground at once with a silent ongoing
+    notification ("Waiting for Buddy · <chat>", tap → `TalkActivity` for that chat), takes its wake lock, starts
+    `TextToSpeech` and adds its MessageClient listener for `/buddy`. It runs `send` only when `addListener`'s Task
+    succeeds, so a fast `heard` or refusal can't come before anyone listens; if adding fails it sends nothing and
+    ends: "Couldn't connect to your phone. Try again."
+  - Awake while it works: a partial wake lock (`"buddy:talk"`, like the phone's `buddy:rule`), held from `begin` until
+    `Talk` stops, with a 20-minute timeout (the 15-minute ceiling plus the longest reply's speech) so no bug can hold
+    it longer. Handler delays count only awake time and the screen is allowed to sleep, so without it the status
+    check and the ceiling could wait for the next wrist raise. Doze turns off partial wake locks only for apps below
+    foreground-service state, and `Talk` is foreground for exactly this span (Risk 12). Nothing else on the watch
+    waits with the screen off: `ChatsActivity`'s 8 s and `TalkActivity`'s 120 s run while it's on.
+  - Speech: each `reply` (`error` replies and `Talk`'s own end messages too, since the user may not be looking) is
+    added to the lines at once and queued to be spoken, in order, once. Until `TextToSpeech` reports its init, they
+    all wait in a list (the phone's `Voice` keeps a single pending text, `Voice.java:243-260`; the watch can get
+    several replies before a cold engine is ready); on success they go to the engine in order (`QUEUE_ADD`,
+    `USAGE_ASSISTANT`, an utterance id each), and later ones go straight there. An `UtteranceProgressListener` counts
+    what is still to be said (done, error, or stopped by the mic button). Init fails → the list is dropped, replies
+    are shown only, with one line "This watch can't read aloud (no voice installed)". The activity only draws lines,
+    so showing them again never repeats speech.
   - Deadlines, one Handler: no `heard`/`error` 10 s after sending → "Buddy on your phone didn't answer." After
     `heard`, whenever 30 s pass with nothing from the phone, it sends `/buddy/status {chat}`: `running: true` → keep
     waiting; `running: false` and no `done` → "Buddy on your phone stopped working on this, but the answer didn't reach
     the watch. It's in the chat on your phone."; no answer in 10 s, or the send fails → "Lost contact with your phone.
     Your message got there; Buddy's answer will be in the chat on your phone." It never re-sends the message: the
     phone accepted it, and sending again would run it twice.
-  - It ends (listener removed, TTS shut down once its queue is spoken, foreground and notification dropped, the lines
-    kept for the activity) on: `done` ("Stopped on your phone" for `stopped`); `/buddy/error`; either status-check
-    failure above; 15 minutes after `begin`, the phone's wake-lock cap ("Still working on your phone after 15
-    minutes. The answer will be in the chat there."); or the user swiping `TalkActivity` away (`isFinishing()` in
-    `onDestroy`). The wrist going down, the watch face coming back, or Android destroying the activity don't end it.
+  - It finishes in two steps. **End** of the wait, on: `done` ("Stopped on your phone" for `stopped`);
+    `/buddy/error`; either status-check failure above; the listener failing to add; 15 minutes after `begin`, the
+    phone's wake-lock cap ("Still working on your phone after 15 minutes. The answer will be in the chat there."); or
+    the user swiping `TalkActivity` away (`isFinishing()` in `onDestroy`). The end cancels the deadlines, removes the
+    listener and stops waiting; the activity shows it. **Stop**, once the wait has ended and nothing is left to say
+    (the last utterance done or failed, or no TTS), or at the latest 5 minutes after the end (a 3000-character reply,
+    the cap, takes about 3½ minutes to say): TTS shut down, wake lock released, foreground and notification dropped,
+    `stopSelf`; the lines stay for the activity. So a `done` that arrives mid-reply doesn't cut the speech, and a hung
+    engine can't keep the watch awake. The wrist going down, the watch face coming back, or Android destroying the
+    activity cause neither.
   - Manifest: the service with `android:foregroundServiceType="remoteMessaging"` (Android 14+ requires a type; this
     one is for passing a user's messages between their devices and needs no runtime permission), plus
-    `FOREGROUND_SERVICE` and `FOREGROUND_SERVICE_REMOTE_MESSAGING`. No `POST_NOTIFICATIONS` request: the service runs
-    without it, Wear OS 4+ only hides the notification.
-  - TTS init fails → replies are shown only, with one line "This watch can't read aloud (no voice installed)".
+    `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_REMOTE_MESSAGING` and `WAKE_LOCK`. No `POST_NOTIFICATIONS` request: the
+    service runs without it, Wear OS 4+ only hides the notification.
 - `TalkActivity`, a view of `Talk`: on a fresh open it starts listening at once (the "tap to speak" is the tap on the
   chat), unless `Talk` has something for this chat the user hasn't seen (still waiting, or `unseen` lines), or Android
   is recreating it (`savedInstanceState != null`); then it just shows the conversation. A round accent mic button
@@ -188,22 +207,22 @@ CI run and are installed together (Risks).
   reply appended (`error` replies in the error colour); the end restores the face. `FLAG_KEEP_SCREEN_ON` while `Talk`
   waits, but at most 120 s with nothing from the phone (each step/reply resets the clock). After that the screen may
   sleep and the status reads "Still working on your phone. I'll read the answer out when it comes.", which holds,
-  since `Talk` keeps waiting and speaking.
+  since `Talk` keeps the watch awake to check and speak.
 
 ### The speech piece: swappable, **pending the Watch4 probe**
 Everything after "the words reached the phone" is shared, because the phone answers `heard` in both cases. Only
 `TalkActivity.listen()` and what it calls differ. The Coder builds **one** of these, whichever the probe allows:
 - **A, the watch recognizer (preferred).** Use it if the probe gets text back from `ACTION_RECOGNIZE_SPEECH` on the
   Watch4. `startActivityForResult` with `LANGUAGE_MODEL_FREE_FORM` and the prompt "Ask Buddy"; RESULT_OK →
-  `Talk.begin(…)`, then `Phone.send("/buddy/send", {chat, text})`; cancel → stay with the mic button;
+  `Talk.begin(…)` with `Phone.send("/buddy/send", {chat, text})` as its sender; cancel → stay with the mic button;
   `ActivityNotFoundException` → "This watch has no speech recognizer." The system's voice UI holds the microphone, so
   the watch app needs **no `RECORD_AUDIO`**. About 25 lines.
 - **B, the phone transcribes.** Use it if A fails (no handler, or `isRecognitionAvailable` false *and* the intent
   returns nothing). The watch records with `AudioRecord` (16 kHz mono PCM16, `RECORD_AUDIO` asked at runtime on the
   watch). It stops on a tap or on end of speech (a copy of `Voice.EndOfSpeech`, `Voice.java:39-60`, about 25 lines)
-  and, after `Talk.begin(…)`, streams over `ChannelClient.openChannel(node, "/buddy/talk")`: a header line, then the
-  PCM. Recording happens while the activity is on screen, so no microphone foreground service is needed. On the
-  phone, the manifest adds `CHANNEL_EVENT` for `/buddy`, and `WatchLink.onChannelOpened` reads the stream into a new
+  and hands `Talk.begin(…)` a sender that streams it over `ChannelClient.openChannel(node, "/buddy/talk")`: a header
+  line, then the PCM. Recording happens while the activity is on screen, so no microphone foreground service is
+  needed. On the phone, the manifest adds `CHANNEL_EVENT` for `/buddy`, and `WatchLink.onChannelOpened` reads the stream into a new
   `MicServer` feed. `MicServer.useFeed()` makes the next `startCapture` take pushed chunks instead of opening the
   phone's mic (`MicServer.java:106-150`); the PCM format is already the same. Then `Voice.listen` runs with the
   user's chosen engine (Claude or ChatGPT dictation read `MicServer`), and `onFinal(text)` → `deliver(...)`. With the
@@ -232,6 +251,9 @@ Everything after "the words reached the phone" is shared, because the phone answ
 - Watch `WearableListenerService` as the receiver: survives process death, but its process is cached again as soon
   as delivery returns, so speech can still be cut; the foreground `Talk` keeps the process for the whole wait.
 - A Session flag marking "note continuation pending": the posted end check gets the same answer with no main-code state.
+- No watch wake lock, absolute `elapsedRealtime` deadlines rechecked when the screen returns: a dead link or Buddy then
+  goes unsaid until the user looks, and the 15-minute ceiling doesn't hold asleep (Risk 12's fallback).
+- `AlarmManager` wake-ups for the 30 s check: inexact alarms are deferred in Doze; exact ones need `SCHEDULE_EXACT_ALARM`.
 - A "More" page for the chat list: every eligible chat fits in one message.
 
 ## Steps
@@ -270,11 +292,11 @@ Each step is one commit on `feat/003-wear-companion`.
    check, wake lock, as in Design; about 190 lines).
 5. **Watch: chat list.** `wear/src/main/java/app/buddy/assistant/wear/Phone.java`, `Look.java`, the full
    `ChatsActivity.java`, and the strings they use.
-6. **Watch: the conversation.** `wear/.../Talk.java` (state, listener, TTS, deadlines and status check, ongoing
-   notification, endings, as in Design), its manifest entry and permissions, and its strings. Independent of the
-   probe.
-7. **Watch: talk screen. Wait for the probe result** (Open question 1). `TalkActivity.java`, its manifest entry and
-   its strings, with **7A**, the watch recognizer; or **7B**: `TalkActivity` recording + `RECORD_AUDIO`, the phone's
+6. **Watch: the conversation.** `wear/.../Talk.java` (state, listener then send, wake lock, TTS queue, deadlines
+   and status check, ongoing notification, end and stop, as in Design), its manifest entry and permissions
+   (`WAKE_LOCK` included), and its strings. Independent of the probe.
+7. **Watch: talk screen. Wait for the probe result** (Open question 1). `TalkActivity.java` (it hands `Talk.begin`
+   the sender), its manifest entry and its strings, with **7A**, the watch recognizer; or **7B**: `TalkActivity` recording + `RECORD_AUDIO`, the phone's
    `WatchLink.onChannelOpened` + `CHANNEL_EVENT` filter, and the `MicServer.useFeed()` seam (`MicServer.java`).
    For 7B, split the phone part into its own commit.
 8. **Docs.** `README.md`: a short "Galaxy Watch (Wear OS)" section. It covers what the watch app does (phase 1), that
@@ -327,9 +349,9 @@ feature docs; file contents and credentials never do.
 | Done-when | Proof |
 |---|---|
 | 1 builds in CI, installs | CI run on the branch green with `:wear:assembleRelease` (from Step 1); artifact `buddy-apk` contains `buddy-watch-<ref>.apk` (from Step 2). After Step 0: `apksigner verify --print-certs` shows the same SHA-256 cert digest for `buddy-watch-*.apk` and `buddy-*.apk`. `adb -s <watch> install` → `Success`; the app opens on the Watch4 (screenshot via `adb -s <watch> exec-out screencap -p`). |
-| 2 list, speak, runs | On the devices: the watch list matches the phone's chats (top-level, unarchived, pinned first), all of them, with more than 20 eligible chats on the phone (count equal). Speak "what time is it" into a chat → the phone chat shows it as the user's message and the run starts (screenshot of the phone chat). **Busy chat, note as a second run:** on the phone, ask a chat for a long answer with no phone actions (e.g. "write a 400-word story about a lighthouse"); while it writes, speak "what is two plus two" into that chat from the watch → shown as a note; the first run ends, the note runs as a second run; the watch stays "working" in between, speaks the story and then "four", and gets `done` only after the second run; the phone speaks neither. Repeat, and press Stop on the phone while the note waits → the watch shows the "note not sent" line and "Stopped on your phone". |
-| 3 reply shown + spoken | The reply text appears on the watch and is heard from the watch speaker, once: reopening the talk screen shows it without speaking it again. With Settings → read replies aloud **on**, the phone stays silent and posts no "finished" notification. A multi-part reply arrives part by part; status lines show during tool use. |
-| 4 locked phone, clear errors | Phone locked, screen off for 5+ min, in a pocket → a watch question still gets its answer. Watch Bluetooth and Wi-Fi off → "Can't reach your phone…". Official Buddy / no fork on the phone → "Buddy's watch link isn't on your phone…" (can be checked **today**, before any switch). Accessibility service off → the phone's `watch_buddy_off` text. **Slow answer:** a question that takes over 2 minutes; the screen is released after 120 s and the wrist lowered until the watch face is back → the answer is still spoken, and reopening shows it without repeating it. Same with the watch's Developer options → "Don't keep activities" on (the activity is destroyed on leaving), and with `adb -s <watch> shell am kill app.buddy.assistant` while waiting (it kills only cached processes: the foreground `Talk` keeps the process, and `dumpsys activity services app.buddy.assistant` shows it foreground). **After `heard`:** the phone in airplane mode (or the watch's Bluetooth and Wi-Fi off) → within about 40 s "Lost contact with your phone…" and the working state ends; `adb shell am force-stop app.buddy.assistant` on the phone → the watch leaves the working state within about 40 s, with the "stopped working" or "lost contact" text; in both, the phone chat holds the message once (no re-send). |
+| 2 list, speak, runs | On the devices: the watch list matches the phone's chats (top-level, unarchived, pinned first), all of them, with more than 20 eligible chats on the phone (count equal). Speak "what time is it" into a chat → the phone chat shows it as the user's message and the run starts (screenshot of the phone chat). **Busy chat, note as a second run:** on the phone, ask a chat for a long answer with no phone actions (e.g. "write a 400-word story about a lighthouse"); while it writes, speak "what is two plus two" into that chat from the watch → shown as a note; the first run ends, the note runs as a second run; the watch stays "working" in between, speaks the story and then "four", and gets `done` only after the second run; the phone speaks neither. Repeat, and press Stop on the phone while the note waits → the watch shows the "note not sent" line and "Stopped on your phone". **Cold start (listener before send):** before each of these, `adb -s <watch> shell am force-stop app.buddy.assistant`; then open the app → the list loads (no "isn't answering"); pick a chat and speak → "You: …" from the fast `heard`, no "didn't answer"; with the phone's accessibility service off → the `watch_buddy_off` text at once, not the 10 s timeout. |
+| 3 reply shown + spoken | The reply text appears on the watch and is heard from the watch speaker, once: reopening the talk screen shows it without speaking it again. With Settings → read replies aloud **on**, the phone stays silent and posts no "finished" notification. A multi-part reply arrives part by part; status lines show during tool use. **Cold voice, quick replies:** force-stop the watch's TTS engine (package from `adb -s <watch> shell settings get secure tts_default_synth`) and the watch app; ask for three separate one-line messages, and lower the wrist at once → all three are spoken in order, once, though `done` arrives during the first; `dumpsys activity services app.buddy.assistant` shows `Talk` foreground until the last word, and gone shortly after. |
+| 4 locked phone, clear errors | Phone locked, screen off for 5+ min, in a pocket → a watch question still gets its answer. Watch Bluetooth and Wi-Fi off → "Can't reach your phone…". Official Buddy / no fork on the phone → "Buddy's watch link isn't on your phone…" (can be checked **today**, before any switch). Accessibility service off → the phone's `watch_buddy_off` text. **Slow answer:** a question that takes over 2 minutes; the screen is released after 120 s and the wrist lowered until the watch face is back → the answer is still spoken, and reopening shows it without repeating it. Same with the watch's Developer options → "Don't keep activities" on (the activity is destroyed on leaving), and with `adb -s <watch> shell am kill app.buddy.assistant` while waiting (it kills only cached processes: the foreground `Talk` keeps the process, and `dumpsys activity services app.buddy.assistant` shows it foreground). **After `heard`:** the phone in airplane mode (or the watch's Bluetooth and Wi-Fi off) → within about 40 s "Lost contact with your phone…" and the working state ends; `adb shell am force-stop app.buddy.assistant` on the phone → the watch leaves the working state within about 40 s, with the "stopped working" or "lost contact" text; in both, the phone chat holds the message once (no re-send). **Screen really off (wake lock):** watch on the wrist, off the charger (Doze doesn't start while charging), adb disconnected; ask a slow question and lower the wrist; when the screen has been dark for 2 minutes, put the phone in airplane mode → within about 40 s the watch *speaks* "Lost contact with your phone…" with the screen still off. Raise the wrist 20+ minutes later and open that chat → the conversation ends with that line, no working face, no auto-listen, no ongoing notification; the phone chat holds the message once; `adb -s <watch> shell dumpsys power` lists no `buddy:talk` wake lock. The 15-minute ceiling runs on the same Handler and wake lock, so this covers it. |
 | 5 F-Droid clean, GitHub has link | (a) Step 1 commit: unsigned `assembleFdroidRelease` APK from the branch equals main's, entry by entry (fork CI without secrets gives unsigned APKs to compare directly; else `apksigcopier compare --unsigned`). (b) Every later commit: the new CI step finds no `Lcom/google/android/gms/` in the fdroid dex; `aapt2 dump xmltree --file AndroidManifest.xml` of the fdroid APK has no `WatchLink`/gms entries, while the github APK has both. (c) CI "F-Droid APK is reproducible" green (once secrets exist; before that it fails on the fork for a known reason). (d) `FLAVOR=github bash build.sh` (or, without native libs, its step-3 javac line) compiles on the phone with Buddy's javac/aapt2/d8. |
 | 6 looks like Buddy, style, YAGNI | Watch screenshots: black background, Buddy face and icon, the phone's accent colour. Code review against the repo style: single-file package-private classes, why-comments, strings in resources, no new dependencies beyond Play services in github/wear. The diff holds only the files in Steps 1-8 (plus `migration.md`). |
 
@@ -359,8 +381,9 @@ scratch key, echoing `/buddy/send`) checks locked-phone delivery and the wake lo
 7. **F-Droid upstream.** The fork isn't on F-Droid. If this were ever upstreamed, F-Droid's scanner would flag
    `com.google.android.gms` in `wear/` and `app/build.gradle.kts`; the fdroiddata recipe would need `scandelete`
    and a `prebuild` line. Out of scope.
-8. **Battery on the watch:** at most 120 s of forced screen-on per question; the foreground `Talk` for at most 15
-   minutes, with one small status message per 30 s of silence; TTS and the listener cost little.
+8. **Battery on the watch:** at most 120 s of forced screen-on per question; the foreground `Talk` and its partial
+   wake lock (CPU awake, screen off) for the wait plus the speech, usually a minute or two, at most 15 + 5 minutes
+   (20-minute timeout), with one small status message per 30 s of silence; TTS and the listener cost little.
 9. **Install friction:** watch adb needs Wi-Fi on the watch (same network, no client isolation) and a pairing code
    read off the watch, which only Nicholas can do (research, constraint 15).
 10. **The `remoteMessaging` service type on Wear OS** is untested here. If the Watch4 refuses it, the first device
@@ -368,6 +391,10 @@ scratch key, echoing `/buddy/send`) checks locked-phone delivery and the wake lo
 11. **Buddy's updater on the fork** announces official releases it can't install (different key). Mitigation: Update
     notices off and manual updates of the matching pair (Step 8, checklist step 10); a fork-aware updater is a
     separate feature.
+12. **Watch power management.** Doze leaves a foreground service's partial wake lock on, but Samsung's own power
+    saving (or Bedtime mode) might still hold the timers. The screen-off test (Test plan 4) shows it. Fallback, back to
+    the Planner: absolute `elapsedRealtime` deadlines rechecked when the activity returns or a message wakes `Talk`,
+    with the wrist-down promise narrowed to "you'll see it when you look".
 
 ## Open questions
 These are not research questions; the plan can go to review now. Q1 gates Step 7 only, Q2 and Q3 gate

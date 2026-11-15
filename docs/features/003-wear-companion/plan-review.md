@@ -67,3 +67,34 @@ F2 [minor] Request sending is not ordered after receiver readiness - `plan.md:15
 F3 [minor] TTS readiness and foreground lifetime through playback need an explicit contract - `plan.md:162-166` starts TTS and speaks every arriving reply immediately, but [TextToSpeech requires initialization to complete before synthesis](https://developer.android.com/reference/android/speech/tts/TextToSpeech). The existing phone implementation already buffers pending speech for this reason (`app/src/main/java/app/buddy/assistant/Voice.java:243-260`). Also, `plan.md:173-177` defers TTS shutdown until the queue is spoken but does not clearly defer dropping foreground status; `done` can arrive while a long reply is still playing. -> Retain all pending utterances until successful initialization, drain them once in order, and keep `Talk` foreground until the last utterance completes or fails. Bound failed initialization/playback cleanup and preserve shown text. Check a cold TTS engine with multiple quick replies followed immediately by `done`, with the activity off screen.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+F1: accepted - Bounded wake: `Talk` holds a partial wake lock `"buddy:talk"` (watch `WAKE_LOCK`) from `begin` until
+it stops, with a 20-minute timeout (the 15-minute ceiling plus the longest speech, F3). Its Handler deadlines then run
+in real time with the screen off. Doze turns off partial wake locks only for apps below foreground-service state, and
+`Talk` is foreground for exactly that span. I chose this over `elapsedRealtime` deadlines rechecked on wake because
+someone who lowers the wrist is waiting to *hear* the answer. Only an awake check can tell them the phone is gone, so
+`Talk`'s own end messages are now spoken too. Nothing else on the watch waits with the screen off: `ChatsActivity`'s
+8 s and `TalkActivity`'s 120 s run while it's on. The cost is CPU time for the wait, usually a minute or two (Risk 8).
+Test plan 4 adds the screen-off test: on the wrist, off the charger, adb disconnected, airplane mode after 2 minutes
+of dark screen. The watch must speak "Lost contact" within about 40 s with the screen still off. Opening it 20+
+minutes later must show the ended conversation, with no auto-listen, no notification, no wake lock and the message in
+the phone chat once. New Risk 12: if Samsung's power management still holds the timers, that test shows it, and your
+recheck-on-wake option is the fallback (also in Alternatives).
+F2: accepted - `Talk.begin(context, chat, title, send)` takes the sending step (A: `/buddy/send`; B: opening the
+`/buddy/talk` stream) and runs it only when `addListener`'s Task succeeds. If adding fails it sends nothing and ends
+with "Couldn't connect to your phone. Try again." The 10 s deadline starts at the send. `ChatsActivity` sends
+`/buddy/chats` only after its own `addListener` succeeds (failure → the error with Retry), and its 8 s starts at that
+send. Test plan 2 adds cold-start checks after a watch force-stop: the list loads, a fast `heard` arrives, and an
+immediate `watch_buddy_off` refusal shows. None may end in a false timeout.
+F3: accepted - Every utterance waits in an ordered list until TTS init reports, then they're spoken in order, once.
+The phone's `Voice.java:243-260` keeps a single `pending` text, which isn't enough here. An `UtteranceProgressListener`
+counts what is left to say. `Talk` now finishes in two steps:
+- **End** of the wait (`done`, error, lost contact, 15 minutes, swipe-away): deadlines and listener off; the screen
+  shows the end.
+- **Stop**, once nothing is left to say, or TTS failed, or at most 5 minutes after the end (a 3000-character reply
+  takes about 3½ minutes): TTS off, wake lock released, foreground dropped.
+
+The lines are kept either way. Test plan 3 adds the cold-engine test: watch TTS engine and watch app force-stopped,
+three quick replies, `done` during the first, wrist down. All three must be spoken in order, once, with `Talk`
+foreground until the last word.
