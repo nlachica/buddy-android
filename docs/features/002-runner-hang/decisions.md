@@ -154,3 +154,10 @@
   steps 1-3 of build.sh by hand into /tmp/buddy-build-002; the string (step 6) was added after the Java that uses
   it, so only the step 5 commit alone doesn't compile.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - The `until_exit` relay is a bash `read` loop, not awk (review round 1 F1)
+- Options: (a) keep awk and add a workaround for mawk's input buffering; (b) a `while IFS= read -r` loop that
+  stops at the end line and forwards non-empty lines with builtin `printf`.
+- Choice: (b). It drops the relay's awk dependency, so busybox and mawk behave the same: a line is passed on as
+  soon as it is read, and the loop leaves at the end line. `PIPESTATUS[0]` is still the producer's status.
+- By: Coder (claude-sonnet-5-5)

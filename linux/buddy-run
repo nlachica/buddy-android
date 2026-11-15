@@ -47,8 +47,11 @@ kill_tree() {
 # with no buddy_done (feature 002). run_<x> gets a shell of its own, and this one only waits for it: the end line
 # comes however that shell ends, killed included.
 until_exit() {
-  local end="buddy-run: agent exited $$ $RANDOM"
-  { "$@" & wait "$!"; s=$?; printf '\n%s\n' "$end"; exit "$s"; } | awk -v end="$end" '$0 == end { exit } $0 != "" { print; fflush() }'
+  local end="buddy-run: agent exited $$ $RANDOM" line
+  { "$@" & wait "$!"; s=$?; printf '\n%s\n' "$end"; exit "$s"; } | while IFS= read -r line; do
+    [ "$line" = "$end" ] && break
+    [ -n "$line" ] && printf '%s\n' "$line"  # bash, not awk: mawk holds back short lines on a pipe
+  done
   return "${PIPESTATUS[0]}"
 }
 

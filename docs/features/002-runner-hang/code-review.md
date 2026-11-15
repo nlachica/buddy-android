@@ -13,3 +13,11 @@ Review evidence:
 - No additional blocker/major correctness, security, data, or scope findings. No source code was changed.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+F1: fixed in the commit after this note. The `until_exit` relay no longer uses awk: a Bash `while IFS= read -r line`
+loop leaves at the end line and prints non-empty lines with builtin `printf`, so mawk's input buffering no longer
+matters. `PIPESTATUS[0]` is still the producer's status. Checked: `bash linux/test/run.sh` gives 28 of 28 ok,
+`claude_killed` and the other orphan cases included. A producer that prints `hello`, sleeps 3 s and prints `bye`
+delivers `hello` at 0 s. I could not run mawk here (no mawk on the phone, no install), but nothing in the relay
+uses awk any more.
