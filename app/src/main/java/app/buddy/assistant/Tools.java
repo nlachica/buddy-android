@@ -303,9 +303,11 @@ final class Tools {
                             + "the user asks to update Buddy or whether there's a new version.", props()));
         } else {
             t.put(tool("update_buddy",
-                    "Check whether a newer Buddy is out (the official GitHub release) and what's new; with install=true, "
-                            + "download it and open Android's installer. Use it when the user asks to update Buddy or whether "
-                            + "there's a new version. Only the user can tap Update.",
+                    "Check whether a newer Buddy is out (this fork's GitHub release) and what's new; with install=true, "
+                            + "Buddy shows the user an approval card, then downloads it and opens Android's installer. Use it "
+                            + "when the user asks to update Buddy or whether there's a new version. Only the user can approve "
+                            + "and tap Update. To ship your own change to Buddy's code, see \"Updating Buddy on the phone\" in "
+                            + "the buddy-fork repo's AGENTS.md: a version bump and a tag make the fork's CI publish the release.",
                     props().put("install", boolProp("true: download the update and open the installer (after the user said yes)"))));
         }
         t.put(tool("wait_for_install",
@@ -2103,43 +2105,56 @@ final class Tools {
                     + "Settings (it also covers sessions outside Buddy's chats, like this one), wait until they say it's "
                     + "done, then call install_apk again.";
         }
-        java.io.File out = FilesProvider.apkFile(svc);
-        if (path != null && path.matches("http://(127\\.0\\.0\\.1|localhost):\\d+/.*")) {
-            // only from this phone: another app (e.g. Termux) serving an APK it built
-            java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(path).openConnection();
-            c.setConnectTimeout(5000);
-            c.setReadTimeout(30000);
-            try (java.io.InputStream in = c.getInputStream(); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
-                copy(in, o);
-            } catch (java.io.IOException e) {
-                return "Couldn't download " + path + ": " + e.getMessage();
-            } finally {
-                c.disconnect();
+        java.io.File out = FilesProvider.newApk(svc.getCacheDir()); // this attempt's own file (the installer opens it later)
+        boolean opened = false;
+        try {
+            if (path != null && path.matches("http://(127\\.0\\.0\\.1|localhost):\\d+/.*")) {
+                // only from this phone: another app (e.g. Termux) serving an APK it built
+                java.net.HttpURLConnection c = (java.net.HttpURLConnection) new java.net.URL(path).openConnection();
+                c.setConnectTimeout(5000);
+                c.setReadTimeout(30000);
+                try (java.io.InputStream in = c.getInputStream(); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
+                    copy(in, o);
+                } catch (java.io.IOException e) {
+                    return "Couldn't download " + path + ": " + e.getMessage();
+                } finally {
+                    c.disconnect();
+                }
+                if (out.length() < 4) return "No APK at " + path + ".";
+            } else {
+                if (path == null || !path.startsWith("/") || !path.endsWith(".apk")) return "Give the full path of an .apk file.";
+                java.io.File root = Linux.root(svc).getCanonicalFile();
+                java.io.File f = new java.io.File(root, path.substring(1)).getCanonicalFile();
+                if (!f.getPath().startsWith(root.getPath() + "/") || !f.isFile()) return "No APK at " + path + ".";
+                try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
+                    copy(in, o);
+                }
             }
-            if (out.length() < 4) return "No APK at " + path + ".";
-        } else {
-            if (path == null || !path.startsWith("/") || !path.endsWith(".apk")) return "Give the full path of an .apk file.";
-            java.io.File root = Linux.root(svc).getCanonicalFile();
-            java.io.File f = new java.io.File(root, path.substring(1)).getCanonicalFile();
-            if (!f.getPath().startsWith(root.getPath() + "/") || !f.isFile()) return "No APK at " + path + ".";
-            try (java.io.InputStream in = new java.io.FileInputStream(f); java.io.OutputStream o = new java.io.FileOutputStream(out)) {
-                copy(in, o);
+            if (!Flavor.FDROID) { // Buddy's own APK goes through update_buddy, which shows the user a card first
+                android.content.pm.PackageInfo pi = svc.getPackageManager().getPackageArchiveInfo(out.getPath(), 0);
+                if (pi == null) return "Android can't read that file as an app, so it wasn't opened.";
+                if (svc.getPackageName().equals(pi.packageName)) {
+                    return "That's Buddy itself: use update_buddy with install=true (the user approves it on a card).";
+                }
             }
+            if (!svc.getPackageManager().canRequestPackageInstalls()) {
+                svc.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        android.net.Uri.parse("package:" + svc.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+                return "Buddy isn't allowed to install apps yet. Android's settings page for that is open now: ask the user to "
+                        + "turn on 'Allow from this source' for Buddy, wait until they say it's done, then call install_apk again.";
+            }
+            svc.startActivity(new Intent(Intent.ACTION_VIEW)
+                    .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
+                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
+            opened = true;
+            return "The installer is open. The user must tap Install/Update and confirm (you can't). Call wait_for_install now.";
+        } finally {
+            if (!opened) out.delete(); // a file the installer will open later is left as it is
         }
-        if (!svc.getPackageManager().canRequestPackageInstalls()) {
-            svc.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    android.net.Uri.parse("package:" + svc.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
-            return "Buddy isn't allowed to install apps yet. Android's settings page for that is open now: ask the user to "
-                    + "turn on 'Allow from this source' for Buddy, wait until they say it's done, then call install_apk again.";
-        }
-        svc.startActivity(new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(FilesProvider.apkUri(), "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
-        return "The installer is open. The user must tap Install/Update and confirm (you can't). Call wait_for_install now.";
     }
 
     /** Buddy's own updates (see {@link Updates}). */
-    private String updateBuddy(boolean install) {
+    private String updateBuddy(boolean install) throws InterruptedException {
         Updates.Release r;
         try {
             r = Updates.latest();
@@ -2152,6 +2167,9 @@ final class Tools {
             return head + " An update is available. What's new:\n" + r.notes + "\n\nAsk the user if they want it now; "
                     + "if yes, call update_buddy with install=true.";
         }
+        String no = SettingsTool.approval(c -> svc.askConfirm(c, false),
+                svc.getString(R.string.tools_card_update, r.version, BuildInfo.VERSION, r.notes));
+        if (no != null) return "Not installed. " + no;
         svc.showStatus(svc.getString(R.string.tools_status_downloading, r.version));
         String res = Updates.install(svc, r);
         if (Updates.NEEDS_PERMISSION.equals(res)) {

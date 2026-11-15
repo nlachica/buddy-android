@@ -33,16 +33,16 @@ import java.net.URL;
 import static app.buddy.assistant.Ui.*;
 
 /**
- * Buddy's own updates, only ever from its official GitHub release (Android also refuses an APK that isn't signed
- * like the installed one). Used by the update_buddy tool, the daily check behind the "update available"
+ * Buddy's own updates, only ever from this fork's GitHub release, which the fork's CI builds and signs (Android also
+ * refuses an APK that isn't signed like the installed one). Used by the update_buddy tool, the daily check behind the "update available"
  * notification (Settings → Update notices), and the sheet that notification opens.
  */
 public final class Updates extends BroadcastReceiver {
-    static final String REPO = "https://github.com/ghorbelhamdi/buddy-android";
+    static final String REPO = "https://github.com/nlachica/buddy-android";
     /** For the agent (update_buddy), so English; the sheet shows R.string.update_failed_manual instead. */
     static final String MANUAL = "You can also get it at " + REPO + "/releases/latest (buddy.apk), or with Obtainium "
             + "for automatic updates (see " + REPO + "#updating).";
-    private static final String API = "https://api.github.com/repos/ghorbelhamdi/buddy-android/releases/latest";
+    private static final String API = "https://api.github.com/repos/nlachica/buddy-android/releases/latest";
     private static final String CHANNEL = "updates", ACTION_MUTE = "app.buddy.assistant.MUTE_UPDATES";
     private static final int ID = 3;
     private static final long DAY = 24 * 3600_000L;
@@ -91,8 +91,9 @@ public final class Updates extends BroadcastReceiver {
     /** {@link #install(Context, Release)}; with user, what went wrong is in the user's language (for the sheet). */
     private static String install(Context c, Release r, boolean user) {
         if (r.apkUrl == null) return user ? c.getString(R.string.update_error_no_apk) : "The release has no buddy.apk yet.";
-        File out = FilesProvider.apkFile(c);
+        File out = null;
         try {
+            out = FilesProvider.newApk(c.getCacheDir());
             HttpURLConnection h = (HttpURLConnection) new URL(r.apkUrl).openConnection();
             h.setConnectTimeout(10000);
             h.setReadTimeout(60000);
@@ -102,21 +103,24 @@ public final class Updates extends BroadcastReceiver {
                 h.disconnect();
             }
         } catch (IOException e) {
+            if (out != null) out.delete();
             return user ? c.getString(R.string.update_error_download, e.getMessage())
                     : "The download failed (" + e.getMessage() + ").";
         }
         android.content.pm.PackageInfo pi = c.getPackageManager().getPackageArchiveInfo(out.getPath(), 0);
         if (pi == null || !c.getPackageName().equals(pi.packageName) || pi.getLongVersionCode() <= BuildInfo.VERSION_CODE) {
+            out.delete();
             return user ? c.getString(R.string.update_error_not_newer)
                     : "The downloaded file isn't a newer Buddy, so it wasn't opened.";
         }
         if (!c.getPackageManager().canRequestPackageInstalls()) {
+            out.delete();
             c.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + c.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return NEEDS_PERMISSION;
         }
         c.startActivity(new Intent(Intent.ACTION_VIEW)
-                .setDataAndType(FilesProvider.apkUri(), "application/vnd.android.package-archive")
+                .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
         cancel(c);
         return OPENED;
@@ -228,7 +232,7 @@ public final class Updates extends BroadcastReceiver {
         }
         LinearLayout btns = row(a);
         Button later = button(a, a.getString(R.string.update_later), false);
-        Button update = button(a, a.getString(R.string.update_action), true);
+        Button update = protect(button(a, a.getString(R.string.update_action), true)); // only the user starts an update
         btns.addView(later, new LinearLayout.LayoutParams(0, dp(a, 44), 1));
         LinearLayout.LayoutParams up = new LinearLayout.LayoutParams(0, dp(a, 44), 1);
         up.setMarginStart(dp(a, 10));
