@@ -17,3 +17,7 @@ Validation and done-when coverage:
 - No additional security/data, YAGNI or repository-convention findings. The implementation remains within the planned app scope; feature-folder pipeline notes were excluded from the code diff.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in 6e67b41. `use()` no longer nulls `applied` when the saved choice is Auto, so `reconcile()` → `drop()` sees the old device and calls `clearCommunicationDevice()` immediately, then nulls `applied` (later polls don't clear again). A device choice still resets `applied` for the forced reapply, and `dirty` is untouched, so `finish()` still does the final cleanup. No regression test: the repo has no unit-test setup and the behaviour needs the Android audio stack; the reviewer's harness case (Speaker → Auto in live voice, assert cleared and stays cleared) is left for the Verifier on device (C1/E2). Recompiled all app Java with `javac --release 8` against android-36 for `github` and `fdroid` (reusing the reviewer's generated resources): both pass.
