@@ -141,3 +141,16 @@
 - Choice: the saved key, because it needs no code beyond the value passed in. Auto can be tapped to clear the
   choice, and the note already says that Auto is in effect.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Coder: small choices the plan left open
+- API 31 guards: `use()` and `choices()` check `SDK_INT >= 31`; the private helpers that call API 31 methods
+  (`reconcile`, `drop`, `finish`) carry `@TargetApi(31)`, as they are only reachable through `use()`. Lint isn't
+  run here; the CI `lintVital` is the check.
+- `AudioRoute.indexOf(choices, key)` (not in the plan) is shared by the Settings row and the voice bar, to avoid two
+  copies of the same loop.
+- `dropMode` only sets `MODE_NORMAL` while the mode still reads `MODE_IN_COMMUNICATION`, so a call that started
+  ringing meanwhile isn't overwritten. Exceptions from the audio calls in `use()` and the poll are ignored, as in
+  `SpeechPause`.
+- The Settings `AudioDeviceCallback` is registered on every API level (it exists since API 23); the row itself
+  only shows on 31+.
+- The voice bar's chip uses `TEXT` colour on `CARD2`, to read as a tappable choice next to the muted status.
