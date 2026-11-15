@@ -86,7 +86,9 @@ final class AudioRoute {
             began = System.currentTimeMillis();
             heard = false;
             quietSince = 0;
-            applied = refused = null;
+            // a device choice is forced to apply again; Auto keeps `applied` so reconcile's drop() releases it
+            if (!Prefs.audioDevice(a).isEmpty()) applied = null;
+            refused = null;
             try {
                 reconcile();
             } catch (Exception ignored) {
