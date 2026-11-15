@@ -192,6 +192,7 @@ final class SettingsTool {
         }));
         agentsModels(svc, l);
         voice(svc, l);
+        safety(svc, l);
         return l;
     }
 
@@ -212,6 +213,21 @@ final class SettingsTool {
         for (Mirrors.M m : Mirrors.ALL) if (!m.id.isEmpty()) ids.add(m.id);
         if (custom) ids.add(Mirrors.CUSTOM);
         return ids.toArray(new String[0]);
+    }
+
+    /** Settings → Safety and approvals. */
+    private static void safety(BuddyService svc, List<Setting> l) {
+        l.add(new Scalar("reviewer", () -> Prefs.reviewer(svc), v -> Prefs.setReviewer(svc, v), "", "same", "claude", "codex")
+                .ready(v -> {
+                    if (!v.equals("same")) signedIn(svc, v);
+                }));
+        l.add(new Scalar("builtin_risky_words", () -> Prefs.guardBuiltin(svc) ? "on" : "off",
+                v -> Prefs.setGuardBuiltin(svc, v.equals("on")), "", "on", "off") {
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{view(snapshot), value.equals("off") ? "off: Send, Pay, Delete… no longer always ask" : value};
+            }
+        });
     }
 
     /** Settings → Voice. */
@@ -414,6 +430,52 @@ final class SettingsTool {
                     b.append(o[0] == null ? "\n" + o[1] + ":" : "\n  " + (o[0].isEmpty() ? "default" : o[0]) + " — " + o[1]);
                 }
                 return b.toString();
+            }
+        };
+    }
+
+    /** button/&lt;package or *&gt;/&lt;label&gt; → {package or null for every app, label}, or null when it isn't one. */
+    static String[] buttonName(String name) {
+        if (!name.startsWith("button/")) return null;
+        String rest = name.substring(7);
+        int i = rest.indexOf('/');
+        if (i <= 0) return null;
+        String scope = rest.substring(0, i), label = rest.substring(i + 1).trim();
+        if (label.isEmpty() || !scope.equals("*") && !scope.matches("[A-Za-z0-9_.]+")) return null;
+        return new String[]{scope.equals("*") ? null : scope, label};
+    }
+
+    private static String buttonText(String state, String label, String where) {
+        return state == null ? "on neither list" : state.equals("ask") ? "ask: always ask before an agent taps “" + label + "” in " + where
+                : "allow: never ask; agents tap “" + label + "” without a card in " + where;
+    }
+
+    /**
+     * A button on the always-ask or never-ask list (Settings → Safety → Button rules): ask, allow, or "" for neither.
+     * get is the list holding it (null: neither). app: the name to show for pkg; installed: is the app on the phone.
+     */
+    static Scalar button(String pkg, String label, String app, boolean installed, Supplier<String> get, Consumer<String> set) {
+        String where = pkg == null ? "every app" : app;
+        return new Scalar("button/" + (pkg == null ? "*" : pkg) + "/" + label, get, set, "", "ask", "allow", "") {
+            @Override
+            String allowed() {
+                return "ask (always ask), allow (never ask), or \"\" to take it off both lists";
+            }
+
+            @Override
+            String check(String value) {
+                String v = value.trim().toLowerCase(Locale.ROOT);
+                if (!v.isEmpty() && !v.equals("ask") && !v.equals("allow")) throw new IllegalArgumentException(name + " takes: " + allowed());
+                // a rule already on a list can be moved or removed whether or not its app is still there (the screen's chips do)
+                if (!v.isEmpty() && pkg != null && !installed && get() == null) {
+                    throw new IllegalArgumentException("no installed app " + pkg + ": a new rule for one app needs it installed");
+                }
+                return v;
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{buttonText(snapshot, label, where), buttonText(value.isEmpty() ? null : value, label, where)};
             }
         };
     }
@@ -1014,11 +1076,18 @@ final class SettingsTool {
                 }
             });
         }
+        if (name.equals("reviewer_model/claude") || name.equals("reviewer_model/codex")) {
+            String h = name.substring(15);
+            return model(name, () -> Models.options(h, false), false, () -> Prefs.reviewerModel(svc, h),
+                    v -> Prefs.setReviewerModel(svc, h, v), " The reviewer uses it from its next review.").ready(v -> signedIn(svc, h));
+        }
         if (name.matches("service/[A-Za-z0-9_-]+(/(name|models))?")) {
             String[] sp = name.substring(8).split("/");
             Store store = sp.length == 1 ? q -> Providers.setOff(svc, q, q.off) : q -> Providers.save(svc, q, null);
             return service(sp[0], sp.length == 1 ? "" : sp[1], Providers::find, store);
         }
+        String[] bn = buttonName(name);
+        if (bn != null) return buttonRule(svc, bn[0], bn[1]);
         String[] p = name.split("/");
         if (p.length == 3 && p[0].equals("chat") && chat(svc, p[1]) != null && chat(svc, p[1]).parent.isEmpty()) {
             switch (p[2]) {
@@ -1036,6 +1105,45 @@ final class SettingsTool {
         return null;
     }
 
+    /** Which list holds the rule (ask or allow), or null; a rule is matched by its normalized label and package. */
+    private static String ruleList(BuddyService svc, String pkg, String label) {
+        for (String list : new String[]{"ask", "allow"}) {
+            for (Guard.Rule r : Guard.rules(svc, list)) {
+                if (Guard.norm(r.label).equals(Guard.norm(label)) && Objects.equals(r.pkg, pkg)) return list;
+            }
+        }
+        return null;
+    }
+
+    private static Setting buttonRule(BuddyService svc, String pkg, String label) {
+        String stored = null, installedLabel = null;
+        for (String list : new String[]{"ask", "allow"}) {
+            for (Guard.Rule r : Guard.rules(svc, list)) {
+                if (Guard.norm(r.label).equals(Guard.norm(label)) && Objects.equals(r.pkg, pkg) && r.app != null && !r.app.isEmpty()) stored = r.app;
+            }
+        }
+        if (pkg != null) {
+            try {
+                installedLabel = String.valueOf(svc.getPackageManager().getApplicationInfo(pkg, 0).loadLabel(svc.getPackageManager()));
+            } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                // gone: the stored name, else the package
+            }
+        }
+        String app = installedLabel != null ? installedLabel : stored != null ? stored : pkg;
+        return button(pkg, label, app, installedLabel != null, () -> ruleList(svc, pkg, label), v -> {
+            if (v.isEmpty()) {
+                for (String list : new String[]{"ask", "allow"}) {
+                    List<Guard.Rule> rs = Guard.rules(svc, list);
+                    if (rs.removeIf(r -> Guard.norm(r.label).equals(Guard.norm(label)) && Objects.equals(r.pkg, pkg))) {
+                        Guard.saveRules(svc, list, rs);
+                    }
+                }
+            } else {
+                Guard.addRule(svc, v, new Guard.Rule(label, pkg, pkg == null ? null : app));
+            }
+        });
+    }
+
     /** The chats section of the listing; here = the calling agent's chat id (or null) gets "(this chat)". */
     static void chatLines(StringBuilder b, java.util.List<Sessions.Session> all, String here) {
         int n = 0;
@@ -1051,6 +1159,17 @@ final class SettingsTool {
     private String listing(String here) {
         StringBuilder b = new StringBuilder();
         for (Setting s : scalars(svc)) b.append(s.read()).append('\n');
+        b.append("\nSmart reviewer's models (the quick one is default):\n");
+        for (String h : new String[]{"claude", "codex"}) {
+            if (SetupState.signedIn(svc, h)) b.append(find(svc, "reviewer_model/" + h).line()).append('\n');
+        }
+        b.append("\nButton lists (button/<package or *>/<label> = ask: always ask, allow: never ask; \"\" takes one off; "
+                + "* is every app):\n");
+        for (String list : new String[]{"ask", "allow"}) {
+            for (Guard.Rule r : Guard.rules(svc, list)) {
+                b.append("button/").append(r.pkg == null ? "*" : r.pkg).append('/').append(r.label).append(" = ").append(list).append('\n');
+            }
+        }
         b.append("\nDefault models (read one to see its choices):\n");
         for (Account a : Account.ALL) {
             if (SetupState.signedIn(svc, a.agent) || !Providers.forAgent(a.agent).isEmpty()) {

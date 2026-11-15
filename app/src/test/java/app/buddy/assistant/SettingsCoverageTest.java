@@ -313,4 +313,89 @@ public class SettingsCoverageTest {
         assertTrue(r, r.contains("changed while the card was open"));
         assertEquals("de-DE,fr-FR", now.get());
     }
+
+    // ---------------------------------------------------------------- safety and approvals
+
+    @Test
+    public void theSafetyScalarsRefuseABadShapeAndWarnOnWhatTheyLower() {
+        refused(named("reviewer"), "gpt");
+        refused(named("builtin_risky_words"), "maybe");
+        assertEquals("same", named("reviewer").check("SAME"));
+        String[] card = named("builtin_risky_words").card("on", "off");
+        assertTrue(card[1], card[1].contains("Send, Pay, Delete"));
+        assertEquals("on", named("builtin_risky_words").card("off", "on")[1]);
+    }
+
+    @Test
+    public void aButtonNameIsPackageOrStarThenTheLabel() {
+        assertEquals("[null, Log out]", Arrays.toString(SettingsTool.buttonName("button/*/Log out")));
+        assertEquals("[com.x, a/b]", Arrays.toString(SettingsTool.buttonName("button/com.x/a/b")));
+        assertEquals(null, SettingsTool.buttonName("button/*/ "));
+        assertEquals(null, SettingsTool.buttonName("button/bad pkg/x"));
+        assertEquals(null, SettingsTool.buttonName("button/Pay"));
+        assertEquals("button/com.x/a/b", new Lists().row("com.x", "a/b", null, true).name);
+    }
+
+    /** A button on ask|allow|none, kept in memory. */
+    private static final class Lists {
+        String now;
+
+        SettingsTool.Scalar row(String pkg, String label, String app, boolean installed) {
+            return SettingsTool.button(pkg, label, app, installed, () -> now, v -> now = v.isEmpty() ? null : v);
+        }
+    }
+
+    @Test
+    public void aButtonCardSaysWhatEachChoiceDoes() throws Exception {
+        Lists l = new Lists();
+        List<String> cards = new ArrayList<>();
+        SettingsTool.Asker ok = card -> {
+            cards.add(card);
+            return YES;
+        };
+        edit(l.row(null, "Pay", null, false), "allow", ok);
+        assertTrue(cards.get(0), cards.get(0).contains("Now: on neither list") && cards.get(0).contains("never ask")
+                && cards.get(0).contains("“Pay”") && cards.get(0).contains("every app"));
+        edit(l.row("com.bank", "Pay", "My Bank", true), "ask", ok);
+        assertTrue(cards.get(1), cards.get(1).contains("always ask before an agent taps “Pay” in My Bank"));
+        assertEquals("ask", l.now);
+        edit(l.row("com.bank", "Pay", "My Bank", true), "", ok);
+        assertTrue(cards.get(2), cards.get(2).contains("New: on neither list"));
+        assertEquals(null, l.now);
+        refused(l.row(null, "Pay", null, true), "maybe");
+    }
+
+    @Test
+    public void aNewRuleNeedsTheAppButAnOrphanedOneCanBeMovedAndRemoved() throws Exception {
+        Lists l = new Lists();
+        refused(l.row("com.gone", "Pay", "com.gone", false), "allow");
+        assertEquals("", l.row("com.gone", "Pay", "com.gone", false).check(""));
+        l.now = "ask";
+        assertEquals("allow", l.row("com.gone", "Pay", "Old Bank", false).check("allow"));
+        List<String> cards = new ArrayList<>();
+        assertTrue(edit(l.row("com.gone", "Pay", "Old Bank", false), "", card -> {
+            cards.add(card);
+            return YES;
+        }).startsWith("Changed "));
+        assertTrue(cards.get(0), cards.get(0).contains("in Old Bank"));
+        assertEquals(null, l.now);
+    }
+
+    @Test
+    public void aButtonMovedOrRemovedDuringTheCardIsNotWritten() throws Exception {
+        Lists l = new Lists();
+        l.now = "ask";
+        String r = edit(l.row(null, "Pay", null, true), "allow", card -> {
+            l.now = "allow";
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        l.now = "ask";
+        r = edit(l.row(null, "Pay", null, true), "allow", card -> {
+            l.now = null;
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open (now: (none))"));
+        assertEquals(null, l.now);
+    }
 }
