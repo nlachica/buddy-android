@@ -43,11 +43,13 @@ final class Tools {
     private final List<AccessibilityNodeInfo> lastNodes = new ArrayList<>();
     private final BrowserTools browser;
     private final PhoneTools phone;
+    private final SettingsTool settings;
 
     Tools(BuddyService svc) {
         this.svc = svc;
         browser = new BrowserTools(svc);
         phone = new PhoneTools(svc);
+        settings = new SettingsTool(svc);
     }
 
     // ---------------------------------------------------------------- schema
@@ -315,6 +317,7 @@ final class Tools {
                         .put("timeout_s", intProp("Default 120, max 300")),
                 "package"));
         PhoneTools.list(t); // the clipboard, alarms, sharing, Downloads, status, camera, location
+        if (!Flavor.FDROID) SettingsTool.list(t); // this fork only: Buddy's own settings, each change on a card
         if (Browser.available(svc)) BrowserTools.list(t); // the background browser (Settings)
         return t;
     }
@@ -533,6 +536,10 @@ final class Tools {
                 return text(phoneShell(a));
             case "point_out":
                 return text(pointOut(a));
+            case "buddy_settings":
+                if (Flavor.FDROID) return text("Not available in this build.");
+                if (ruleRun()) return text("Not available in a notification rule's run. Tell the user what's needed instead.");
+                return text(settings.call(a));
             case "update_buddy":
             case "install_apk":
             case "wait_for_install":
@@ -788,7 +795,7 @@ final class Tools {
 
     /** Not for a helper (see Helpers): what reaches the user, the phone's own settings or a later time. */
     private static final java.util.Set<String> HELPER_NO = new java.util.HashSet<>(java.util.Arrays.asList(
-            "delegate", "subagents", "phone_shell", "install_apk", "update_buddy", "wait_for_install", "schedule_message",
+            "delegate", "subagents", "phone_shell", "buddy_settings", "install_apk", "update_buddy", "wait_for_install", "schedule_message",
             "cancel_scheduled", "notify", "share", "reply_notification", "point_out", "add_calendar_event", "set_alarm",
             "set_timer", "take_photo", "clipboard_write", "save_to_downloads"));
 

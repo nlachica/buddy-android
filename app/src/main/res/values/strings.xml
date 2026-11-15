@@ -828,6 +828,7 @@
     <!-- Step in the chat: the agent answers a notification through its reply field. %1$s = the reply (shortened). -->
     <string name="hub_tool_reply_notification">Replying: %1$s</string>
     <string name="hub_tool_update_download">Downloading the Buddy update</string>
+    <string name="hub_tool_settings">Buddy settings: %1$s</string>
     <string name="hub_tool_update_check">Checking for a Buddy update</string>
     <!-- %1$s = what is searched for. -->
     <string name="hub_tool_web_search">Searching the web: %1$s</string>
@@ -2056,6 +2057,8 @@
     <!-- Second switch, shown while the first is on. -->
     <string name="background_shell_ask">Ask before each command</string>
     <string name="background_shell_ask_info">An approval card shows the command first. Without it, nothing stands between a tricked agent and your phone: a command can even tap an approval card.</string>
+    <!-- Approval card for a change to Buddy's own settings (this fork); %1$s = the setting, %2$s = its value now, %3$s = the new value. -->
+    <string name="tools_card_setting">Change Buddy\'s setting %1$s\nNow: %2$s\nNew: %3$s</string>
     <!-- Approval card for a phone command; %1$s = the command line. -->
     <string name="tools_card_shell">Run on the phone:\n%1$s</string>
     <!-- In the bubble while a phone command runs. Keep short. -->

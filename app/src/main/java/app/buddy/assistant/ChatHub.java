@@ -1126,6 +1126,7 @@ final class ChatHub {
                 return labels.length() > 0 ? BuddyApp.str(R.string.hub_tool_point_out, said(full, labels.toString(), 60))
                         : BuddyApp.str(R.string.hub_tool_point_out_any);
             }
+            case "buddy_settings": return BuddyApp.str(R.string.hub_tool_settings, in.optString("name", "list"));
             case "update_buddy": return BuddyApp.str(in.optBoolean("install") ? R.string.hub_tool_update_download : R.string.hub_tool_update_check);
             case "notify": return in.optString("text");
             case "delegate": {
