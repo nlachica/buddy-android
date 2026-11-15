@@ -42,6 +42,17 @@ kill_tree() {
   kill -TERM "$p" 2>/dev/null
 }
 
+# An agent's run (run_<x>): its output, until it exits. Something it started (an MCP server, a background job) can
+# keep that output open after it's gone; read to the end, the stream waited for that, and the chat stayed "working"
+# with no buddy_done (feature 002). run_<x> gets a shell of its own, and this one only waits for it: the end line
+# comes however that shell ends, killed included.
+until_exit() {
+  local end="buddy-run: agent exited $$ $RANDOM"
+  { "$@" & wait "$!"; s=$?; printf '\n%s\n' "$end"; exit "$s"; } | awk -v end="$end" '$0 == end { exit } $0 != "" { print; fflush() }'
+  return "${PIPESTATUS[0]}"
+}
+
+
 descendants() { # print a pid and all its descendants
   local p=$1 c
   echo "$p"
@@ -921,11 +932,11 @@ fi
 (
   if [ "$BACKEND" = opencode ]; then
     if ! have opencode; then event buddy_error "OpenCode isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_opencode | stream_opencode
+    until_exit run_opencode | stream_opencode
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/opencode-session" ] && grep -q -i -E 'not found|no such|session' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/opencode-session"   # old session is gone; retry as a new conversation
-      run_opencode | stream_opencode
+      until_exit run_opencode | stream_opencode
       status=${PIPESTATUS[0]}
     fi
     name=OpenCode
@@ -934,18 +945,18 @@ fi
     # a rule's run must get no shell, files or web; agy's allow list can't promise that yet (see Account.runsRules)
     if [ "$DEV" = rule ]; then event buddy_error "Antigravity can't run notification rules yet. Pick another agent for this rule."; exit 0; fi
     # the last run's raw events stay in the session folder, for checking how agy reports its steps
-    run_agy | tee "$S/agy-last.jsonl" | stream_agy
+    until_exit run_agy | tee "$S/agy-last.jsonl" | stream_agy
     status=${PIPESTATUS[0]}
     # a refusal ended its turn without a word: nudge it on once, in the same conversation
     if [ -s "$S/agy-denied" ] && [ -s "$S/agy-conversation" ]; then
       MSG="(From Buddy, not the user) This chat doesn't allow that: $(cat "$S/agy-denied"). Carry on with the phone \
 tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
-      run_agy | tee -a "$S/agy-last.jsonl" | stream_agy last
+      until_exit run_agy | tee -a "$S/agy-last.jsonl" | stream_agy last
       status=${PIPESTATUS[0]}
     fi
     if [ -s "$S/agy-conversation" ] && grep -q -i -E 'conversation.*(not found|no such|unknown)' "$S/agy-error" "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/agy-conversation"   # old conversation is gone; retry as a new one
-      run_agy | stream_agy
+      until_exit run_agy | stream_agy
       status=${PIPESTATUS[0]}
     fi
     # a failed turn (quota reached, …) is already in the chat from its result; agy also exits non-zero and prints
@@ -954,11 +965,11 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Antigravity
   elif [ "$BACKEND" = grok ]; then
     if ! have grok; then event buddy_error "Grok isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_grok | stream_grok
+    until_exit run_grok | stream_grok
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/grok-session" ] && grep -q -i -E 'session.*not found|failed to restore session' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/grok-session"   # old session is gone; retry as a new conversation
-      run_grok | stream_grok
+      until_exit run_grok | stream_grok
       status=${PIPESTATUS[0]}
     fi
     # a failed turn (not signed in, …) is already in the chat from its result; grok also exits non-zero and prints
@@ -967,21 +978,21 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Grok
   elif [ "$BACKEND" = codex ]; then
     if ! have codex; then event buddy_error "Codex isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_codex | stream_codex
+    until_exit run_codex | stream_codex
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/codex-thread" ] && grep -q -i -E 'not found|no such|unknown (thread|session)' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/codex-thread"   # old thread is gone; retry as a new conversation
-      run_codex | stream_codex
+      until_exit run_codex | stream_codex
       status=${PIPESTATUS[0]}
     fi
     name=Codex
   else
     if ! have claude; then event buddy_error "Claude Code isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_claude | stream_claude
+    until_exit run_claude | stream_claude
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && grep -q -i 'no conversation found' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/claude-session"   # old session is gone; retry as a new conversation
-      run_claude | stream_claude
+      until_exit run_claude | stream_claude
       status=${PIPESTATUS[0]}
     fi
     name="Claude Code"
