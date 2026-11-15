@@ -14,3 +14,53 @@ F4 [major] Late events can undo failure and invalidate the new exit callback - `
 F5 [major] The new busy waiter produces an unowned second done - `plan.md:45-56` gives a rejected busy `ask` its own EXIT-generated done after waiting for the old pid. The original wrapper already emits done, removes its pid, and can cause the app to start a queued-note run (`linux/buddy-run:995-998`; `ChatHub.java:703-725`). The waiter can observe the gap with no pid and emit its delayed done after that next run has started. Events carry only the session id (`linux/buddy-run:266`), and `ChatHub.java:704` accepts any done while running, so this second done can incorrectly end the next run and release its parent. The callback's `runId` guard does not guard HTTP events. -> Give completion a single owner in the busy-rejection path, or otherwise ensure its completion cannot be applied to a subsequent run. Add an ordered regression for old run completion -> next run starts -> busy waiter exits, asserting that the next run stays running until its own completion. This can be addressed narrowly without a general protocol redesign.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - every non-zero exit now ends with an error. Classification is by the agent's exit status alone:
+0 = finished (even without a result event, so agy's withheld result and an OpenCode end without step_finish stay
+successes); non-zero = failed. Stderr text with a status other than 143 is reported as today. Every other non-zero end
+(empty stderr: "it exited with status N." or "it was killed (signal N).", plus any 143) goes out as a `buddy_error`
+with one new optional field, `"fallback": true`. The wrapper's own "cut off" error does too. The app drops a fallback
+error when the run already has an outcome: "failed" (the agent reported its own error, e.g. a Claude error result,
+so nothing is doubled) or "stopped" (`stop()` sets it synchronously before it sends "stop"). That one rule tells an
+explicit Stop apart from an agent TERMed by anything else. New harness cases: `claude_exit3`, `claude_agentterm`,
+and `claude_error` (an error result, then exit 1 with empty stderr: the fallback carries the flag the app drops on).
+Decision 3 is superseded.
+
+F2: accepted - `until_exit` now runs `run_x` in a background shell of its own: `{ "$@" & wait "$!"; s=$?; printf …end…; exit "$s"; }`.
+The brace group only waits, so `wait` returns however run_x's shell dies (SIGKILL included, status 137) and the end
+line always follows. Tried on the phone with your exact `run_fake() { sleep 30 & kill -KILL "$BASHPID"; }`: the stream
+ends in 0.1 s with status 137. kill -9 of an agent whose child holds stdout: 0.08 s, 137. The agent's parent is
+run_x's shell, so a fake agent's `kill -9 $PPID` reproduces producer death; that is the new `claude_producer` case.
+It is a top-level run and must end with error + done within the case timeout. Still not covered: SIGKILL of the
+waiting shell itself. Then the ceiling (sub-agents) or Stop (`kill_tree` takes the whole tree) end the run. Design
+C's "no idle timer" text is corrected: a dead agent or producer is now caught in the helper while it is alive, and the
+app's check covers a dead helper. No idle timer and no change to the one-shot give-up timer: legitimate silent work
+stays allowed.
+
+F3: accepted - the ceiling is armed in `startRun`, the shared run-start point, for every run of a chat with a parent:
+`send`, a queued note's run (`sendNoteAsMessage`), and any other start. It is keyed to that run's `runId`. Check:
+a walkthrough in the Test plan, plus an optional build with a 1-minute ceiling. An automated Java check is rejected:
+the app has no unit-test setup, and the brief's done-when 5 asks only for run.sh.
+
+F4: accepted - two changes. (1) Late events never restart a run that ended failed or stopped: the auto-start in
+`onEvent` (`:559`) also needs `ses.outcome == null`. An explicit send still works (`startRun` resets the outcome),
+and late events still add their bubbles. (2) The helper-gone check no longer compares `runId`. Each chat counts its
+live `ask` helpers (`Session.asking`, runtime only): it goes up when `Helper.run` returns and down in that launch's
+exit callback. The check is "the last helper exited and the chat still works -> fail". Ownership lasts until the
+process really exits, and a restarted run or a busy-rejected launch can't detach it. Both of your paths are traced
+step by step in the Test plan (give-up -> late system event -> wrapper SIGKILL; ceiling -> late assistant /
+`buddy_stopped` / fallback error / done). Both stay failed, release the parent, and never turn busy again.
+Deterministic Java tests: rejected for the reason given under F3.
+
+F5: accepted - the busy waiter is gone. The traps are set after the busy check, so a rejected `ask` exits as today:
+the "still working" error and no done. The run in progress is the only owner of the chat's done. The app's exit
+callback for the rejected launch does nothing, because the old launch's helper still counts (F4 (2)). The chat keeps
+its Stop button, and the old run's done ends it. No second done exists. New harness case `claude_busy`: a live pid in
+`$S/pid` gives exactly the "still working" error, no `buddy_done`, and an immediate exit. The app half is traced in
+the Test plan.
+
+Also changed, found while answering F1: since 143 is now reported, the run subshell could race the wrapper's TERM
+trap and post a second fallback. The trap now writes `$S/cut-off` before `kill_tree`, and the run section skips its
+error rule when that file exists. On the phone, 5 of 5 runs gave exactly "cut off", then done, with the agent gone.

@@ -75,3 +75,61 @@
 - Choice: (a). CI already runs run.sh, `--update` and the diff are reused, and buddy-run puts `$HOME/bin`
   first on PATH. (c) would clash with the real app's port 8765 on the phone and needs nc/python.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - `until_exit` runs the agent's function in a shell of its own and only waits for it (supersedes the first entry's relay body; review F2)
+- Options: (a) `{ "$@" & wait "$!"; …end line…; }`: a watcher whose `wait` returns however run_x's shell dies;
+  (b) a bounded liveness check (an idle timer gated on a pid) that ends the stream when the producer is gone;
+  (c) the round-0 relay, where the producer shell itself writes the end line.
+- Choice: (a), a change of a few characters. It catches the reviewer's `kill -KILL "$BASHPID"` case in 0.1 s
+  (status 137; prototyped on the phone) without timers, and keeps `PIPESTATUS[0]`. `&` changes nothing else: the run
+  section is already a background subshell (stdin `/dev/null`, SIGINT ignored). (b) means guessed timings and pid
+  files. (c) loses the end line when the producer shell is killed. Left uncovered: a SIGKILL of the watcher itself
+  (the ceiling or Stop still end that run).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Traps go after the busy check; a busy-rejected `ask` sends no done and doesn't wait (supersedes the second entry's placement and busy wait; review F5)
+- Options: (a) traps after the busy check: the rejected `ask` exits as today, and the app's helper count keeps the
+  chat working; (b) round 0: traps before it, and the busy branch waits for the old pid, then sends done.
+- Choice: (a). The run in progress is the only owner of the chat's done. (b) sends a second, unowned done that can
+  end the next run (F5). The "API key gone" exit is after the traps and now sends done.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Any non-zero exit fails the run; the helper's own guesses are `buddy_error` with `"fallback": true`, which the app drops when the run already has an outcome (supersedes the third entry; review F1)
+- Options: (a) a fallback flag, deduplicated in the app by `outcome`; (b) the helper detects "an error was already
+  reported" (five streams, or a fork per event); (c) round 0: errors only on signal deaths, except 143.
+- Choice: (a). Classification is by exit status: 0 is finished even without a result event; non-zero is failed.
+  Stderr text with a status other than 143 is reported as today; every other failure (empty stderr, any 143, the
+  wrapper's "cut off") is a fallback. The app already knows whether the agent reported an error ("failed") or the
+  user stopped ("stopped", set before "stop" is sent), so one guard handles both the dedupe and Stop vs. another
+  TERM. The cost is one optional field, which old apps ignore and which ships with the helper.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The wrapper's TERM trap marks the run `cut-off` before `kill_tree`, and the run section then skips its error rule
+- Options: (a) a marker file the run section checks; (b) let both report (the app drops the second fallback, but
+  `claude_term` becomes nondeterministic); (c) SIGSTOP the run subshell first (risky under proot's ptrace).
+- Choice: (a). The run section reaches its error rule only after `kill_tree` has started, so there is exactly one
+  error. Checked on the phone, 5 of 5 runs: "cut off", then done, and the agent gone.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Helper gone = the last live `ask` helper of a working chat exited (a per-chat count, not `runId`) (supersedes the fourth entry's callback guard; reviews F4, F5)
+- Options: (a) runtime `Session.asking`, up when `Helper.run` returns and down in the exit callback; fail when it
+  reaches 0 while running; (b) round 0: compare the launch's `runId`; (c) a launch token stored per run.
+- Choice: (a). Ownership lasts until the process really exits. A run restarted by events (new `runId`) can't detach
+  it, and a busy-rejected launch exiting doesn't end the chat while the old helper lives, which keeps "Tap Stop
+  first". (b) fails both (F4, F5); (c) needs the same count to handle busy rejection.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Late events never restart a run that ended failed or stopped (review F4)
+- Options: (a) the `onEvent` auto-start also requires `ses.outcome == null`; (b) a new "ended by Buddy" flag;
+  (c) keep restarts and rely on the helper count alone.
+- Choice: (a), one condition and no new state. `startRun` resets the outcome, so explicit sends still work. (c)
+  still lets a ceiling'd sub-agent flip back to busy and end "stopped" (F4). Cost: after a give-up, a late-waking
+  agent's reply shows, but its chat doesn't go back to "working".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The sub-agent ceiling is armed in `startRun` (supersedes the fifth entry's "in ChatHub.send"; review F3)
+- Options: (a) `startRun`, the one place every run starts; (b) the same timer copied into `send` and
+  `sendNoteAsMessage`.
+- Choice: (a). A queued note's run gets its ceiling too, and so does any future start path. Still 30 minutes,
+  keyed to that run's `runId`, and still fail now, then "stop".
+- By: Planner (claude-opus-5-5)
