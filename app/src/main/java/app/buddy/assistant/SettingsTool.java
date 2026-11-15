@@ -678,6 +678,29 @@ final class SettingsTool {
         };
     }
 
+    /**
+     * An app the user allows in a chat without asking (the chat's "Allowed without asking"): on while the chat's task
+     * runs, and for a scheduled chat in its scheduled runs too. app: the name to show; refusal: why "on" is refused (null: it can be allowed).
+     */
+    static Scalar allowedApp(String chat, String pkg, String app, String refusal, boolean scheduled, Supplier<String> get,
+                             Consumer<String> set) {
+        return new Scalar("chat/" + chat + "/allowed/" + pkg, get, set, "", "on", "off") {
+            @Override
+            String check(String value) {
+                String v = super.check(value);
+                if (v.equals("on") && refusal != null) throw new IllegalArgumentException(refusal);
+                return v;
+            }
+
+            @Override
+            String[] card(String snapshot, String value) {
+                return new String[]{view(snapshot), value.equals("on") ? "on: routine approvals in " + app
+                        + " go ahead without asking until this chat's task ends" + (scheduled ? " and in its scheduled runs" : "")
+                        : value};
+            }
+        };
+    }
+
     /** A chat's scheduled task, as Schedules.Plan's JSON; "" removes it. */
     static Setting schedule(BuddyService svc, String id) {
         return new Setting("chat/" + id + "/schedule", "a schedule as JSON, or \"\" to remove it") {
@@ -1188,6 +1211,27 @@ final class SettingsTool {
                     return null;
             }
         }
+        if (p.length == 4 && p[0].equals("chat") && p[2].equals("allowed") && p[3].matches("[A-Za-z0-9_.]+") && chat(svc, p[1]) != null
+                && chat(svc, p[1]).parent.isEmpty()) {
+            String id = p[1], pkg = p[3];
+            String label = null;
+            try {
+                label = String.valueOf(svc.getPackageManager().getApplicationInfo(pkg, 0).loadLabel(svc.getPackageManager()));
+            } catch (android.content.pm.PackageManager.NameNotFoundException e) {
+                // not installed: an app can still be taken off the list
+            }
+            // what the screen's picker offers: not a money, Settings, installer or store app
+            String refusal = label == null ? "no installed app " + pkg
+                    : Guard.allowable(svc, pkg) ? null : label + " can't be allowed without asking (money, Settings, installer and store apps never can)";
+            return allowedApp(id, pkg, label == null ? pkg : label, refusal, chat(svc, id).schedule != null, () -> {
+                Sessions.Session c = chat(svc, id);
+                return c == null ? null : c.allowed.contains(pkg) ? "on" : "off";
+            }, v -> {
+                Sessions.Session c = chat(svc, id);
+                if (c == null) throw new IllegalStateException("that chat is gone");
+                ChatHub.get(svc).setAllowed(c, pkg, v.equals("on"));
+            });
+        }
         return null;
     }
 
@@ -1238,7 +1282,11 @@ final class SettingsTool {
             b.append("chat/").append(c.id).append(" \"").append(c.title).append("\"").append(c.id.equals(here) ? " (this chat)" : "")
                     .append(": linux_tools ").append(c.dev ? "on" : "off").append(", background ")
                     .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
-                            : c.schedule.paused ? "paused" : "set").append('\n');
+                            : c.schedule.paused ? "paused" : "set");
+            synchronized (c.allowed) {
+                b.append(", allowed: ").append(c.allowed.isEmpty() ? "none" : String.join(",", c.allowed));
+            }
+            b.append('\n');
         }
     }
 
@@ -1272,8 +1320,8 @@ final class SettingsTool {
         for (java.util.Map.Entry<String, String> e : Prefs.appSafetyAll(svc).entrySet()) {
             b.append("app/").append(e.getKey()).append(" = ").append(e.getValue()).append('\n');
         }
-        b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off) and "
-                + "chat/<id>/schedule (JSON):\n");
+        b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off), "
+                + "chat/<id>/schedule (JSON) and chat/<id>/allowed/<package> (on, off: apps allowed without asking):\n");
         chatLines(b, ChatHub.get(svc).sessions.all, here);
         b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
         for (Rules.Rule r : Rules.all(svc)) {

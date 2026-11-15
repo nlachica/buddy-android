@@ -432,4 +432,45 @@ public class SettingsCoverageTest {
         assertEquals("black", named("surface").check("Black"));
         assertEquals("#123ABC", named("accent").check("#123abc"));
     }
+
+    // ---------------------------------------------------------------- chats
+
+    @Test
+    public void anAllowedAppCardSaysUntilWhen() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("off");
+        List<String> cards = new ArrayList<>();
+        SettingsTool.Asker ok = card -> {
+            cards.add(card);
+            return YES;
+        };
+        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, now::set), "on", ok);
+        assertTrue(cards.get(0), cards.get(0).contains("on: routine approvals in Chatty go ahead without asking until this chat's task ends"));
+        assertTrue(cards.get(0), !cards.get(0).contains("scheduled"));
+        now.set("off");
+        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, true, now::get, now::set), "on", ok);
+        assertTrue(cards.get(1), cards.get(1).contains("and in its scheduled runs"));
+        assertEquals("chat/c1/allowed/com.chat", SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, now::set).name);
+    }
+
+    @Test
+    public void anAppThatCantBeAllowedIsRefusedForOnButCanBeTakenOff() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("on");
+        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.bank", "Bank", "Bank can't be allowed without asking", false, now::get, now::set);
+        refused(s, "on");
+        assertEquals("off", s.check("OFF"));
+        refused(s, "maybe");
+    }
+
+    @Test
+    public void anAllowedAppTurnedOnByTheScreenIsNotOverwritten() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("off");
+        AtomicInteger sets = new AtomicInteger();
+        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, v -> sets.incrementAndGet());
+        String r = edit(s, "on", card -> {
+            now.set("on");
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        assertEquals(0, sets.get());
+    }
 }
