@@ -54,3 +54,10 @@ Validation and coverage:
 - No additional security/data finding or unnecessary abstraction found. The implementation remains within the approved audio-bridge scope; both fixes belong in the existing lifecycle/ownership code.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+- F1: fixed in 0584532. The claim stays (it stops the duplicate speech). `Speaker` now records `sounded` once the track accepts an audible block (`len > 0 && loud`). When the stream ends, `streamEnded` sees "claimed but not sounded" and releases the claim under `synchronized (s)`, then the normal TTS fallback runs. The Speaker thread has already finished by then (`ended` is its last act), so the old check/write race does not return. A /say that arrives between the claim and the failure is ignored by `toTts` (claimed), and the reply falls back when the stream ends. A zero-byte first write leaves `sounded` false until a later block is accepted; a stream that ends with none accepted falls back.
+- F2: fixed in 0584532. `hangUp()` is now `synchronized` on the class lock, the same one `startCall` publishes under and `close()` clears under (re-entrant). The worker either publishes first and has its id retired and cleared, or finds `web != page` and publishes nothing. Phone-only reuse (`fail()`, watchdog) doesn't go through `hangUp()` and is unchanged.
+
+**Tests:** none run, same as round 1: no Android SDK here and `javac` doesn't start (PaX). CI compiles after push; the orderings still need the Verifier's device run. I did not repeat the reviewer's stub harnesses.
