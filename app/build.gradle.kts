@@ -47,6 +47,15 @@ android {
         create("fdroid") { dimension = "store" }
     }
 
+    // The link to the Galaxy Watch app (wear/) needs Google Play services, so it is compiled into the github build only.
+    // It has a folder of its own, not src/github: build.sh compiles src/github/java with javac, which has no Play
+    // services, and so it would stop building the github build on the phone (it ships without the watch link).
+    sourceSets.getByName("github") {
+        java.srcDir("src/watchlink/java")
+        res.srcDir("src/watchlink/res")
+        manifest.srcFile("src/watchlink/AndroidManifest.xml")
+    }
+
     // No Google-only dependency blob and no git details in the APK: F-Droid requires the first, and both keep the
     // fdroid APK the same whoever builds it (F-Droid's reproducible build compares its APK with the one on GitHub).
     dependenciesInfo {
@@ -70,4 +79,8 @@ android {
     buildFeatures {
         buildConfig = false
     }
+}
+
+dependencies {
+    "githubImplementation"("com.google.android.gms:play-services-wearable:20.0.1")
 }

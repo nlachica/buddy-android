@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- How the watch app finds this phone (Phone.java in wear/) -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>buddy_phone</item>
+    </string-array>
+</resources>
