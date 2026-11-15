@@ -29,3 +29,23 @@ VERDICT: REVISE
 - F4: fixed in the same commit. The service snapshot is a JSON array and `view` reads the one field it needs, so an embedded NUL can't move an address into another part. New names are refused if they contain any control character (`\p{Cntrl}`, which covers CR and LF); an already-stored name is read safely. Test: `aServiceNameWithControlCharactersNeverMovesAnAddressIntoAnotherPart` covers a read, a card and a stale-write reply with no secret in any of them.
 
 Tests: `/tmp/buddy-build-005/check.sh github` and `fdroid` both OK, 44 tests (javac + JUnit against android-all, no Gradle).
+
+## Round 2 - Code Reviewer (gpt-6-astra)
+
+Reviewed `main...HEAD` at `08d0b12e3cae4401218eddc6c05a70448e91cbe6`, including the Round 1 fixes, the brief, plan, decisions, inventory, tests, and the affected screen/store handlers. No production code or repository tests were modified.
+
+F3 [blocker] Required CI remains unverified - `docs/features/005-settings-coverage/plan.md:238` and `.github/workflows/build.yml:59`: the orchestrator again supplied the HTTP 403 dispatch failure against `ghorbelhamdi/buddy-android`. A read-only GitHub API lookup of `nlachica/buddy-android/actions/runs?head_sha=08d0b12e3cae4401218eddc6c05a70448e91cbe6` returned `total_count: 0`. There is still no green Gradle/Android/Wear build for this commit. The Coder correctly left repository access and dispatch to the orchestrator; this remains an infrastructure/verification blocker, not a demonstrated compilation defect. -> Target the fork explicitly (`-R nlachica/buddy-android`) for dispatch and run lookup/watch, resolve its Actions access if necessary, and attach a successful required workflow run for the reviewed commit before approval.
+
+Resolved findings from Round 1:
+- F1: resolved. `allowedApp` now includes scheduled scope in its snapshot and derives the card's scope from that snapshot. The regression test adds a schedule during approval and verifies that the setter is never called.
+- F2: resolved. The model validator uses a whitespace matcher with `find()`. The tests reject multiple line breaks in both model families and CR/LF sequences in the default-model family.
+- F4: resolved. Service snapshots use a JSON array; rendering selects the intended field without delimiter ambiguity. New names reject control characters, and the regression test checks reads, a card and a stale-write reply using an already-stored name containing NULs, without exposing either synthetic address.
+
+Validation and coverage:
+- `/tmp/buddy-build-005/check.sh github`: PASS, 44 tests.
+- `/tmp/buddy-build-005/check.sh fdroid`: PASS, 44 tests.
+- These checks compile scratch copies using javac/JUnit and android-all, with the documented API-36 omission and Os shim. They do not establish that Gradle, native libraries, watchlink, Wear, packaging or reproducibility checks pass.
+- The inventory has final covered/excluded statuses, and the implemented families and JVM cases match the agreed scope. No additional blocker or major code, security, YAGNI or convention finding was identified.
+- Phone listing, availability checks, approved/denied cards for the 12 families, and device stale-write evidence remain pending in the empty `verify.md`. The plan schedules these after installation; the device done-when item remains unfulfilled and verification must remain PARTIAL until evidence is recorded.
+
+VERDICT: REVISE
