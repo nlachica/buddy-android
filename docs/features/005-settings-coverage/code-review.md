@@ -20,3 +20,12 @@ Validation and coverage:
 - Phone listing, availability checks, approve/deny checks for all 12 families, and device stale-write evidence remain pending: `verify.md` has no evidence yet. As the plan schedules these after installation, this review does not claim the device done-when item is satisfied; verification must remain PARTIAL until they are recorded.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+- F1: fixed in the commit "005 review round 1". `allowedApp` takes a `BooleanSupplier` for the schedule and puts the scope in the snapshot (`on`/`off` plus `+scheduled`); `view` strips it, and the card's "scheduled runs" text comes from the snapshot. A schedule added while the card is open now makes the write stale. Test: `aScheduleAddedWhileTheAllowedAppCardIsOpenIsNotWritten` (no write, reply says it changed). The shared gate is unchanged.
+- F2: fixed in the same commit. Whitespace is searched with `Pattern.find()`, so any line break is refused. Cases with several LF and CR/LF added for both model families (`default_model` and `reviewer_model`).
+- F3: not a code change; the Coder can't dispatch CI, and this run's orchestrator instructions say not to tag or release. Left to the orchestrator: dispatch with `-R nlachica/buddy-android` (and look up/watch the run the same way), then attach the green run for the reviewed commit. Until then the Gradle/watchlink/Wear builds are CI-only and unverified; the scratch javac run is not a substitute.
+- F4: fixed in the same commit. The service snapshot is a JSON array and `view` reads the one field it needs, so an embedded NUL can't move an address into another part. New names are refused if they contain any control character (`\p{Cntrl}`, which covers CR and LF); an already-stored name is read safely. Test: `aServiceNameWithControlCharactersNeverMovesAnAddressIntoAnotherPart` covers a read, a card and a stale-write reply with no secret in any of them.
+
+Tests: `/tmp/buddy-build-005/check.sh github` and `fdroid` both OK, 44 tests (javac + JUnit against android-all, no Gradle).

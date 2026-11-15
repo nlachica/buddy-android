@@ -106,6 +106,8 @@ public class SettingsCoverageTest {
         assertEquals("claude-x-5", m.check(" claude-x-5 "));
         refused(m, "@ds/other");
         refused(m, "two words");
+        refused(m, "one\ntwo\nthree");
+        refused(m, "one\r\ntwo\r\nthree");
         refused(m, "");
         refused(m, new String(new char[201]).replace('\0', 'a'));
         assertEquals("default", m.get());
@@ -116,6 +118,7 @@ public class SettingsCoverageTest {
         assertTrue(m.read(), m.read().contains("DeepSeek:") && m.read().contains("@ds/chat — Chat"));
         SettingsTool.Scalar reviewer = SettingsTool.model("reviewer_model/claude", SettingsCoverageTest::options, false, now::get, now::set, "");
         refused(reviewer, "@ds/chat");
+        refused(reviewer, "one\ntwo\nthree");
         assertEquals("opus", reviewer.check("opus"));
     }
 
@@ -217,6 +220,25 @@ public class SettingsCoverageTest {
         assertEquals("service/a = off  (Beta; models shown: 1 of 2)", SettingsTool.serviceLine(map.get("a")));
         for (String part : new String[]{"", "name", "models"}) noSecret(SettingsTool.service("a", part, map::get, p -> { }).read());
         noSecret(edit(SettingsTool.service("a", "name", map::get, p -> { }), "Beta", never())); // Already
+    }
+
+    @Test
+    public void aServiceNameWithControlCharactersNeverMovesAnAddressIntoAnotherPart() throws Exception {
+        Map<String, Providers.P> map = new HashMap<>();
+        map.put("a", service("a", "Work\u0000x\u0000y", "m1", "m2")); // as already stored
+        for (String part : new String[]{"", "name", "models"}) {
+            noSecret(SettingsTool.service("a", part, map::get, p -> { }).read());
+        }
+        assertTrue(SettingsTool.service("a", "models", map::get, p -> { }).read(), SettingsTool.service("a", "models", map::get, p -> { }).read().contains("= all"));
+        refused(SettingsTool.service("a", "name", map::get, p -> { }), "Work\u0000x\u0000y");
+        // a stale-write reply and a card show the part only
+        String r = edit(SettingsTool.service("a", "models", map::get, p -> { }), "m1", card -> {
+            noSecret(card);
+            map.get("a").name = "Other\u0000x\u0000y";
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        noSecret(r);
     }
 
     @Test
@@ -443,29 +465,45 @@ public class SettingsCoverageTest {
             cards.add(card);
             return YES;
         };
-        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, now::set), "on", ok);
+        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, () -> false, now::get, now::set), "on", ok);
         assertTrue(cards.get(0), cards.get(0).contains("on: routine approvals in Chatty go ahead without asking until this chat's task ends"));
         assertTrue(cards.get(0), !cards.get(0).contains("scheduled"));
         now.set("off");
-        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, true, now::get, now::set), "on", ok);
+        edit(SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, () -> true, now::get, now::set), "on", ok);
         assertTrue(cards.get(1), cards.get(1).contains("and in its scheduled runs"));
-        assertEquals("chat/c1/allowed/com.chat", SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, now::set).name);
+        assertEquals("chat/c1/allowed/com.chat", SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, () -> false, now::get, now::set).name);
     }
 
     @Test
     public void anAppThatCantBeAllowedIsRefusedForOnButCanBeTakenOff() throws Exception {
         AtomicReference<String> now = new AtomicReference<>("on");
-        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.bank", "Bank", "Bank can't be allowed without asking", false, now::get, now::set);
+        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.bank", "Bank", "Bank can't be allowed without asking", () -> false, now::get, now::set);
         refused(s, "on");
         assertEquals("off", s.check("OFF"));
         refused(s, "maybe");
     }
 
     @Test
+    public void aScheduleAddedWhileTheAllowedAppCardIsOpenIsNotWritten() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("off");
+        AtomicReference<Boolean> scheduled = new AtomicReference<>(false);
+        AtomicInteger sets = new AtomicInteger();
+        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, scheduled::get, now::get, v -> sets.incrementAndGet());
+        String r = edit(s, "on", card -> {
+            assertTrue(card, !card.contains("scheduled"));
+            scheduled.set(true);
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        assertEquals(0, sets.get());
+        assertEquals("chat/c1/allowed/com.chat = off  (on, off)", s.read());
+    }
+
+    @Test
     public void anAllowedAppTurnedOnByTheScreenIsNotOverwritten() throws Exception {
         AtomicReference<String> now = new AtomicReference<>("off");
         AtomicInteger sets = new AtomicInteger();
-        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, false, now::get, v -> sets.incrementAndGet());
+        SettingsTool.Scalar s = SettingsTool.allowedApp("c1", "com.chat", "Chatty", null, () -> false, now::get, v -> sets.incrementAndGet());
         String r = edit(s, "on", card -> {
             now.set("on");
             return YES;

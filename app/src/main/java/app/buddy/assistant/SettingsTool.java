@@ -26,6 +26,10 @@ import java.util.function.Supplier;
  * said yes and the setting is still as the card showed it. Keys, tokens and server addresses are never shown.
  */
 final class SettingsTool {
+    private static final java.util.regex.Pattern WHITE = java.util.regex.Pattern.compile("\\s");
+    private static final String SCHEDULED = "+scheduled";
+    private static final java.util.regex.Pattern CONTROL = java.util.regex.Pattern.compile("\\p{Cntrl}");
+
     /** Longest value the tool takes; the card shows values whole, so nothing hides past a limit. */
     private static final int MAX = 20_000;
 
@@ -495,7 +499,7 @@ final class SettingsTool {
             String check(String value) {
                 String v = value.trim();
                 if (v.equalsIgnoreCase("default")) v = "default";
-                else if (v.isEmpty() || v.length() > 200 || v.matches(".*\\s.*")) {
+                else if (v.isEmpty() || v.length() > 200 || WHITE.matcher(v).find()) {
                     throw new IllegalArgumentException(name + " takes: default, a listed model, or a model name (one word, up to 200 characters)");
                 } else if (v.startsWith("@") && !services) {
                     throw new IllegalArgumentException(name + " takes no @service/model");
@@ -581,16 +585,21 @@ final class SettingsTool {
             @Override
             String get() {
                 Providers.P p = find.apply(id);
-                return p == null ? null : String.join("\u0000", p.name, p.anthropic, p.openai, String.valueOf(p.off),
-                        String.join(",", p.shown));
+                return p == null ? null : new JSONArray().put(p.name).put(p.anthropic).put(p.openai).put(p.off)
+                        .put(String.join(",", p.shown)).toString();
             }
 
             @Override
             String view(String snapshot) {
                 if (snapshot == null) return "(none)";
-                String[] f = snapshot.split("\u0000", -1);
-                return part.isEmpty() ? f[3].equals("true") ? "off" : "on" : part.equals("name") ? f[0]
-                        : f[4].isEmpty() ? "all" : f[4];
+                JSONArray f;
+                try {
+                    f = new JSONArray(snapshot);
+                } catch (org.json.JSONException e) {
+                    throw new IllegalStateException(e);
+                }
+                return part.isEmpty() ? f.optBoolean(3) ? "off" : "on" : part.equals("name") ? f.optString(0)
+                        : f.optString(4).isEmpty() ? "all" : f.optString(4);
             }
 
             @Override
@@ -599,7 +608,7 @@ final class SettingsTool {
                 if (part.isEmpty()) {
                     if (!v.equalsIgnoreCase("on") && !v.equalsIgnoreCase("off")) throw new IllegalArgumentException(name + " takes: on, off");
                     v = v.toLowerCase(Locale.ROOT);
-                } else if (part.equals("name") && (v.isEmpty() || v.contains("\n") || v.contains("\r"))) {
+                } else if (part.equals("name") && (v.isEmpty() || CONTROL.matcher(v).find())) {
                     throw new IllegalArgumentException(name + " takes a name: one line, not blank");
                 }
                 Providers.P p = find.apply(id);
@@ -682,9 +691,18 @@ final class SettingsTool {
      * An app the user allows in a chat without asking (the chat's "Allowed without asking"): on while the chat's task
      * runs, and for a scheduled chat in its scheduled runs too. app: the name to show; refusal: why "on" is refused (null: it can be allowed).
      */
-    static Scalar allowedApp(String chat, String pkg, String app, String refusal, boolean scheduled, Supplier<String> get,
+    static Scalar allowedApp(String chat, String pkg, String app, String refusal, BooleanSupplier scheduled, Supplier<String> get,
                              Consumer<String> set) {
-        return new Scalar("chat/" + chat + "/allowed/" + pkg, get, set, "", "on", "off") {
+        // the scope is in the snapshot, so a schedule added while the card is open makes the write stale
+        return new Scalar("chat/" + chat + "/allowed/" + pkg, () -> {
+            String s = get.get();
+            return s == null ? null : s + (scheduled.getAsBoolean() ? SCHEDULED : "");
+        }, set, "", "on", "off") {
+            @Override
+            String view(String snapshot) {
+                return snapshot == null ? "(none)" : snapshot.replace(SCHEDULED, "");
+            }
+
             @Override
             String check(String value) {
                 String v = super.check(value);
@@ -695,7 +713,7 @@ final class SettingsTool {
             @Override
             String[] card(String snapshot, String value) {
                 return new String[]{view(snapshot), value.equals("on") ? "on: routine approvals in " + app
-                        + " go ahead without asking until this chat's task ends" + (scheduled ? " and in its scheduled runs" : "")
+                        + " go ahead without asking until this chat's task ends" + (snapshot.endsWith(SCHEDULED) ? " and in its scheduled runs" : "")
                         : value};
             }
         };
@@ -1226,7 +1244,7 @@ final class SettingsTool {
             // what the screen's picker offers: not a money, Settings, installer or store app
             String refusal = label == null ? "no installed app " + pkg
                     : Guard.allowable(svc, pkg) ? null : label + " can't be allowed without asking (money, Settings, installer and store apps never can)";
-            return allowedApp(id, pkg, label == null ? pkg : label, refusal, chat(svc, id).schedule != null, () -> {
+            return allowedApp(id, pkg, label == null ? pkg : label, refusal, () -> chat(svc, id) != null && chat(svc, id).schedule != null, () -> {
                 Sessions.Session c = chat(svc, id);
                 return c == null ? null : c.allowed.contains(pkg) ? "on" : "off";
             }, v -> {
