@@ -97,3 +97,11 @@ A or a talk run tracks A. The shared wake lock is released only when no watch ca
 call sets its own flag and takes the wake lock once on, so cleanup order doesn't matter. Test: a call in chat B while
 A is on and while A is connecting. B keeps `buddy:watch`; afterwards A's run-ended notification shows again and no
 `buddy:watch` is left.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No blocker or major findings remain. Round 2 F1 is addressed by `plan.md:73-87,211-223`: normal completion closes only the OutputStream, the watch retains the channel through EOF, and cancellation has a separate bounded path. This matches the [ChannelClient](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient) and [ChannelCallback](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient.ChannelCallback) contracts. Round 2 F2 is addressed by `plan.md:175-193`: cancellation uses a fresh thread, posted work rechecks ownership, and start-worker publication is guarded. The rationale for code review plus device verification instead of a JVM WebView test is sound. Round 2 F3 is addressed by the separate per-chat flag and shared wake-lock rules (`plan.md:122-129`).
+
+All four brief done-when items have planned verification (`plan.md:320-325`). Locked-phone WebView operation and Bluetooth throughput remain explicitly unverified device gates (`plan.md:295-298,328-339`); approval of this plan does not establish that those gates pass. No additional scope or abstraction is needed for this final round.
+
+VERDICT: APPROVE
