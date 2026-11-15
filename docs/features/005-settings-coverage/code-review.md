@@ -55,3 +55,17 @@ VERDICT: REVISE
 - F3: not fixed by the Coder, and no code change is needed. Round 2 finds no defect in the code: F1, F2 and F4 are resolved. The open item is a green CI run for `08d0b12`, and the Coder can't dispatch workflows or change repository access. This run also forbids tagging or releasing. Left to the orchestrator: run `gh workflow run -R nlachica/buddy-android` (and look up/watch the run with `-R nlachica/buddy-android` too), then attach the green run for the reviewed commit. Until then the Gradle, watchlink, Wear and packaging builds are CI-only and unverified; the scratch javac run is not a substitute.
 
 Tests (re-run at HEAD, no code changes this round): `/tmp/buddy-build-005/check.sh github` OK, 44 tests; `/tmp/buddy-build-005/check.sh fdroid` OK, 44 tests (javac + JUnit against android-all, no Gradle).
+
+## Round 3 - Code Reviewer (gpt-6-astra)
+
+Reviewed `main...HEAD` at `a126bb4171e9957322ea285ace20309d989f6499`, the brief, plan, decisions, earlier rounds, checked inventory, touched Java files and relevant screen/store handlers. This final round reports blocker/major findings only. Production code and tests are identical to Round 2 (`08d0b12`); only review notes have changed since then. No code or tests were modified during this review.
+
+F3 [blocker] Required CI still has no successful run - `docs/features/005-settings-coverage/plan.md:238` and `.github/workflows/build.yml:59`: the orchestrator again reports `HTTP 403: Must have admin rights to Repository` while dispatching workflow `377393827` against `ghorbelhamdi/buddy-android`. A read-only lookup of `nlachica/buddy-android/actions/runs?head_sha=a126bb4171e9957322ea285ace20309d989f6499` returned `total_count: 0`. The required Gradle unit tests and Android/Wear release builds therefore remain unverified. The Coder's response correctly assigns dispatch/access to the orchestrator; it does not resolve this explicit CI gate. This is an infrastructure/verification blocker, not evidence of a compilation defect. -> Have the orchestrator dispatch the intended branch explicitly with `gh workflow run build.yml -R nlachica/buddy-android --ref feat/005-settings-coverage`, use the same fork for run lookup/watch, resolve Actions access if needed, and attach a successful required workflow run for the reviewed commit before approval.
+
+Validation and coverage:
+- `/tmp/buddy-build-005/check.sh github`: PASS, 44 tests at this HEAD. This is the documented scratch javac/JUnit check against android-all with the API-36 omission and Os shim; it does not establish a successful Gradle, native, watchlink, Wear or packaging build. Round 2's F-Droid scratch pass applies to identical code; it was not repeated.
+- Round 1 F1, F2 and F4 remain resolved: scheduled scope participates in the allowed-app snapshot, model whitespace uses a search, and JSON service snapshots prevent embedded NULs from shifting secret-bearing addresses into displayed fields. Their regression tests pass.
+- The inventory and implemented families match the agreed scope. No additional blocker or major correctness, security, YAGNI or convention finding was identified.
+- Phone listing, availability refusals, approved/denied cards for all 12 families and device stale-write evidence remain unrecorded in `verify.md`. These are scheduled after installation by the plan; the device done-when item remains unfulfilled and verification must remain PARTIAL until evidence is recorded.
+
+VERDICT: REVISE
