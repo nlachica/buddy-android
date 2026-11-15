@@ -49,6 +49,13 @@ final class Speaker {
     /** Reads and plays this stream on a thread of its own. */
     void play(InputStream stream) {
         in = stream;
+        if (stopped) { // stopped before the stream came
+            try {
+                stream.close();
+            } catch (IOException ignored) {
+            }
+            return;
+        }
         new Thread(this::run, "speaker").start();
     }
 
