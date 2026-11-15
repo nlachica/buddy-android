@@ -15,4 +15,4 @@ dependencyResolutionManagement {
 }
 
 rootProject.name = "buddy"
-include(":app")
+include(":app", ":wear")
