@@ -8,6 +8,7 @@ import com.google.android.gms.wearable.Wearable;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.util.function.BooleanSupplier;
 
 /** The link to Buddy on the phone: finds it, sends it JSON, and holds the message paths (see the plan's table). */
 final class Phone {
@@ -24,7 +25,8 @@ final class Phone {
     private Phone() {
     }
 
-    static void send(Context c, String path, JSONObject body, Sent sent) {
+    /** {@code valid} is asked again once the phone is found, right before sending: an obsolete request sends nothing. */
+    static void send(Context c, String path, JSONObject body, BooleanSupplier valid, Sent sent) {
         final Context app = c.getApplicationContext();
         Wearable.getCapabilityClient(app).getCapability(CAPABILITY, CapabilityClient.FILTER_REACHABLE)
                 .addOnSuccessListener(info -> {
@@ -32,6 +34,7 @@ final class Phone {
                         why(app, sent);
                         return;
                     }
+                    if (!valid.getAsBoolean()) return;
                     String node = info.getNodes().iterator().next().getId();
                     Wearable.getMessageClient(app).sendMessage(node, path, body.toString().getBytes(StandardCharsets.UTF_8))
                             .addOnSuccessListener(id -> sent.done(null))

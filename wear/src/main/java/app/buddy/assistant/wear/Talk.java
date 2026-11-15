@@ -27,6 +27,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 /**
  * One conversation with Buddy on the phone, from the moment the user's words are sent until the answer is said. It is
@@ -50,7 +51,7 @@ public class Talk extends Service {
 
     /** What begin() hands over to send: call done with the result of sending (null error: the message left). */
     interface Sender {
-        void send(Phone.Sent done);
+        void send(BooleanSupplier valid, Phone.Sent done);
     }
 
     // the conversation, process-wide and main-thread only; one at a time, a new one replaces it
@@ -160,7 +161,7 @@ public class Talk extends Service {
         h.postDelayed(noHeard, NO_HEARD_MS); // armed before anything is sent; any answer from the phone cancels it
         Wearable.getMessageClient(this).addListener(listener)
                 .addOnSuccessListener(v -> {
-                    if (active(mine)) send.send(error -> {
+                    if (active(mine)) send.send(() -> active(mine), error -> {
                         if (error != null && active(mine)) fail(error);
                     });
                 })
@@ -239,7 +240,7 @@ public class Talk extends Service {
         h.postDelayed(noStatus, STATUS_MS);
         final int mine = run;
         try {
-            Phone.send(this, Phone.STATUS, new JSONObject().put("chat", chat), error -> {
+            Phone.send(this, Phone.STATUS, new JSONObject().put("chat", chat), () -> active(mine), error -> {
                 if (error != null && active(mine)) noStatus.run();
             });
         } catch (JSONException x) {
@@ -348,6 +349,7 @@ public class Talk extends Service {
         ttsReady = true;
         for (String t : early) speak(t);
         early.clear();
+        maybeStop(); // every speak() may have been refused
     }
 
     private void finished(String id) {

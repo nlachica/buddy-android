@@ -89,7 +89,7 @@ public class ChatsActivity extends Activity {
         Wearable.getMessageClient(this).addListener(listener)
                 .addOnSuccessListener(v -> {
                     if (!listening) Wearable.getMessageClient(this).removeListener(listener); // left meanwhile
-                    if (live(mine)) Phone.send(this, Phone.CHATS, new JSONObject(), error -> {
+                    if (live(mine)) Phone.send(this, Phone.CHATS, new JSONObject(), () -> live(mine), error -> {
                         if (error != null && live(mine)) showError(error);
                     });
                 })

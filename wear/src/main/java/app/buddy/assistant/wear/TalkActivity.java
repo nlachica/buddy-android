@@ -128,9 +128,9 @@ public class TalkActivity extends Activity {
         ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (request != LISTEN || result != RESULT_OK || heard == null || heard.isEmpty()) return; // cancelled: the mic button is there
         final String text = heard.get(0);
-        Talk.begin(this, chat, title, accent, done -> {
+        Talk.begin(this, chat, title, accent, (valid, done) -> {
             try {
-                Phone.send(this, Phone.SEND, new JSONObject().put("chat", chat).put("text", text), done);
+                Phone.send(this, Phone.SEND, new JSONObject().put("chat", chat).put("text", text), valid, done);
             } catch (JSONException e) {
                 throw new IllegalStateException(e);
             }
