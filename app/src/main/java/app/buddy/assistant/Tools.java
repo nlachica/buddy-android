@@ -611,7 +611,7 @@ final class Tools {
      * could tap an approval card), and the second is the user's alone. A tripwire for the plain cases, not a wall:
      * a command line can hide what it does, which is why each one goes to the user first unless they turned that off.
      */
-    private static final java.util.regex.Pattern SHELL_NO = java.util.regex.Pattern.compile(
+    static final java.util.regex.Pattern SHELL_NO = java.util.regex.Pattern.compile(
             "(?:^|[\\s;&|(`])(?:/system/bin/)?(?:input|sendevent|monkey|uiautomator)(?:\\s|$)|cmd\\s+input"
                     + "|app\\.buddy\\.assistant|enabled_accessibility_services|accessibility_enabled");
 

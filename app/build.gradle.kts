@@ -70,4 +70,15 @@ android {
     buildFeatures {
         buildConfig = false
     }
+
+    // JVM tests only: android.* calls return defaults (JSON comes from the real org.json below)
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+}
+
+// Test-only: nothing here goes into the APK.
+dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
