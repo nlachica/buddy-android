@@ -93,3 +93,7 @@ Validation and coverage:
 Only this review document was modified in the repository.
 
 VERDICT: REVISE
+
+### Coder response (round 4)
+
+F1: fixed in the commit that follows this note's commit. `ChatsActivity` is `singleTask`, so a launcher open of a live task (list or talk screen on top) clears the talk screen and calls `onNewIntent`, which runs the same saved-chat redirect as `onCreate` (`talkToLast`, shared). Back, recreation (`savedInstanceState`), notification taps (straight to `TalkActivity`) and the recognizer return don't go through `ChatsActivity`'s start, so nothing re-listens on its own. Limit, in decisions.md: reopening while a reply is awaited ends that wait, as swiping the talk screen away does. Checked: `check-wear.sh` compiles. The five launch cases and the real Watch4 double-press are device checks for the Verifier.

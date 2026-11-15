@@ -1,6 +1,7 @@
 package app.buddy.assistant.wear;
 
 import android.app.Activity;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
 import android.os.Handler;
@@ -50,9 +51,20 @@ public class ChatsActivity extends Activity {
         scroll.addView(body);
         setContentView(scroll);
         header();
-        // opening the app means "I want to say something": straight to the last chat; the list is one Back away
+        if (b == null) talkToLast(); // not on recreation
+    }
+
+    /** The launcher opens the app again while its task is alive (singleTask): same as a fresh open. */
+    @Override
+    protected void onNewIntent(Intent i) {
+        super.onNewIntent(i);
+        talkToLast();
+    }
+
+    /** Opening the app means "I want to say something": straight to the last chat; the list is one Back away. */
+    private void talkToLast() {
         SharedPreferences last = getSharedPreferences("last", MODE_PRIVATE);
-        if (b == null && last.contains("chat")) {
+        if (last.contains("chat")) {
             startActivity(Talk.intent(this, last.getString("chat", ""), last.getString("title", ""),
                     last.getInt("accent", Look.ACCENT)));
         }

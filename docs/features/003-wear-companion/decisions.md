@@ -184,6 +184,17 @@
   screen. Only a fresh create (`savedInstanceState == null`) redirects, so Android recreating the list doesn't. No saved
   chat (first launch) shows the list as before. If the saved chat was deleted on the phone, the send fails with the
   usual error; the list is one Back away.
-- Known limit: if the app's task is still alive, the launcher resumes whatever was on top (the talk screen, not
-  listening) instead of recreating the list; the mic button is there.
+- Known limit (superseded below): if the app's task is still alive, the launcher resumed whatever was on top.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - A launcher open of a live task also goes straight to talking: `ChatsActivity` is `singleTask` (code-review round 4, F1)
+- Options: (a) `launchMode="singleTask"` on `ChatsActivity` + `onNewIntent`; (b) `onResume` redirect with a flag; (c) leave
+  the limit.
+- Choice: (a). Android delivers a launcher start to a live task's root only for singleTask/singleInstance; it clears
+  the talk screen above and calls `onNewIntent`, which does what `onCreate` does (`talkToLast`). Only explicit starts of
+  `ChatsActivity` (the launcher, so the Home double-press too) take this path; Back, recreation, the notification (opens
+  `TalkActivity` directly) and the recognizer's return don't, so nothing re-listens by itself. No saved chat: the list as before.
+- Cost: reopening while the watch waits for a reply finishes the old talk screen, which stops the wait (same as swiping
+  it away, `TalkActivity.onDestroy`); the new talk screen shows the lines so far and listens.
+- Not checked here: the actual Watch4 launcher/double-press behaviour (compile only); for the Verifier.
 - By: Coder (claude-sonnet-5-5)
