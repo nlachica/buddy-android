@@ -217,15 +217,20 @@ final class Voice {
 
     // ------------------------------------------------------------- speaking
 
-    static void speak(Context c, String text) {
+    /** A reply as it is read aloud: code blocks and links become the (localized) words "code" and "link", markup goes. */
+    static String spoken(Context c, String text) {
         // the words spoken in place of code and links are plain text, not regex replacement syntax
         String code = " " + java.util.regex.Matcher.quoteReplacement(c.getString(R.string.voice_code_omitted)) + " ";
         String link = java.util.regex.Matcher.quoteReplacement(c.getString(R.string.voice_link));
-        String clean = text.replaceAll("```[\\s\\S]*?```", code)
+        return text.replaceAll("```[\\s\\S]*?```", code)
                 .replaceAll("[*_`#>|]", "")
                 .replaceAll("\\[(.*?)\\]\\(.*?\\)", "$1")
                 .replaceAll("https?://\\S+", link)
                 .trim();
+    }
+
+    static void speak(Context c, String text) {
+        String clean = spoken(c, text);
         if (clean.isEmpty()) return;
         SpeechPause.begin(c);
         AudioRoute.use(c);

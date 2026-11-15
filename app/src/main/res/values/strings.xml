@@ -722,6 +722,10 @@
     <string name="hub_note_not_sent">You stopped it, so your note wasn\'t sent: it\'s back in the message box</string>
     <!-- The agent received what the user added while it worked. -->
     <string name="hub_note_passed">Passed on what you added</string>
+    <!-- Shown on the user's Galaxy Watch when they speak to Buddy there but Buddy's accessibility service is off. -->
+    <string name="watch_buddy_off">Buddy\'s accessibility service is off on your phone. Turn it on there, then try again.</string>
+    <!-- Shown on the watch when the chat picked there has been deleted on the phone. -->
+    <string name="watch_chat_gone">That chat isn\'t on your phone any more.</string>
     <!-- The bubble's status pill when several chats work at once. %1$d = number of chats (always 2 or more),
          %2$s = the newest chat's status. -->
     <plurals name="hub_pill_chats">

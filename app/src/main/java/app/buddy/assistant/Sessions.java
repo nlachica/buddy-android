@@ -102,6 +102,8 @@ final class Sessions {
         final List<Msg> messages = new ArrayList<>();
         // runtime only
         boolean running, gotText, unread;
+        /** The run answers to the user's watch (WatchLink): no read-aloud and no "run ended" notification on the phone. */
+        boolean watch;
         String status = "";
         String lastReply = "";
         long lastEventAt;

@@ -717,6 +717,9 @@ final class ChatHub {
                         add(ses, Bubble.Kind.STEP, app.getString(R.string.hub_note_not_sent));
                     } else if (left != null) {
                         final String msg = left;
+                        // keep this post BEFORE the changed() below with no changed() in between: the watch link
+                        // (WatchLink) decides a run is over in a post of its own from onChatsChanged, and relies on
+                        // this continuation having had its turn by then
                         main.post(() -> {
                             if (!ses.running) sendNoteAsMessage(ses, msg);
                         });
@@ -964,7 +967,9 @@ final class ChatHub {
         // Then its end is a notification too, as for a long task's or a scheduled one's
         boolean away = Triggers.locked(app) || (ses.background && !viewing.contains(ses));
         // (a helper's end is its parent's business: no notification)
-        if ((ses.awake || ses.scheduledRun || away) && !quiet && ses.parent.isEmpty()) KeepAwake.notifyEnded(app, ses);
+        // (nor a run from the watch: the watch says it itself, and Galaxy Wearable would buzz the wrist again)
+        if ((ses.awake || ses.scheduledRun || away) && !quiet && ses.parent.isEmpty() && !ses.watch)
+            KeepAwake.notifyEnded(app, ses);
         ses.scheduledRun = false;
         ses.quietRun = false;
         ses.quietSaid = false;
@@ -978,8 +983,10 @@ final class ChatHub {
         if (text == null) return;
         sessions.add(ses, kind, text, files);
         if (kind == Bubble.Kind.BUDDY && !viewing.contains(ses) && ses.parent.isEmpty()) ses.unread = true;
-        // not during a live voice call: the voice tells the user itself (nor a helper's report, which is for its parent)
-        if (kind == Bubble.Kind.BUDDY && !text.isEmpty() && Prefs.speakReplies(app) && !CodexLive.on() && ses.parent.isEmpty())
+        // not during a live voice call: the voice tells the user itself (nor a helper's report, which is for its parent,
+        // nor a run from the watch, which speaks on the watch)
+        if (kind == Bubble.Kind.BUDDY && !text.isEmpty() && Prefs.speakReplies(app) && !CodexLive.on() && ses.parent.isEmpty()
+                && !ses.watch)
             Voice.speak(app, text);
         Sessions.Msg m = ses.messages.get(ses.messages.size() - 1);
         for (Listener l : new ArrayList<>(listeners)) l.onMessage(ses, m);
