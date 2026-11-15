@@ -14,4 +14,17 @@
     <string name="phone_unreachable">Can\'t reach your phone. Check Bluetooth.</string>
     <string name="phone_no_link">Buddy\'s watch link isn\'t on your phone. It needs Buddy\'s GitHub version, from the same release as this watch app.</string>
     <string name="phone_send_failed">Couldn\'t send. Is your phone nearby?</string>
+
+    <!-- Talking with Buddy: the ongoing notification while it works (%1$s = the chat) and while the answer is said -->
+    <string name="talk_channel">Buddy\'s answers</string>
+    <string name="talk_notif_waiting">Waiting for Buddy · %1$s</string>
+    <string name="talk_notif_speaking">Buddy is speaking · %1$s</string>
+    <!-- Said and shown when the conversation ends without an answer -->
+    <string name="talk_no_answer">Buddy on your phone didn\'t answer.</string>
+    <string name="talk_stopped_working">Buddy on your phone stopped working on this, but the answer didn\'t reach the watch. It\'s in the chat on your phone.</string>
+    <string name="talk_lost">Lost contact with your phone. Your message got there; Buddy\'s answer will be in the chat on your phone.</string>
+    <string name="talk_connect">Couldn\'t connect to your phone. Try again.</string>
+    <string name="talk_stopped">Stopped on your phone</string>
+    <string name="talk_ceiling">Still working on your phone after 15 minutes. The answer will be in the chat there.</string>
+    <string name="talk_no_voice">This watch can\'t read aloud (no voice installed)</string>
 </resources>

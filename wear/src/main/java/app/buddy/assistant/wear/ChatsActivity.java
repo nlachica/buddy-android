@@ -1,7 +1,6 @@
 package app.buddy.assistant.wear;
 
 import android.app.Activity;
-import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -123,8 +122,7 @@ public class ChatsActivity extends Activity {
     }
 
     private void open(String id, String title, int accent) {
-        startActivity(new Intent().setClassName(this, "app.buddy.assistant.wear.TalkActivity")
-                .putExtra("chat", id).putExtra("title", title).putExtra("accent", accent));
+        startActivity(Talk.intent(this, id, title, accent));
     }
 
     private void showError(String text) {

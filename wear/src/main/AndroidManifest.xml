@@ -3,6 +3,17 @@
 
     <uses-feature android:name="android.hardware.type.watch" />
 
+    <!-- Talk: waits for Buddy's answer and reads it out with the screen off -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:label="@string/app_name"
         android:icon="@mipmap/ic_launcher"
@@ -24,5 +35,11 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Passes the user's words to Buddy on the phone and reads the answer out; no runtime permission needed -->
+        <service
+            android:name=".Talk"
+            android:exported="false"
+            android:foregroundServiceType="remoteMessaging" />
     </application>
 </manifest>
