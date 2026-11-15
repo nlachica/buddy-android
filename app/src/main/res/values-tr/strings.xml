@@ -493,6 +493,7 @@
     <string name="chat_interrupted_continue">Devam et</string>
     <string name="chat_interrupted_dismiss">Kapat</string>
     <string name="hub_agent_stopped">%1$s durdu.</string>
+    <string name="hub_helper_ceiling">Bu alt ajan %1$d dakikadan uzun çalıştı, bu yüzden Buddy onu sonlandırdı.</string>
     <string name="hub_something_wrong">Bir şeyler ters gitti.</string>
     <string name="hub_note_added">Çalışırken eklendi: %1$s bunu bir sonraki adımında alacak</string>
     <string name="hub_note_not_sent">Durdurduğun için notun gönderilmedi: yeniden mesaj kutusunda</string>

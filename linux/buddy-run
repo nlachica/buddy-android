@@ -14,7 +14,7 @@
 #   buddy-run <token> transcript <claude|codex> <file>   last messages of a session (buddy_transcript)
 #   buddy-run <token> adopt <session> <claude|codex> <agent-session-id>  continue that session as a Buddy chat
 # Every event sent to the bubble carries "buddy_session" so the app can route it.
-HELPER_VERSION=30
+HELPER_VERSION=31
 set -u
 export PATH=$HOME/.local/bin:$HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # The claude launcher sets BUN_OPTIONS with a path relative to its folder; never inherit a stale one.
@@ -40,6 +40,19 @@ kill_tree() {
   local p=$1 c
   for c in $(pgrep -P "$p" 2>/dev/null); do kill_tree "$c"; done
   kill -TERM "$p" 2>/dev/null
+}
+
+# An agent's run (run_<x>): its output, until it exits. Something it started (an MCP server, a background job) can
+# keep that output open after it's gone; read to the end, the stream waited for that, and the chat stayed "working"
+# with no buddy_done (feature 002). run_<x> gets a shell of its own, and this one only waits for it: the end line
+# comes however that shell ends, killed included.
+until_exit() {
+  local end="buddy-run: agent exited $$ $RANDOM" line
+  { "$@" & wait "$!"; s=$?; printf '\n%s\n' "$end"; exit "$s"; } | while IFS= read -r line; do
+    [ "$line" = "$end" ] && break
+    [ -n "$line" ] && printf '%s\n' "$line"  # bash, not awk: mawk holds back short lines on a pipe
+  done
+  return "${PIPESTATUS[0]}"
 }
 
 descendants() { # print a pid and all its descendants
@@ -264,12 +277,21 @@ svc_window() {
 S=$D/sessions/$SID
 mkdir -p "$S"
 event() { jq -cn --arg type "$1" --arg text "${2:-}" --arg s "$SID" '{type:$type,text:$text,buddy_session:$s}' | post; }
+# The helper's own account of how a run ended; the app shows it only if the run reported no error and wasn't stopped.
+fallback_error() { jq -cn --arg text "$1" --arg s "$SID" '{type:"buddy_error",text:$text,fallback:true,buddy_session:$s}' | post; }
+cut_off() { fallback_error "The run was cut off: Buddy's helper in Linux was stopped."; }
 tag() { jq -c --arg s "$SID" '. + {buddy_session:$s}' 2>/dev/null; }
 
 if [ -f "$S/pid" ] && kill -0 "$(cat "$S/pid")" 2>/dev/null; then
   event buddy_error "This session is still working. Tap Stop first, or start another session."
   exit 0
 fi
+
+# From here every end of this run says done, once: the normal end, an early exit, a crash, a kill. A TERM stops the
+# agent first (the cut-off marker keeps the run section from also reporting the TERM it gets).
+trap 'event buddy_done' EXIT
+trap '[ -n "${RUN:-}" ] && { touch "$S/cut-off"; kill_tree "$RUN"; rm -f "$S/pid"; }; cut_off; exit 1' TERM INT HUP
+rm -f "$S/cut-off"
 
 if [ -n "$SVC" ] && [ ! -s "$D/providers/$SVC.json" ]; then
   event buddy_error "This chat's model is from an API key that is no longer in Buddy. Pick another model."
@@ -913,6 +935,7 @@ stream_grok() {
 # events instead of posting them.
 if [ -n "${BUDDY_TEST_STREAM:-}" ]; then
   post() { cat; echo; }
+  trap - EXIT
   "stream_$BUDDY_TEST_STREAM"
   exit 0
 fi
@@ -921,11 +944,11 @@ fi
 (
   if [ "$BACKEND" = opencode ]; then
     if ! have opencode; then event buddy_error "OpenCode isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_opencode | stream_opencode
+    until_exit run_opencode | stream_opencode
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/opencode-session" ] && grep -q -i -E 'not found|no such|session' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/opencode-session"   # old session is gone; retry as a new conversation
-      run_opencode | stream_opencode
+      until_exit run_opencode | stream_opencode
       status=${PIPESTATUS[0]}
     fi
     name=OpenCode
@@ -934,18 +957,18 @@ fi
     # a rule's run must get no shell, files or web; agy's allow list can't promise that yet (see Account.runsRules)
     if [ "$DEV" = rule ]; then event buddy_error "Antigravity can't run notification rules yet. Pick another agent for this rule."; exit 0; fi
     # the last run's raw events stay in the session folder, for checking how agy reports its steps
-    run_agy | tee "$S/agy-last.jsonl" | stream_agy
+    until_exit run_agy | tee "$S/agy-last.jsonl" | stream_agy
     status=${PIPESTATUS[0]}
     # a refusal ended its turn without a word: nudge it on once, in the same conversation
     if [ -s "$S/agy-denied" ] && [ -s "$S/agy-conversation" ]; then
       MSG="(From Buddy, not the user) This chat doesn't allow that: $(cat "$S/agy-denied"). Carry on with the phone \
 tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
-      run_agy | tee -a "$S/agy-last.jsonl" | stream_agy last
+      until_exit run_agy | tee -a "$S/agy-last.jsonl" | stream_agy last
       status=${PIPESTATUS[0]}
     fi
     if [ -s "$S/agy-conversation" ] && grep -q -i -E 'conversation.*(not found|no such|unknown)' "$S/agy-error" "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/agy-conversation"   # old conversation is gone; retry as a new one
-      run_agy | stream_agy
+      until_exit run_agy | stream_agy
       status=${PIPESTATUS[0]}
     fi
     # a failed turn (quota reached, …) is already in the chat from its result; agy also exits non-zero and prints
@@ -954,11 +977,11 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Antigravity
   elif [ "$BACKEND" = grok ]; then
     if ! have grok; then event buddy_error "Grok isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_grok | stream_grok
+    until_exit run_grok | stream_grok
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/grok-session" ] && grep -q -i -E 'session.*not found|failed to restore session' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/grok-session"   # old session is gone; retry as a new conversation
-      run_grok | stream_grok
+      until_exit run_grok | stream_grok
       status=${PIPESTATUS[0]}
     fi
     # a failed turn (not signed in, …) is already in the chat from its result; grok also exits non-zero and prints
@@ -967,32 +990,43 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Grok
   elif [ "$BACKEND" = codex ]; then
     if ! have codex; then event buddy_error "Codex isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_codex | stream_codex
+    until_exit run_codex | stream_codex
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && [ -s "$S/codex-thread" ] && grep -q -i -E 'not found|no such|unknown (thread|session)' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/codex-thread"   # old thread is gone; retry as a new conversation
-      run_codex | stream_codex
+      until_exit run_codex | stream_codex
       status=${PIPESTATUS[0]}
     fi
     name=Codex
   else
     if ! have claude; then event buddy_error "Claude Code isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    run_claude | stream_claude
+    until_exit run_claude | stream_claude
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && grep -q -i 'no conversation found' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/claude-session"   # old session is gone; retry as a new conversation
-      run_claude | stream_claude
+      until_exit run_claude | stream_claude
       status=${PIPESTATUS[0]}
     fi
     name="Claude Code"
   fi
-  if [ "$status" -ne 0 ] && [ "$status" -ne 143 ] && [ -s "$S/last-error.log" ]; then
-    # the agent's own words: all of them, unless it wrote pages (then the end, and a mark that there was more)
-    more=""; [ "$(wc -c < "$S/last-error.log")" -gt 4000 ] && more="… "
-    event buddy_error "$name failed: $more$(tail -c 4000 "$S/last-error.log")"
+  [ -e "$S/cut-off" ] && exit 0   # the wrapper's TERM trap reports this run
+  # Failed = a non-zero exit (0 is finished, even with no result event). The agent's own words (all of them, unless it
+  # wrote pages: then the end, and a mark that there was more) are reported as they come; any other failure is the
+  # helper's guess (fallback), which the app drops when the run already has an outcome (an error it showed, a Stop).
+  if [ "$status" -ne 0 ]; then
+    if [ -s "$S/last-error.log" ]; then
+      more=""; [ "$(wc -c < "$S/last-error.log")" -gt 4000 ] && more="… "
+      why="$more$(tail -c 4000 "$S/last-error.log")"
+    elif [ "$status" -gt 128 ]; then why="it was killed (signal $((status - 128)))."
+    else why="it exited with status $status."; fi
+    if [ -s "$S/last-error.log" ] && [ "$status" -ne 143 ]; then event buddy_error "$name failed: $why"
+    else fallback_error "$name failed: $why"; fi
   fi
+  exit 0   # the wrapper reads any other status as "this section was cut short"
 ) &
-echo $! > "$S/pid"
-wait $! 2>/dev/null
+RUN=$!
+echo "$RUN" > "$S/pid"
+wait "$RUN" 2>/dev/null
+rs=$?
 rm -f "$S/pid"
-event buddy_done
+if [ "$rs" -ne 0 ]; then cut_off; fi   # killed, or aborted: its error rule never ran

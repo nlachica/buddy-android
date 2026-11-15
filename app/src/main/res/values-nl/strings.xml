@@ -490,6 +490,7 @@
     <string name="chat_interrupted_continue">Doorgaan</string>
     <string name="chat_interrupted_dismiss">Sluiten</string>
     <string name="hub_agent_stopped">%1$s is gestopt.</string>
+    <string name="hub_helper_ceiling">Deze subagent werkte langer dan %1$d minuten, dus Buddy heeft hem beëindigd.</string>
     <string name="hub_something_wrong">Er is iets misgegaan.</string>
     <string name="hub_note_added">Toegevoegd tijdens het werk: %1$s krijgt het bij de volgende stap</string>
     <string name="hub_note_not_sent">Je hebt gestopt, dus je notitie is niet verstuurd: hij staat weer in het berichtvak</string>

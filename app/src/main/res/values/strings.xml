@@ -715,6 +715,7 @@
     <string name="chat_interrupted_dismiss">Dismiss</string>
     <!-- The agent ended with an error and gave no message. %1$s = agent name. -->
     <string name="hub_agent_stopped">%1$s stopped.</string>
+    <string name="hub_helper_ceiling">This sub-agent worked for over %1$d minutes, so Buddy ended it.</string>
     <string name="hub_something_wrong">Something went wrong.</string>
     <!-- After the user adds something while the agent works. %1$s = agent name. -->
     <string name="hub_note_added">Added while working: %1$s gets it at its next step</string>
