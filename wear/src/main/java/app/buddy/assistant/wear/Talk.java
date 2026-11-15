@@ -110,7 +110,8 @@ public class Talk extends Service {
         final long arrived = SystemClock.elapsedRealtime();
         long voice;
         /** The voice's first audible block was written: the voice owns this reply from then on (reader thread sets). */
-        volatile boolean committed;
+        volatile boolean committed; // the voice owns the reply; with fellBack, set only under synchronized (this)
+        boolean fellBack; // the TTS owns it
         Speaker speaker;
         Runnable deadline;
 
@@ -403,12 +404,16 @@ public class Talk extends Service {
         if (ch == null || s.speaker != null) return;
         final Speaker sp = new Speaker(false, "voice " + s.voice, new Speaker.Listener() {
             @Override
-            public void audible() {
-                s.committed = true; // here, not posted: a /buddy/say that comes next must find it already the voice's
+            public boolean audible() {
+                synchronized (s) { // one owner: the first sound or the fallback, whichever claims first
+                    if (s.fellBack) return false;
+                    s.committed = true; // here, not posted: a /buddy/say that comes next must find it already the voice's
+                }
                 h.post(() -> {
                     Log.i("BuddyTalk", "first sound (voice) " + (SystemClock.elapsedRealtime() - s.arrived) + " ms after the reply");
                     if (s.deadline != null) h.removeCallbacks(s.deadline);
                 });
+                return true;
             }
 
             @Override
@@ -449,7 +454,11 @@ public class Talk extends Service {
     }
 
     private void toTts(Say s, String why) {
-        if (s.voice < 0 || s.committed || !toSay.contains(s)) return;
+        if (s.voice < 0 || !toSay.contains(s)) return;
+        synchronized (s) {
+            if (s.committed) return;
+            s.fellBack = true;
+        }
         Log.i("BuddyTalk", "voice " + s.voice + " becomes tts (" + why + ")");
         if (s.deadline != null) h.removeCallbacks(s.deadline);
         if (s.speaker != null) s.speaker.stop(why);
@@ -488,7 +497,12 @@ public class Talk extends Service {
         }
         if (!channels.containsKey(id)) return; // closed by us (read, converted, hushed)
         channels.remove(id);
-        for (Say s : toSay) if (s.voice == id) toTts(s, "closed");
+        for (Say s : toSay) {
+            if (s.voice == id) {
+                toTts(s, "closed"); // changes toSay
+                return;
+            }
+        }
     }
 
     private void closeChannel(long id) {

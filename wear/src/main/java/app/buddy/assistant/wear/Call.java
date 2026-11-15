@@ -190,7 +190,8 @@ public class Call extends Service {
                 out.flush();
                 Speaker sp = new Speaker(true, "call " + id, new Speaker.Listener() {
                     @Override
-                    public void audible() {
+                    public boolean audible() {
+                        return true;
                     }
 
                     @Override
@@ -237,7 +238,10 @@ public class Call extends Service {
             long quietUntil = 0;
             while (!dead) {
                 int n = r.read(buf, 0, buf.length);
-                if (n < 0) break;
+                if (n < 0) {
+                    if (dead) break; // close() released the recorder
+                    throw new IOException("microphone read " + n); // talk() ends the call
+                }
                 long now = SystemClock.elapsedRealtime();
                 if (sp.audibleNow()) quietUntil = now + AFTER_MS;
                 if (n == 0 || now < quietUntil) continue; // half-duplex: the speaker is 3 cm from the microphone

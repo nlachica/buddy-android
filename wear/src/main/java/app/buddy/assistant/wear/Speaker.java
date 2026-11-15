@@ -18,8 +18,8 @@ import java.io.InputStream;
  */
 final class Speaker {
     interface Listener {
-        /** The first audible block was written (reader thread). */
-        void audible();
+        /** The first audible block is about to be written (reader thread): false when someone else owns the reply; nothing sounds. */
+        boolean audible();
 
         /** The stream ended: "eof" (the phone's normal end, all played) or "closed" (it broke); not after stop(). */
         void ended(String by);
@@ -113,19 +113,23 @@ final class Speaker {
                         t.pause();
                         playing = false;
                     }
+                    boolean loud = peak(buf, n) > AUDIBLE;
+                    if (loud && audibleAt < 0) {
+                        if (!listener.audible()) { // lost the claim: the other voice has it
+                            stop("lost");
+                            return;
+                        }
+                        audibleAt = SystemClock.elapsedRealtime() - t0;
+                    }
                     int len = write(t, buf, n);
                     frames += len / 2;
                     if (!playing && (frames - t.getPlaybackHeadPosition()) * 2 >= PREBUFFER) {
                         t.play();
                         playing = true;
                     }
-                    if (len > 0 && peak(buf, len) > AUDIBLE) {
+                    if (len > 0 && loud) {
                         long lag = (frames - t.getPlaybackHeadPosition()) * 1000 / RATE;
                         audibleUntil = SystemClock.elapsedRealtime() + lag;
-                        if (audibleAt < 0) {
-                            audibleAt = SystemClock.elapsedRealtime() - t0;
-                            listener.audible();
-                        }
                     }
                 }
                 if (have == 1) buf[0] = buf[n];
