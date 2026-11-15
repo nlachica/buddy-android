@@ -87,3 +87,10 @@
   get wrong. (c) still leaves nothing armed after a `status running:false` ignored while words are in flight. This
   replaces the part of the "sent one at a time" entry saying `run` goes up when words are given up.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Coder: two begin() calls before the service has started
+- Plan didn't settle: a second non-join `begin` before the first `onStartCommand` runs (two recognitions within
+  milliseconds) clears the queue, and the second `onStartCommand` then finds it empty.
+- Choice: `next()` returns on an empty queue; no further handling. The words of the second begin are still sent by the
+  first `onStartCommand`; only that send's `noHeard` deadline is lost (the second reset removes it). Needs two
+  speech results in one frame, so not worth state. By: Coder (claude-sonnet-5-5)
