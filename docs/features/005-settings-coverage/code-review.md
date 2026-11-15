@@ -49,3 +49,9 @@ Validation and coverage:
 - Phone listing, availability checks, approved/denied cards for the 12 families, and device stale-write evidence remain pending in the empty `verify.md`. The plan schedules these after installation; the device done-when item remains unfulfilled and verification must remain PARTIAL until evidence is recorded.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+- F3: not fixed by the Coder, and no code change is needed. Round 2 finds no defect in the code: F1, F2 and F4 are resolved. The open item is a green CI run for `08d0b12`, and the Coder can't dispatch workflows or change repository access. This run also forbids tagging or releasing. Left to the orchestrator: run `gh workflow run -R nlachica/buddy-android` (and look up/watch the run with `-R nlachica/buddy-android` too), then attach the green run for the reviewed commit. Until then the Gradle, watchlink, Wear and packaging builds are CI-only and unverified; the scratch javac run is not a substitute.
+
+Tests (re-run at HEAD, no code changes this round): `/tmp/buddy-build-005/check.sh github` OK, 44 tests; `/tmp/buddy-build-005/check.sh fdroid` OK, 44 tests (javac + JUnit against android-all, no Gradle).
