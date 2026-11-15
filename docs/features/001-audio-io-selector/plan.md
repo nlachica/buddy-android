@@ -1,5 +1,5 @@
 # Plan: 001-audio-io-selector
-<!-- Planner (claude-opus-5-5), 2026-11-15; revised for plan review round 1. Paths under app/src/main/java/app/buddy/assistant/ unless shown otherwise. -->
+<!-- Planner (claude-opus-5-5), 2026-11-15; revised for plan review rounds 1-2. Paths under app/src/main/java/app/buddy/assistant/ unless shown otherwise. -->
 
 ## Goal
 Nicholas picks one audio device for Buddy's voice, the way you choose a device during a call: **Auto** (Android
@@ -67,6 +67,16 @@ its state lives on the main thread):
   3. Forget what was applied, then `reconcile()`.
 - `reconcile()` (private) brings Android in line with the choice. It runs from `use()` and on every poll tick while
   Buddy's voice is active:
+  0. **After a live call.** While `CodexLive.on()`, note `live`. Once `live` is noted, `!CodexLive.on()` and
+     `getMode()` is `MODE_NORMAL`, the WebView's teardown is over. Clear `live` and forget what was applied or
+     refused, so step 4 can't skip the re-apply. Why this works: Chromium's teardown clears the communication
+     device, restores its saved speakerphone state, and only then calls `setMode(MODE_NORMAL)`. It always uses
+     NORMAL, not the mode it found (`AudioManagerAndroid.setCommunicationAudioModeOn`,
+     `CommunicationDeviceSelectorPostS.setCommunicationAudioModeOn`). `CodexLive.end` clears `ses` at once but tears
+     the page down later (`CodexLive.java:228,246-257`). Dictation or read aloud can start in that gap
+     (`Voice.java:101`, `ChatHub.java:950`), and its `use()` applies the device before the teardown undoes it. The
+     first tick that sees NORMAL (within 300 ms) applies it again, mode included (step 5), for the rest of that
+     activity. This fires once per live call, so Buddy never fights a mode that Android itself resets.
   1. If the choice is Auto: `drop()` and stop.
   2. If the phone is ringing or in a phone call (mode neither `MODE_NORMAL` nor `MODE_IN_COMMUNICATION`), the
      session counts as another call's from now on, whatever Buddy applied before.
@@ -98,12 +108,20 @@ its state lives on the main thread):
   "listening for its answer" (`Bubble.java:2404-2414`).
 - `static boolean ownsMode()` reports whether Buddy itself set communication mode. `AutoPause` reads it.
 
-Cost: under Auto, one `getMode()` per `use()` plus a check of three booleans every 300 ms while Buddy's voice is on.
-With a device chosen, add one `getAvailableCommunicationDevices()` per tick.
+Cost: under Auto, one `getMode()` per `use()` plus a check of three booleans every 300 ms while Buddy's voice is on
+(and a `getMode()` per tick between a live call's End and its teardown). With a device chosen, add one `getMode()`
+and one `getAvailableCommunicationDevices()` per tick.
 
 **Hooks** (one line each):
 - `Voice.speak`: `AudioRoute.use(c)` next to `SpeechPause.begin(c)` (`Voice.java:229`). Covers both read-aloud
   engines and the Settings sample.
+- `Voice.say`: `AudioRoute.use(c)` in the main-thread step, after the `tts == null || !ttsReady` check and right
+  before `tts.speak` (`Voice.java:268-280`). The phone voice can start well after `speak()`: a cold engine
+  initializes asynchronously, language detection runs on a worker, and ChatGPT's voice can fail and hand over
+  (`CodexSpeech.fail()`, `CodexSpeech.java:209-216`) after its WebView has closed. None of that counts as
+  `Voice.isSpeaking()`, so the session may have ended by then. This call starts it again, or just restarts its
+  timers. No separate hook at the fallback's start: this one covers the fallback, a slow first start, and
+  anything over the 10 s "never started" limit.
 - `Voice.listen`: `AudioRoute.use(c)` after `stopListening(); stopSpeaking();` (`Voice.java:102-103`), before
   the engine is chosen. Covers all three input engines, chat, bubble, cards and the assistant button.
 - `CodexLive.start`: `AudioRoute.use(app)` right after `app = c.getApplicationContext()` (`CodexLive.java:189`).
@@ -129,7 +147,11 @@ With a device chosen, add one `getAvailableCommunicationDevices()` per tick.
 **Settings** (`SetupActivity` Voice card, after the Voice output block (`:443-460`) and before Languages; only if
 `choices().length > 1`, i.e. API 31+): `fieldLabel("Audio device")` + `segmented(choices, selected, ...)`, the
 same control as Voice input/output and the six-option live agent picker.
-- `selected` is the saved key if that device is connected, otherwise `""` (Auto is in effect).
+- `selected` is the saved key, `Prefs.audioDevice`, as stored. While that device is away it matches no option, so
+  no segment is highlighted and every one can be tapped, Auto included (`Ui.segmented` only calls back for an
+  option that isn't selected, `Ui.java:460-463`). Tapping Auto saves `""`, so the device doesn't take audio back
+  when it reconnects. The note below says that Auto is in effect. The highlight always shows what's saved, and the
+  note says when a different device is in effect. `Ui.segmented` isn't changed.
 - On pick: `Prefs.setAudioDevice`, `render()`, then `Voice.stopSpeaking(); Voice.speak(sample)`, as the ChatGPT
   voice picker does (`:453-457`). That plays the sample through the new device, which is also the quickest check.
 - The muted note below says what the choice covers. When the saved device is away it says "Galaxy Watch4 (K1KA)
@@ -144,8 +166,9 @@ a compact text chip between the status and End/send.
 - Built with Ui helpers: `monoText` 12 sp, single line, ellipsized, max about 88 dp, `rounded(CARD2, 10)`, 34 dp
   high like End.
 - It shows the device in effect: the saved one if it's connected, otherwise Auto.
-- A tap moves to the next entry of `choices()`, saves it, calls `AudioRoute.use(c)` and updates the label. The bar
-  only shows while Buddy's voice is on, so the new choice applies at once.
+- A tap moves to the entry of `choices()` after the one shown (after Auto, when the saved device is away). It saves
+  that entry, calls `AudioRoute.use(c)` and updates the label. The bar only shows while Buddy's voice is on, so the
+  new choice applies at once.
 - The label refreshes in `begin()`, which both screens call each time the bar appears (`Bubble.java:688,718`,
   `ChatActivity.java:1718,1752`), on a tap, and about once a second from the bar's existing 70 ms ticker
   (`VoiceBar.java:164-173`). A device lost or reconnected mid-call shows within a second.
@@ -174,8 +197,13 @@ route without the permission. If A3 fails, the permission is added, as the decis
 - Explicit release hooks per engine: rejected (see the poll above).
 - A device-change listener in `AudioRoute` (`AudioDeviceCallback`, `OnCommunicationDeviceChangedListener`):
   rejected. The poll already runs whenever Buddy's voice is on, so it reconciles the device as well.
-- Comparing `getCommunicationDevice()` with the choice on every tick: rejected for now. A Bluetooth link takes
-  about 1 s to come up, and the poll would re-request it in that time. Kept as a fallback (Risks).
+- Comparing `getCommunicationDevice()` with the choice on every tick, also to catch the live teardown: rejected
+  (round 2). It doesn't report a Bluetooth SCO device until the link is up, about 1 s (AOSP `AudioDeviceBroker`
+  shows the default voice device meanwhile). A watch link still coming up, or refused, would look "undone", and
+  Buddy would re-request it every 300 ms. The teardown's final `setMode(MODE_NORMAL)` is an exact signal instead
+  (step 0). Kept as a fallback if Chromium moves a call by itself (Risks).
+- Re-applying whenever Buddy's mode reads NORMAL, not just once after a live call: rejected. Android may take the
+  mode back itself (Risks), and Buddy would fight it every tick.
 - Refusing live voice during another call: rejected. That is new behavior the brief doesn't ask for. Buddy only
   leaves that call's routing alone.
 - AutoPause keyed on Buddy's route being on: rejected (round 1). Picking Auto mid-call turned Buddy's own call
@@ -197,7 +225,7 @@ route without the permission. If A3 fails, the permission is added, as the decis
    otherwise). Class doc comment in the repo's style: what it's for, the "runs as a call" idea, voice sessions,
    Android 12+.
 3. **Hooks:**
-   - `Voice.java`: `speak`, `listen`.
+   - `Voice.java`: `speak`, `say` (just before `tts.speak`), `listen`.
    - `CodexLive.java`: `start`, before `ses = s`; JS `connected()`.
    - `AutoPause.java`: `callNow` gets the exemption and `liveUntil`, with a one-line comment on why Buddy's own
      communication mode isn't a call.
@@ -219,12 +247,14 @@ device null.
 |---|---|---|
 | CI | `apk` job green on the branch (`assembleGithubRelease assembleFdroidRelease`, lintVital included) | DW6 |
 | A1 | Settings → Voice shows "Audio device" with Auto, Speaker, Phone, Galaxy Watch4 (K1KA), same look as Voice input/output | DW1 |
-| A2 | Voice output = Phone: pick Speaker / Phone / Watch, and the sample plays from the loudspeaker / earpiece / watch | DW1, DW3 (phone TTS) |
+| A2 | Voice output = Phone: pick Speaker / Phone / Watch, and the sample plays from the loudspeaker / earpiece / watch. With the watch, a reply over 10 s long read aloud stays on it to the end | DW1, DW3 (phone TTS) |
 | A3 | Same with Voice output = ChatGPT. **Permission check (not done yet):** Buddy lists the watch, selects it and plays the sample on it, with no Bluetooth permission prompt or grant (App info → Permissions shows no "Nearby devices") | DW3 (ChatGPT voice), permissions |
+| A4 | Late phone voice. Watch chosen, Voice output = ChatGPT. Force-stop Buddy and reopen it (the phone engine is cold), turn Wi-Fi and mobile data off (not airplane mode, which can drop the watch), and pick the watch in Settings (Speaker first if it's already picked) to play the sample. After ChatGPT's voice gives up (up to about 20 s), the phone voice reads the sample on the watch to the end (`dumpsys audio` during it: communication device = the watch). Then E1's clean-up | DW3 (read-aloud fallback) |
 | B1 | Watch chosen: dictate with each engine (Phone, Claude, ChatGPT) from the chat mic and the bubble, speaking at the watch with the phone covered or away. The text is right. Speaker/Phone: dictation works as before | DW3 (voice input) |
 | C1 | Live voice in a chat, choice Speaker: the voice is on the loudspeaker. Tap the bar's chip → Phone: earpiece; → Watch: the watch's mic and speaker; → Auto: as before. Repeat from the bubble | DW2, DW3 (live) |
 | C2 | Voice bar while dictating shows the chip; a tap changes the label and the saved choice (Settings shows it) | DW2 |
-| D1 | Watch chosen. (a) Settings left open, watch Bluetooth off: without leaving the screen, Settings highlights Auto with the "isn't connected" note; Bluetooth on: the watch is back and highlighted. (b) Read aloud while the watch is off plays as Auto; watch on: the next sample plays on the watch with no new pick. (c) In one live call: watch off → the voice moves to Auto's device and the chip says Auto; watch on → the voice is back on the watch within about 2 s and the chip says so, with no tap and no new utterance. (d) Live voice started while the watch is off, then the watch turned on: the call moves to the watch. (e) Force-stop and reopen Buddy: the choice is still there | DW4 |
+| C3 | End, then voice at once. Watch chosen, then Phone: in live voice, tap End and at once tap the chat mic, then dictate for about 10 s. `dumpsys audio` during it shows mode IN_COMMUNICATION and the watch (earpiece) as communication device until the dictation ends, and words spoken at the watch come out right. Same with read aloud: with "Read replies aloud" on, End while the agent is still answering, and the reply is read on the watch (earpiece) to its end. Then E1's clean-up | DW3 (live teardown) |
+| D1 | Watch chosen. (a) Settings left open, watch Bluetooth off: without leaving the screen, the row highlights nothing and the note says the watch isn't connected (Auto until it is); Bluetooth on: the watch is back and highlighted, and the note is the usual one. (b) Read aloud while the watch is off plays as Auto; watch on: the next sample plays on the watch with no new pick. (c) In one live call: watch off → the voice moves to Auto's device and the chip says Auto; watch on → the voice is back on the watch within about 2 s and the chip says so, with no tap and no new utterance. (d) Live voice started while the watch is off, then the watch turned on: the call moves to the watch. (e) Force-stop and reopen Buddy: the choice is still there. (f) Watch off, tap Auto in Settings: Auto is highlighted and the note is the usual one; watch on: Auto stays highlighted and saved, the sample and the chip stay on Auto | DW4 |
 | E1 | About 2 s after each of A-D ends: `dumpsys audio` shows mode NORMAL and no communication device from Buddy. Includes Speaker → live voice → chip to Auto → End, which checks that the WebView's restore at hang-up was cleared. Music in another app plays on its usual device | DW5 (clean-up) |
 | E2 | Auto: live voice, dictation and read aloud behave as before, and `dumpsys audio` shows no route from Buddy during them | DW5 (Auto unchanged) |
 | E3 | While an agent operates the phone, with "Read replies aloud" and "Answer cards by voice" on, the agent is not paused "for a call" when: an approval card is read aloud and answered by voice with a device chosen; live voice runs under Auto (started before the task, and started during it); live voice with a device chosen, then the chip moved to Auto; live voice while the chosen device is away; live voice ended with End. A real incoming call during the task still pauses it | DW5 (AutoPause) |
@@ -236,6 +266,11 @@ device null.
   each `speak`); communication audio is certain to follow the device. If A3 fails as well, ChatGPT's voice can't
   be routed (its WebView has no device API), and the Settings note says read aloud with ChatGPT's voice stays on
   Android's media output.
+- **Android may take communication mode back from Buddy.** AOSP's `AudioService` checks every 6 s whether the app
+  holding `MODE_IN_COMMUNICATION` is playing or recording. The phone voice (TTS engine) and the phone recognizer run
+  in other apps' processes, so a long phone-voice read aloud may move back to the media device. If A2's long reply
+  does that, use the call-usage fallback above. Buddy doesn't set the mode again (step 0 fires only after a live
+  call), so the two never fight.
 - **Volume:** in communication mode the volume keys change call volume, while read aloud plays at the media
   volume for that device. It may be quiet on the earpiece or watch. Check in A2; the same fallback (call usage)
   makes the keys work.

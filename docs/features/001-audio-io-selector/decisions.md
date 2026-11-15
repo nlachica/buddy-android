@@ -115,3 +115,29 @@
   watch (`dumpsys`), not that Buddy can list or route it without the permission. Add the permission only if A3
   fails.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Re-apply once after a live call's teardown, keyed on the mode (plan review round 2, F1)
+- Options: compare `getCommunicationDevice()` with the choice every tick (it doesn't report a Bluetooth SCO device
+  until the link is up, so a watch link still connecting or refused would be re-requested every 300 ms); re-apply
+  whenever the mode reads NORMAL (would fight Android if it takes the mode back); once per live call, forget what was
+  applied on the first tick after End that reads `MODE_NORMAL`.
+- Choice: the last one. Chromium's teardown clears the communication device and restores speakerphone first, then
+  calls `setMode(MODE_NORMAL)` (always NORMAL; `AudioManagerAndroid`, `CommunicationDeviceSelectorPostS`). So NORMAL
+  means the teardown has nothing left to undo, and the re-apply sticks for the dictation or read aloud that started
+  during it.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Phone voice reacquires the route at the TTS handoff (plan review round 2, F2)
+- Options: also hook the ChatGPT fallback's start; track pending speech until playback; call `AudioRoute.use` in
+  `Voice.say` right before `tts.speak`.
+- Choice: the `Voice.say` call, because it's the one place every phone-voice playback passes through. It covers the
+  late fallback, a cold engine and slow language detection with one line, and the existing poll still does the
+  clean-up.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Settings highlights the saved choice, not the effective one (plan review round 2, F3)
+- Options: change `Ui.segmented` so a selected option can be tapped again; add the away device as an extra segment;
+  pass the saved key as `selected`, so nothing is highlighted while that device is away.
+- Choice: the saved key, because it needs no code beyond the value passed in. Auto can be tapped to clear the
+  choice, and the note already says that Auto is in effect.
+- By: Planner (claude-opus-5-5)
