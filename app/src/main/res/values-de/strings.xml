@@ -490,6 +490,7 @@
     <string name="chat_interrupted_continue">Weiter</string>
     <string name="chat_interrupted_dismiss">Schließen</string>
     <string name="hub_agent_stopped">%1$s wurde beendet.</string>
+    <string name="hub_helper_ceiling">Dieser Unter-Agent hat über %1$d Minuten gearbeitet, daher hat Buddy ihn beendet.</string>
     <string name="hub_something_wrong">Etwas ist schiefgelaufen.</string>
     <string name="hub_note_added">Während der Arbeit ergänzt: %1$s bekommt es beim nächsten Schritt</string>
     <string name="hub_note_not_sent">Du hast gestoppt, deshalb wurde deine Notiz nicht gesendet: Sie steht wieder im Nachrichtenfeld</string>

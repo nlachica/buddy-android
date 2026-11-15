@@ -505,6 +505,7 @@
     <string name="chat_interrupted_continue">Kontynuuj</string>
     <string name="chat_interrupted_dismiss">Odrzuć</string>
     <string name="hub_agent_stopped">%1$s przerwał pracę.</string>
+    <string name="hub_helper_ceiling">Ten podagent pracował ponad %1$d min, więc Buddy go zakończył.</string>
     <string name="hub_something_wrong">Coś poszło nie tak.</string>
     <string name="hub_note_added">Dodano w trakcie pracy: %1$s otrzyma to przy następnym kroku</string>
     <string name="hub_note_not_sent">Zatrzymano, więc notatka nie została wysłana: wróciła do pola wiadomości</string>

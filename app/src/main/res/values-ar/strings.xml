@@ -511,6 +511,7 @@
     <string name="chat_interrupted_continue">متابعة</string>
     <string name="chat_interrupted_dismiss">تجاهل</string>
     <string name="hub_agent_stopped">توقف %1$s.</string>
+    <string name="hub_helper_ceiling">عمل هذا الوكيل الفرعي أكثر من %1$d دقيقة، لذلك أنهاه Buddy.</string>
     <string name="hub_something_wrong">حدث خطأ ما.</string>
     <string name="hub_note_added">أُضيف أثناء العمل: سيتلقاه %1$s في خطوته التالية</string>
     <string name="hub_note_not_sent">أوقفتَه، لذلك لم تُرسَل ملاحظتك: عادت إلى مربع الرسالة</string>

@@ -662,6 +662,7 @@
     <string name="chat_interrupted_dismiss">Dispensar</string>
     <!-- The agent ended with an error and gave no message. %1$s = agent name. -->
     <string name="hub_agent_stopped">O %1$s parou.</string>
+    <string name="hub_helper_ceiling">Este subagente trabalhou por mais de %1$d minutos, então o Buddy o encerrou.</string>
     <string name="hub_something_wrong">Algo deu errado.</string>
     <!-- After the user adds something while the agent works. %1$s = agent name. -->
     <string name="hub_note_added">Adicionado durante o trabalho: o %1$s recebe isso no próximo passo</string>

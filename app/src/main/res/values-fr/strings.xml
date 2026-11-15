@@ -663,6 +663,7 @@
     <string name="chat_interrupted_dismiss">Ignorer</string>
     <!-- The agent ended with an error and gave no message. %1$s = agent name. -->
     <string name="hub_agent_stopped">%1$s s\'est arrêté.</string>
+    <string name="hub_helper_ceiling">Ce sous-agent a travaillé plus de %1$d minutes, donc Buddy l\'a arrêté.</string>
     <string name="hub_something_wrong">Un problème est survenu.</string>
     <!-- After the user adds something while the agent works. %1$s = agent name. -->
     <string name="hub_note_added">Ajouté en cours de route : %1$s le recevra à sa prochaine étape</string>

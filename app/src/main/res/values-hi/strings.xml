@@ -487,6 +487,7 @@
     <string name="chat_interrupted_continue">जारी रखें</string>
     <string name="chat_interrupted_dismiss">हटाएँ</string>
     <string name="hub_agent_stopped">%1$s रुक गया.</string>
+    <string name="hub_helper_ceiling">यह सब-एजेंट %1$d मिनट से ज़्यादा चला, इसलिए Buddy ने इसे रोक दिया।</string>
     <string name="hub_something_wrong">कोई गड़बड़ी हुई.</string>
     <string name="hub_note_added">काम के दौरान जोड़ा गया: %1$s को यह अगले चरण में मिलेगा</string>
     <string name="hub_note_not_sent">आपने रोक दिया, इसलिए आपका नोट नहीं भेजा गया: वह फिर से संदेश बॉक्स में है</string>

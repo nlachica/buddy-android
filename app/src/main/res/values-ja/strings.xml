@@ -483,6 +483,7 @@
     <string name="chat_interrupted_continue">続ける</string>
     <string name="chat_interrupted_dismiss">閉じる</string>
     <string name="hub_agent_stopped">%1$s が停止しました。</string>
+    <string name="hub_helper_ceiling">このサブエージェントは %1$d 分以上動いたため、Buddy が終了させました。</string>
     <string name="hub_something_wrong">問題が発生しました。</string>
     <string name="hub_note_added">作業中に追加しました：%1$s は次のステップで受け取ります</string>
     <string name="hub_note_not_sent">停止したため、追加したメモは送信されていません。メッセージ欄に戻しました</string>
