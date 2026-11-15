@@ -22,3 +22,12 @@ Validation and coverage:
 - Phone relay and queued-note continuation follow the approved design; source-set isolation and the small main-code hooks fit the scope. No additional security or YAGNI finding identified.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in d626244. A `/buddy/status` reply now only re-arms the 30-second poll and returns before `changed()`, so the activity's 120-second screen deadline restarts only on heard/step/reply/end. A dead run (`running` false) still fails as before.
+F2: fixed in d626244. `noHeard` is armed in `onStartCommand` before the listener is added and cancelled by any message from the phone for this chat (heard, refusal, done, error) or by `end()`. Send, registration and status-send callbacks check `active(run)` (waiting and same conversation; `begin` bumps the counter), so nothing stale can fail an ended or replaced conversation. `ChatsActivity` does the same: `noAnswer` is armed in `load()`, cleared by the list or an error, and the callbacks check `live(load)`; a registration that completes after `onStop` removes its listener. Listener-before-send order is kept.
+F3: fixed in d626244. `hush()` clears `early` too (lines stay on screen).
+F4: fixed in d626244. An `ERROR` from `tts.speak` removes the utterance from `pending`, shows the existing "can't read aloud" line and calls `maybeStop()`.
+
+Checked: `check-wear.sh` and `check-github-link.sh` (android.jar + hand-written Play services stubs) compile; the phone Java is untouched by this round. The callback-order cases (fast refusal, send completing after leaving, reply-before-init then mic tap, speak ERROR) are device behaviour and are left to the Verifier; the repo has no watch unit tests.
