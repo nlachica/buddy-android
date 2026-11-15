@@ -52,3 +52,26 @@
   Overlap already existed in 003 for a reply arriving during a mic tap. Plan R1; the device run shows whether a
   follow-up is needed.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Joined words are sent one at a time, each after the words before them are settled
+- Options: (a) a join bumps `run` and sends at once, taking `waiting` to mean the listener is registered (round-0
+  plan); (b) send at once and count unacknowledged words; (c) queue the words and send one set at a time, each after
+  the one before is heard, refused, failed or given up by `noHeard`, with every send waiting on the stored registration
+  `Task`; (d) refuse or replace words said while earlier words are in flight.
+- Choice: (c) (plan-review F1). (a) can drop the first words (their callbacks die with the bump) or send before
+  registration, and an earlier `heard` can confirm later words. (b) keeps no order between two sends in flight and
+  still needs per-send ids for late failures. (d) loses words, or the first answer, in a 1-10 s window. (c) keeps one
+  `heard` flag (now "nothing in flight"), keeps order, and needs only a list. `run` now goes up on a new conversation,
+  an ended wait and words given up, not on a join.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - A failure of some words doesn't end a run the phone has accepted
+- Options: (a) as 003 and round 0: a failed send, refusal or `noHeard` ends the whole wait; (b) these settle only the
+  words in flight (`settle`: error shown and said, next queued words sent), and the wait goes on while `accepted` (a
+  `heard` with no `done` since); conversation-wide failures (registration, ceiling, lost contact, `status
+  running:false` with nothing in flight, screen closed) still end it; (c) also retry failed words.
+- Choice: (b) (plan-review F2). (a) loses the story whenever the added question fails. (c) risks duplicates on the
+  phone and isn't asked for. A `done` that comes while words are in flight sets `accepted` false and is settled by those
+  words: their `heard` brings their own `done`, and their failure ends the wait. This replaces the earlier entry "only
+  the `noHeard` deadline ends the wait" while words are unconfirmed; its `done` and `status` rules stay.
+- By: Planner (claude-opus-5-5)
