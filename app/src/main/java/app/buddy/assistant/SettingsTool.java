@@ -1128,7 +1128,10 @@ final class SettingsTool {
                         + "arguments, lists every setting with its value and what it accepts. With name, shows that one in full. "
                         + "With name and value, changes it. Buddy shows the user an approval card for each change itself, so "
                         + "don't call confirm first; if they deny it, nothing changes. value \"\" deletes an item (rule, "
-                        + "schedule, skill, MCP server). Keys, tokens and server addresses are never shown or changed here.",
+                        + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
+                        + "page: agents and models (default agent and models, API key services' use, name and shown models, "
+                        + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
+                        + "chat's allowed apps. Keys, tokens and server addresses are never shown or changed here.",
                 Tools.props().put("name", Tools.strProp("Optional: the setting, as listed (e.g. read_aloud)"))
                         .put("value", Tools.strProp("Optional: the new value; needs name"))));
     }

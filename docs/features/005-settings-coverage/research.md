@@ -5,7 +5,7 @@ created: 2026-11-15
 ---
 # Research: 005-settings-coverage
 
-Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: **cov** = covered by 004 (`SettingsTool`), **add** = to add, **excl(N)** = excluded by non-goal N (1 secrets, 2 user-only flow, 3 approval gate, 4 new settings).
+Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: **cov** = covered by 004 (`SettingsTool`), **add** = to add (005 final status: **cov(005)** = added by 005; no row says add any more), **excl(N)** = excluded by non-goal N (1 secrets, 2 user-only flow, 3 approval gate, 4 new settings).
 
 ## Summary
 - 004's `SettingsTool` has: 13 Prefs scalars (`SettingsTool.java:121-174`), `app/<pkg>` modes, `chat/<id>/{linux_tools,background,schedule}`, `rule/*`, `skill/*`, `mcp/*` (`SettingsTool.java:702-730`). Everything else on Settings is a gap.
@@ -33,14 +33,19 @@ Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: *
 ### Agents and models (`agentSection :477`)
 | control | store / values | status |
 |---|---|---|
-| Default agent segmented (`:485-497`) | `Prefs.backend`/`setBackend`; claude, codex, opencode, agy, grok; UI greys `notReady()` agents (install/sign-in needed) | **add** `default_agent`; check = `Account.known` + agent ready (same test as `notReady()`) |
+| Default agent segmented (`:485-497`) | `Prefs.backend`/`setBackend`; claude, codex, opencode, agy, grok; UI greys `notReady()` agents (install/sign-in needed) | cov(005) `default_agent` |
 | Agent rows (install / sign-in) `agentRow :1670` | Account state | excl(2) |
-| API keys row → ApiKeysActivity (add/edit/remove service, key, addresses, model list) | `Providers.save/remove` | excl(1) for keys/addresses/add/remove |
-| API key service "Use this service" switch (`ApiKeysActivity.java:213`) | `Providers.setOff(c,p,off)` (`Providers.java:151`); non-secret | **add** (judgement call: `service/<id>` on/off; list shows name only, never key/host). Planner decides |
-| API key service "shown models" checklist (`:386-438`) | `p.shown`, `Providers.save` | excl(1)-adjacent (same save path as keys; needs the key-bearing editor) - recommend exclude |
-| Chats-on-Default per agent (`defaultsSheet Ui.java:487`, `pickDefault :508`, ApiKeysActivity `defaultRow :113`) | `Prefs.setAgentDefault(agent, ref)`; ref "" or `@service/model` (`Prefs.java:578-584`); side effect `ChatHub.get(c).changed()`; sheet only lists signed-in agents; options from `Models.options(agent,true)` plus free-typed model | **add** `default_model/<agent>`; check: agent signed in (`SetupState.signedIn`), "" or a typed model or `Providers.ref`; call `changed()` |
+| API key service: "Use this service" switch (`ApiKeysActivity.java:213`) | `Providers.setOff(c,p,off)` (`Providers.java:151`); non-secret | cov(005) `service/<id>` |
+| API key service: name | `p.name`, `Providers.save(…, null)` | cov(005) `service/<id>/name` |
+| API key service: API key | `Secrets` | excl(1) |
+| API key service: Anthropic-style and OpenAI-style addresses | `p.anthropic`, `p.openai` | excl(1) |
+| API key service: Check now | refreshes the model list | not a setting (an action) |
+| API key service: shown models checklist (`:386-438`) | `p.shown`, `Providers.save(…, null)` | cov(005) `service/<id>/models` |
+| API key service: add | needs a key | excl(1) |
+| API key service: remove | deletes the saved key | excl(1) |
+| Chats-on-Default per agent (`defaultsSheet Ui.java:487`, `pickDefault :508`, ApiKeysActivity `defaultRow :113`) | `Prefs.setAgentDefault(agent, ref)`; ref "" or `@service/model` (`Prefs.java:578-584`); side effect `ChatHub.get(c).changed()`; sheet only lists signed-in agents; options from `Models.options(agent,true)` plus free-typed model | cov(005) `default_model/<agent>` |
 | GitHub row (sign-in) | `GitHub` | excl(2) |
-| Download server (`mirrorSheet :1328`, `customMirror :1374`) | `Prefs.setMirror(id)` then `Mirrors.apply` on a thread (`chooseMirror :1321`); ids from `Mirrors.ALL` ("", ustc, tuna, aliyun, yandex, mobinhost) + custom | **add** `download_server` for the preset ids only (rewrites Buddy's Linux apt/npm config on a thread; note in reply). Custom address: excl(1)-risk, address may embed credentials (unverified) - recommend preset-only |
+| Download server (`mirrorSheet :1328`, `customMirror :1374`) | `Prefs.setMirror(id)` then `Mirrors.apply` on a thread (`chooseMirror :1321`); ids from `Mirrors.ALL` ("", ustc, tuna, aliyun, yandex, mobinhost) + custom | cov(005) `download_server`: presets, and `custom` once saved; the custom address is excl(1) |
 
 ### Bubble and chat (`bubbleSection :855`)
 | control | store | status |
@@ -52,16 +57,16 @@ Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: *
 ### Voice (`voiceSection :578`, `readAloudSection :889`)
 | control | store / values | status |
 |---|---|---|
-| Voice input engine (`:590`) | `setVoiceEngine`: phone, claude, chatgpt; claude needs `SetupState.planSignedIn(c,"claude")`, chatgpt needs codex (`:581-584`) | **add** `voice_input` |
-| Voice output engine (`:600`) | `setSpeechEngine`: phone, chatgpt (same sign-in rule) | **add** `voice_output` |
-| ChatGPT voice (`:607`, only shown when output=chatgpt) | `setSpeechVoice`; `CodexSpeech.VOICES` juniper, maple, ember, cove (`CodexSpeech.java:20`); UI plays a sample | **add** `voice_name`; reply notes it |
-| Audio device (`:620`, Android 12+, >1 device) | `setAudioDevice(key)`; "" = Auto else `type:name` from `AudioRoute.choices(c)` (`AudioRoute.java:34`) | **add** `audio_device`; allowed values are the live device list (dynamic) |
-| Languages (chips, `:640-667`) | `setVoiceLangs(csv)` of `Voice.LANGUAGES` tags (12, `Voice.java:80`); at least one; long-press = default → `setVoiceLang` | **add** `voice_languages` (csv, ≥1, all in LANGUAGES) and `voice_language_default` (one of the chosen) |
-| Assistant gesture (`:680`) | `setAssistMode`: talk, live | **add** `assist_mode` |
-| Live voice agent (`:689`) | `setLiveAgent`: "" or agent; `Account.known`; UI greys not-ready | **add** `live_agent` |
-| Live voice continue latest chat | `setLiveContinue` | **add** `live_continue` (on/off) |
+| Voice input engine (`:590`) | `setVoiceEngine`: phone, claude, chatgpt; claude needs `SetupState.planSignedIn(c,"claude")`, chatgpt needs codex (`:581-584`) | cov(005) `voice_input` |
+| Voice output engine (`:600`) | `setSpeechEngine`: phone, chatgpt (same sign-in rule) | cov(005) `voice_output` |
+| ChatGPT voice (`:607`, only shown when output=chatgpt) | `setSpeechVoice`; `CodexSpeech.VOICES` juniper, maple, ember, cove (`CodexSpeech.java:20`); UI plays a sample | cov(005) `chatgpt_voice` |
+| Audio device (`:620`, Android 12+, >1 device) | `setAudioDevice(key)`; "" = Auto else `type:name` from `AudioRoute.choices(c)` (`AudioRoute.java:34`) | cov(005) `audio_device` |
+| Languages (chips, `:640-667`) | `setVoiceLangs(csv)` of `Voice.LANGUAGES` tags (12, `Voice.java:80`); at least one; long-press = default → `setVoiceLang` | cov(005) `voice_languages` (one setting; the first tag is the default, so `voice_language_default` is not separate) |
+| Assistant gesture (`:680`) | `setAssistMode`: talk, live | cov(005) `assist_mode` |
+| Live voice agent (`:689`) | `setLiveAgent`: "" or agent; `Account.known`; UI greys not-ready | cov(005) `live_agent` |
+| Live voice continue latest chat | `setLiveContinue` | cov(005) `live_continue` |
 | Read replies aloud | `setSpeakReplies` | cov `read_aloud` |
-| Pause media while reading | `setPauseMediaForSpeech` (`:897`); on also needs notification access else UI opens CheckActivity | **add** `pause_media`; `on` refused/noted if `!NotificationWatcher.enabled` (granting access is a user flow, excl(2)); only effective while read_aloud on |
+| Pause media while reading | `setPauseMediaForSpeech` (`:897`); on also needs notification access else UI opens CheckActivity | cov(005) `pause_media` |
 | Voice cards | `setVoiceCards` | cov `voice_cards` |
 
 ### Safety and approvals (`safetySection :925`)
@@ -73,10 +78,10 @@ Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: *
 | Rules: notification-access prompt, "Clear activity" (`:~170`) | Android permission; `Triggers.clearLog` | excl(2) permission; clear-log = no setting (YAGNI) |
 | App permissions row → AppPermissionsActivity | | see next |
 | Per-app mode hard/smart/trust + "all apps" + "reset to suggested" (`AppPermissionsActivity:171-218`) | `setAppSafety` | cov `app/<pkg>` (bulk = N calls; fine) |
-| Smart reviewer: same, claude, codex (`:92`) | `Prefs.reviewer/setReviewer`; claude/codex greyed unless `SetupState.signedIn` | **add** `reviewer` |
-| Reviewer model per harness claude/codex (`:105-116`, only if signed in) | `setReviewerModel(h, model)`; "" = quick default (Haiku / small Codex) (`Prefs.java:726-732`) | **add** `reviewer_model/<harness>`; free text via `modelSheet(..., services=false)`; check = harness signed in, `Models.options(h,false)` or typed |
-| Button rules page (`rulesPage`): built-in risky words switch (`:269`) | `setGuardBuiltin` (default on) | **add** `guard_builtin_words` on/off |
-| Always-ask list / Never-ask list: add/remove a button label, optionally for one app (`:272-340`) | `Guard.rules/saveRules(list,...)`, `Prefs.guardList` JSON of {label,pkg,app}; lists "ask","allow"; dedupe `Guard.addRule` by normalised label+pkg | **add** `button/ask`, `button/allow` families: item = label (+optional pkg); `""`=delete. Note: "allow" list lowers the guard (never ask for a button), so card must show label+app clearly; Planner to confirm the 004 stance (changing per-app trust already allowed, so consistent) |
+| Smart reviewer: same, claude, codex (`:92`) | `Prefs.reviewer/setReviewer`; claude/codex greyed unless `SetupState.signedIn` | cov(005) `reviewer` |
+| Reviewer model per harness claude/codex (`:105-116`, only if signed in) | `setReviewerModel(h, model)`; "" = quick default (Haiku / small Codex) (`Prefs.java:726-732`) | cov(005) `reviewer_model/<claude or codex>` |
+| Button rules page (`rulesPage`): built-in risky words switch (`:269`) | `setGuardBuiltin` (default on) | cov(005) `builtin_risky_words` |
+| Always-ask list / Never-ask list: add/remove a button label, optionally for one app (`:272-340`) | `Guard.rules/saveRules(list,...)`, `Prefs.guardList` JSON of {label,pkg,app}; lists "ask","allow"; dedupe `Guard.addRule` by normalised label+pkg | cov(005) `button/<package or *>/<label>` |
 | "Seen" buttons list (`Guard.rules(c,"seen")`) | suggestions only | excl(4) not a setting |
 | Linux tools for new chats | `setDevMode` | cov `linux_tools_new_chats` |
 | Let agents tap Buddy's screens | `setAgentsTapBuddy` | cov `agents_tap_buddy` |
@@ -89,7 +94,7 @@ Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: *
 | Phone commands switch (`:221`) | `setPhoneShell` | cov `phone_commands` |
 | Ask before each phone command (`:228`) | `setPhoneShellAsk` | cov read-only `phone_commands_ask` (excl(3)) |
 | Scheduled tasks row → SchedulesActivity | per-chat plans | cov `chat/<id>/schedule` (SchedulesActivity has no own prefs; unverified beyond grep, no `Prefs.set`/`switchRow` hits) |
-| Background browser switch (`:1461`) | `Prefs.setBrowser`; on triggers `Browser.install` (download), off stops it on a thread | **add** `background_browser`; `on` starts a download (Ui.downloadNote warns about data) → card note; counts as a flow only if the user wants it excluded; recommend add with note |
+| Background browser switch (`:1461`) | `Prefs.setBrowser`; on triggers `Browser.install` (download), off stops it on a thread | cov(005) `background_browser` |
 | Open browser / Wipe browser data / sign-in help | `Browser.wipe`, BrowserActivity | excl(2) (sign-in sessions; destructive wipe) |
 
 ### Tools and connections (`connectionsSection :989`, `phoneToolsSection :523`, `remoteSection :704`)
@@ -107,10 +112,10 @@ Paths are under `app/src/main/java/app/buddy/assistant/` unless noted. Status: *
 | control | store | status |
 |---|---|---|
 | Theme mode | `setThemeMode` | cov `theme` |
-| Accent presets (`Theme.accents`, 6, `:1214`) | `setAccent(color)` (clears wallpaper flag, `Prefs.java:379`) | **add** `accent`: preset name/hex `#RRGGBB` (the custom sheet accepts any 6-hex, `:1280-1300`; `Theme.parse`) |
-| Accent from wallpaper (Android 12+) | `setAccentFromWallpaper` (flag only true; no off other than setAccent) | **add** as accent value `wallpaper` (SDK≥31 only) |
-| Surface: warm, neutral, black (`Theme.surfaces`) | `setSurface` | **add** `surface` |
-| Buddy's look: buddy / picture (`:445-462`) | `Prefs.setFace`; `picture` needs an image already saved (`Face.picture`) else opens file picker | **add** `face` = buddy only? Switching to `picture` allowed only when a picture is saved; picking an image excl(2) |
+| Accent presets (`Theme.accents`, 6, `:1214`) | `setAccent(color)` (clears wallpaper flag, `Prefs.java:379`) | cov(005) `accent` |
+| Accent from wallpaper (Android 12+) | `setAccentFromWallpaper` (flag only true; no off other than setAccent) | cov(005) `accent` = wallpaper |
+| Surface: warm, neutral, black (`Theme.surfaces`) | `setSurface` | cov(005) `surface` |
+| Buddy's look: buddy / picture (`:445-462`) | `Prefs.setFace`; `picture` needs an image already saved (`Face.picture`) else opens file picker | cov(005) `face` (buddy always; picture only when one is saved); picking a picture is excl(2) |
 Side effects: UI calls `themeChanged()`/`faceChanged()` (`SetupActivity:190-203`); the tool from the service has no activity, so check how 004's `theme` note ("screens pick it up when next open") applies; accent same.
 
 ### About (`aboutSection :1002`)
@@ -123,10 +128,10 @@ Side effects: UI calls `themeChanged()`/`faceChanged()` (`SetupActivity:190-203`
 ### Adjacent controls named in the brief but not on Settings pages (chat screen; both `protect()`ed)
 | control | store | status |
 |---|---|---|
-| Chat model & effort (`ChatActivity:665-730`) | `ChatHub.setModel/setEffort` (`ChatHub.java:385,393`) | **add** `chat/<id>/model`, `chat/<id>/effort` (brief: "models"). `Models.efforts(ses)` null for agents without effort |
-| Keep awake (long task) | `ChatHub.setAwake` (`:510`) | **add** `chat/<id>/keep_awake` |
-| Incognito | `ChatHub.setIncognito` (`:420`) | **add** `chat/<id>/incognito` (check what it does to history before offering: unverified) |
-| "Allowed without asking" apps | `ChatHub.setAllowed(ses,pkg,on)` (`:520`), `allowedFor` (`:528`); eligible only if `Guard.allowable(c,pkg)` (`Guard.java:407`) | **add** `chat/<id>/allowed/<pkg>` on/off. Lowers approvals for a run: card must say so; consistent with 004 trust changes. Note `Guard.runRule` is then the sole effect and never applies in a rule run (`Guard.java:~415`) |
+| Chat model & effort (`ChatActivity:665-730`) | `ChatHub.setModel/setEffort` (`ChatHub.java:385,393`) | excl(4): on the chat screen, not on a Settings page (plan open question) |
+| Keep awake (long task) | `ChatHub.setAwake` (`:510`) | excl(4): chat screen (plan open question) |
+| Incognito | `ChatHub.setIncognito` (`:420`) | excl(4): chat screen (plan open question) |
+| "Allowed without asking" apps | `ChatHub.setAllowed(ses,pkg,on)` (`:520`), `allowedFor` (`:528`); eligible only if `Guard.allowable(c,pkg)` (`Guard.java:407`) | cov(005) `chat/<id>/allowed/<package>` |
 | Chat Linux tools / background / schedule | | cov |
 
 ## Prior art
