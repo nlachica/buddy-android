@@ -204,3 +204,13 @@ code is gone, so later upstream merges don't conflict on it.
 - Verified: `bash linux/test/run.sh` (15 fixtures, 31 fixtures and runs, 0 failed, twice); compile of FLAVOR=fdroid and
   github (build.sh steps 1-3) into /tmp/buddy-build-sync.
 - By: Claude (claude-sonnet-5-5)
+
+## 2026-11-15 - After the upstream 2.3.9 merge: one fork line kept, one gap left to upstream
+- Codex merge review F2 (major): with upstream's helper, a kill -9 of the run section ended the chat with `done` only,
+  so a sub-agent's partial work looked like a normal report. Fix: buddy-run reports `quiet_end "The run was cut off"`
+  when the run section dies from a signal other than TERM (3 lines; test claude_runkill expects it).
+- Codex F1 (major): in upstream's ChatHub a late event can restart a run the give-up timer already failed, and that
+  run's helper dying is then ignored (the chat can stay "working"). Not patched: it is upstream's design, rare, and a fix
+  needs run ownership changes in ChatHub that would make every upstream merge conflict. Tap Stop clears it. Revisit
+  (or report upstream) if it is seen on the phone.
+- By: Orchestrator (claude-opus-5-5)

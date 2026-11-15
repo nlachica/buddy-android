@@ -1030,6 +1030,8 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
 ) &
 RUN=$!
 echo "$RUN" > "$S/pid"
-wait "$RUN" 2>/dev/null
+wait "$RUN" 2>/dev/null; rs=$?
 rm -f "$S/pid"
+# the run section itself was killed (not by Stop): say so, or the chat ends as if the agent had finished (fork, 002)
+if [ "$rs" -gt 128 ] && [ "$rs" -ne 143 ]; then quiet_end "The run was cut off (signal $((rs - 128)))."; fi
 exit 0 # (buddy_done: the EXIT trap)
