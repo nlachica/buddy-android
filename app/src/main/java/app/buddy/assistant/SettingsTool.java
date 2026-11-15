@@ -953,6 +953,17 @@ final class SettingsTool {
     private String listing(String here) {
         StringBuilder b = new StringBuilder();
         for (Setting s : scalars(svc)) b.append(s.read()).append('\n');
+        b.append("\nDefault models (read one to see its choices):\n");
+        for (Account a : Account.ALL) {
+            if (SetupState.signedIn(svc, a.agent) || !Providers.forAgent(a.agent).isEmpty()) {
+                b.append(find(svc, "default_model/" + a.agent).line()).append('\n');
+            }
+        }
+        b.append("\nAPI key services (service/<id> = on, off; each also has service/<id>/name and service/<id>/models; "
+                + "keys and addresses are never shown):\n");
+        synchronized (Providers.class) {
+            for (Providers.P p : Providers.all()) b.append(serviceLine(p)).append('\n');
+        }
         b.append("\napp/<package> = hard, smart, trust or default: how freely agents may work in one app. Apps with "
                 + "your choice:\n");
         for (java.util.Map.Entry<String, String> e : Prefs.appSafetyAll(svc).entrySet()) {
