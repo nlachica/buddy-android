@@ -146,3 +146,11 @@
   `set -u` abort each gave system, fallback, done. A failing last command followed by `exit 0` gave no error.
   Proven by the new `claude_runkill` case.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Implementation notes the plan left open
+- Choice: `grok_killed.expected.jsonl` keeps grok's pass-through `system` event (`model`/`subtype` null), because
+  `stream_grok` forwards the stand-in's claude-style system line; the other non-Claude backends drop it. The
+  busy-case sleep is started in a subshell so the harness prints no "Killed" job line. Steps 4-6 compile with
+  steps 1-3 of build.sh by hand into /tmp/buddy-build-002; the string (step 6) was added after the Java that uses
+  it, so only the step 5 commit alone doesn't compile.
+- By: Coder (claude-sonnet-5-5)
