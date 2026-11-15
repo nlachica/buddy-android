@@ -3,7 +3,15 @@ package app.buddy.assistant;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.json.JSONArray;
+import org.json.JSONObject;
 import org.junit.Test;
 
 /** The settings 005 adds to buddy_settings: validation, card text and stale writes, without a phone. */
@@ -57,5 +65,201 @@ public class SettingsCoverageTest {
             assertEquals("surface takes: black, live", e.getMessage());
         }
         assertEquals("live", s.check("LIVE"));
+    }
+
+    private static SettingsTool.Setting named(String name) {
+        SettingsTool.Setting s = SettingsTool.find(null, name);
+        assertTrue(name, s != null);
+        return s;
+    }
+
+    private static SettingsTool.Asker never() {
+        return card -> {
+            throw new AssertionError("no card: " + card);
+        };
+    }
+
+    // ---------------------------------------------------------------- agents and models
+
+    @Test
+    public void theAgentsAndModelsScalarsExistAndRefuseABadShape() {
+        for (String n : new String[]{"default_agent", "download_server"}) {
+            assertTrue(n, SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals(n)));
+        }
+        refused(named("default_agent"), "nobody");
+        assertEquals("[default, ustc, tuna, aliyun, yandex, mobinhost]", Arrays.toString(SettingsTool.mirrorIds(false)));
+        assertEquals("custom", SettingsTool.mirrorIds(true)[6]);
+    }
+
+    private static List<String[]> options() {
+        return Arrays.asList(new String[]{"", "Default"}, new String[]{"opus", "Opus"}, new String[]{null, "DeepSeek"},
+                new String[]{"@ds/chat", "Chat"});
+    }
+
+    @Test
+    public void aModelTakesDefaultAListedModelOrATypedName() {
+        AtomicReference<String> now = new AtomicReference<>("");
+        SettingsTool.Scalar m = SettingsTool.model("default_model/claude", SettingsCoverageTest::options, true, now::get, now::set, "");
+        assertEquals("default", m.check("DEFAULT"));
+        assertEquals("@ds/chat", m.check("@DS/chat"));
+        assertEquals("opus", m.check("opus"));
+        assertEquals("claude-x-5", m.check(" claude-x-5 "));
+        refused(m, "@ds/other");
+        refused(m, "two words");
+        refused(m, "");
+        refused(m, new String(new char[201]).replace('\0', 'a'));
+        assertEquals("default", m.get());
+        m.set("opus");
+        assertEquals("opus", m.get());
+        m.set("default");
+        assertEquals("", now.get());
+        assertTrue(m.read(), m.read().contains("DeepSeek:") && m.read().contains("@ds/chat — Chat"));
+        SettingsTool.Scalar reviewer = SettingsTool.model("reviewer_model/claude", SettingsCoverageTest::options, false, now::get, now::set, "");
+        refused(reviewer, "@ds/chat");
+        assertEquals("opus", reviewer.check("opus"));
+    }
+
+    @Test
+    public void aModelChecksTheScreensReadinessAfterItsShape() {
+        SettingsTool.Scalar m = SettingsTool.model("default_model/grok", SettingsCoverageTest::options, true, () -> "", v -> { }, "");
+        m.ready(v -> {
+            throw new IllegalArgumentException("Grok isn't signed in");
+        });
+        refused(m, "two words"); // shape first
+        try {
+            m.check("opus");
+            throw new AssertionError();
+        } catch (IllegalArgumentException e) {
+            assertEquals("Grok isn't signed in", e.getMessage());
+        }
+    }
+
+    @Test
+    public void aDefaultModelChangedElsewhereIsNotOverwritten() throws Exception {
+        AtomicReference<String> now = new AtomicReference<>("");
+        AtomicInteger sets = new AtomicInteger();
+        SettingsTool.Scalar m = SettingsTool.model("default_model/claude", SettingsCoverageTest::options, true, now::get,
+                v -> sets.incrementAndGet(), "");
+        String r = edit(m, "opus", card -> {
+            now.set("@ds/chat");
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open"));
+        assertEquals(0, sets.get());
+    }
+
+    // ---------------------------------------------------------------- API key services
+
+    private static final String SECRET_A = "https://u:p@h.example/v1?token=abc", SECRET_B = "https://sk-123.example";
+
+    private static Providers.P service(String id, String name, String... models) throws Exception {
+        Providers.P p = new Providers.P(id);
+        p.name = name;
+        p.openai = SECRET_A;
+        p.anthropic = SECRET_B;
+        p.models = new JSONArray();
+        for (String m : models) p.models.put(new JSONObject().put("id", m).put("name", m.toUpperCase()));
+        return p;
+    }
+
+    private static void noSecret(String text) {
+        for (String bit : new String[]{"h.example", "token=abc", "u:p", "sk-123", "https://"}) {
+            assertTrue(bit + " in " + text, !text.contains(bit));
+        }
+    }
+
+    @Test
+    public void aServiceIsLookedUpLiveAndRefusedWhenUnknown() throws Exception {
+        Map<String, Providers.P> map = new HashMap<>();
+        map.put("a", service("a", "Alpha", "m1", "m2"));
+        AtomicInteger saves = new AtomicInteger();
+        SettingsTool.Setting use = SettingsTool.service("zzz", "", map::get, p -> saves.incrementAndGet());
+        try {
+            use.check("off");
+            throw new AssertionError();
+        } catch (IllegalArgumentException e) {
+            assertEquals("no such service zzz", e.getMessage());
+        }
+        try {
+            use.set("off");
+            throw new AssertionError();
+        } catch (IllegalStateException e) {
+            assertEquals(0, saves.get());
+        }
+        assertTrue(map.get("zzz") == null);
+        SettingsTool.Setting models = SettingsTool.service("a", "models", map::get, p -> { });
+        assertEquals("all", models.check("ALL"));
+        assertEquals("m1,m2", models.check("m1, M2, m1"));
+        refused(models, "zzz");
+        refused(models, "");
+        SettingsTool.Setting name = SettingsTool.service("a", "name", map::get, p -> { });
+        assertEquals("Work", name.check("  Work  "));
+        refused(name, "   ");
+        refused(name, "two\nlines");
+    }
+
+    @Test
+    public void aServiceCardShowsThePartAndNeverAnAddress() throws Exception {
+        Map<String, Providers.P> map = new HashMap<>();
+        map.put("a", service("a", "Alpha", "m1", "m2"));
+        List<String> cards = new ArrayList<>();
+        SettingsTool.Asker ok = card -> {
+            cards.add(card);
+            return YES;
+        };
+        assertEquals("Changed service/a/name: Alpha → Beta",
+                edit(SettingsTool.service("a", "name", map::get, p -> { }), "Beta", ok));
+        assertEquals("Changed service/a/models: all → m2", edit(SettingsTool.service("a", "models", map::get, p -> { }), "m2", ok));
+        assertEquals("Changed service/a: on → off", edit(SettingsTool.service("a", "", map::get, p -> { }), "off", ok));
+        assertTrue(map.get("a").off && map.get("a").name.equals("Beta") && map.get("a").shown.contains("m2"));
+        for (String c : cards) noSecret(c);
+        noSecret(SettingsTool.serviceLine(map.get("a")));
+        assertEquals("service/a = off  (Beta; models shown: 1 of 2)", SettingsTool.serviceLine(map.get("a")));
+        for (String part : new String[]{"", "name", "models"}) noSecret(SettingsTool.service("a", part, map::get, p -> { }).read());
+        noSecret(edit(SettingsTool.service("a", "name", map::get, p -> { }), "Beta", never())); // Already
+    }
+
+    @Test
+    public void aServiceEditedRemovedOrReplacedDuringTheCardIsNotWritten() throws Exception {
+        for (String part : new String[]{"", "name", "models"}) {
+            String value = part.isEmpty() ? "off" : part.equals("name") ? "Beta" : "m1";
+            AtomicInteger saves = new AtomicInteger();
+            Map<String, Providers.P> map = new HashMap<>();
+            map.put("a", service("a", "Alpha", "m1", "m2"));
+            SettingsTool.Setting s = SettingsTool.service("a", part, map::get, p -> saves.incrementAndGet());
+            // edited by the screen
+            String r = edit(s, value, card -> {
+                if (part.isEmpty()) map.get("a").off = true;
+                else if (part.equals("name")) map.get("a").name = "Gamma";
+                else map.get("a").shown.add("m2");
+                return YES;
+            });
+            assertTrue(part + r, r.contains("changed while the card was open"));
+            noSecret(r);
+            // removed
+            map.put("a", service("a", "Alpha", "m1", "m2"));
+            r = edit(s, value, card -> {
+                map.remove("a");
+                return YES;
+            });
+            assertTrue(part + r, r.contains("changed while the card was open (now: (none))"));
+            noSecret(r);
+            assertTrue(map.isEmpty());
+            // replaced by another service with the same id
+            map.put("a", service("a", "Alpha", "m1", "m2"));
+            r = edit(s, value, card -> {
+                try {
+                    Providers.P q = service("a", "Alpha", "m1", "m2");
+                    q.openai = "https://other.example";
+                    map.put("a", q);
+                } catch (Exception e) {
+                    throw new AssertionError(e);
+                }
+                return YES;
+            });
+            assertTrue(part + r, r.startsWith("Not changed"));
+            noSecret(r);
+            assertEquals(0, saves.get());
+        }
     }
 }

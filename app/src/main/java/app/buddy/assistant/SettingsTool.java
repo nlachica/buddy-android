@@ -78,9 +78,14 @@ final class SettingsTool {
             return new String[]{view(snapshot), value.isEmpty() ? "(deleted)" : value};
         }
 
+        /** One line: the value and what it accepts (the listing's form). */
+        String line() {
+            return name + " = " + view(get()) + (allowed().isEmpty() ? "" : "  (" + allowed() + ")");
+        }
+
         /** The setting in full, for a read. */
         String read() {
-            return name + " = " + view(get()) + (allowed().isEmpty() ? "" : "  (" + allowed() + ")");
+            return line();
         }
     }
 
@@ -90,6 +95,8 @@ final class SettingsTool {
         private final Consumer<String> set;
         private final Supplier<String[]> values; // read when checked or listed: a device list, a saved server...
         private final String note;
+        /** What the screen greys out, checked after the value's shape: throws IllegalArgumentException saying who fixes it. */
+        Consumer<String> ready = v -> { };
 
         Scalar(String name, Supplier<String> get, Consumer<String> set, String note, String... values) {
             this(name, get, set, note, () -> values);
@@ -101,6 +108,11 @@ final class SettingsTool {
             this.set = set;
             this.values = values;
             this.note = note;
+        }
+
+        Scalar ready(Consumer<String> r) {
+            ready = r;
+            return this;
         }
 
         @Override
@@ -116,7 +128,11 @@ final class SettingsTool {
         @Override
         String check(String value) {
             String v = value.trim();
-            for (String c : values.get()) if (c.equalsIgnoreCase(v)) return c; // stored in the choice's own spelling
+            for (String c : values.get()) {
+                if (!c.equalsIgnoreCase(v)) continue;
+                ready.accept(c);
+                return c; // stored in the choice's own spelling
+            }
             throw new IllegalArgumentException(name + " takes: " + allowed());
         }
 
@@ -174,7 +190,34 @@ final class SettingsTool {
             if (!on) Updates.cancel(svc);
             else Prefs.setUpdateNotified(svc, ""); // notify again about a version muted before
         }));
+        agentsModels(svc, l);
         return l;
+    }
+
+    /** Settings → Agents and models. */
+    private static void agentsModels(BuddyService svc, List<Setting> l) {
+        l.add(new Scalar("default_agent", () -> Prefs.backend(svc), v -> Prefs.setBackend(svc, v),
+                " New chats use it.", "claude", "codex", "opencode", "agy", "grok").ready(v -> signedIn(svc, v)));
+        l.add(new Scalar("download_server", () -> Prefs.mirror(svc).isEmpty() ? "default" : Prefs.mirror(svc), v -> {
+            Prefs.setMirror(svc, v.equals("default") ? "" : v);
+            new Thread(() -> Mirrors.apply(svc.getApplicationContext())).start();
+        }, " Buddy's Linux downloads from it from now on.", () -> mirrorIds(!Prefs.mirrorCustom(svc, false).isEmpty())));
+    }
+
+    /** The download servers to pick; custom (the user's own, saved in Settings; its address is never shown) once one is saved. */
+    static String[] mirrorIds(boolean custom) {
+        List<String> ids = new ArrayList<>();
+        ids.add("default");
+        for (Mirrors.M m : Mirrors.ALL) if (!m.id.isEmpty()) ids.add(m.id);
+        if (custom) ids.add(Mirrors.CUSTOM);
+        return ids.toArray(new String[0]);
+    }
+
+    /** An agent that isn't signed in is greyed out on the screens: say who fixes it. */
+    private static void signedIn(BuddyService svc, String agent) {
+        if (!SetupState.signedIn(svc, agent)) {
+            throw new IllegalArgumentException(Account.nameOf(agent) + " isn't signed in; only the user signs in (Settings → Agents and models)");
+        }
     }
 
     /** "on" for background mode or phone commands waits until the user has paired the phone. */
@@ -233,6 +276,141 @@ final class SettingsTool {
 
     private static Sessions.Session chat(BuddyService svc, String id) {
         return ChatHub.get(svc).sessions.find(id);
+    }
+
+    /**
+     * An agent's (or the reviewer's) model: default, a model the picker lists, or a typed name (one word, no @ unless
+     * listed). options: the picker's rows {id, name}, with {null, heading} for a service; services: may it offer @service/model.
+     */
+    static Scalar model(String name, Supplier<List<String[]>> options, boolean services, Supplier<String> get,
+                        Consumer<String> set, String note) {
+        return new Scalar(name, () -> get.get().isEmpty() ? "default" : get.get(),
+                v -> set.accept(v.equals("default") ? "" : v), note, "default") {
+            @Override
+            String allowed() {
+                return "default, a model from the list (read the item), or a model name";
+            }
+
+            @Override
+            String check(String value) {
+                String v = value.trim();
+                if (v.equalsIgnoreCase("default")) v = "default";
+                else if (v.isEmpty() || v.length() > 200 || v.matches(".*\\s.*")) {
+                    throw new IllegalArgumentException(name + " takes: default, a listed model, or a model name (one word, up to 200 characters)");
+                } else if (v.startsWith("@") && !services) {
+                    throw new IllegalArgumentException(name + " takes no @service/model");
+                } else {
+                    String listed = null;
+                    for (String[] o : options.get()) if (o[0] != null && o[0].equalsIgnoreCase(v)) listed = o[0];
+                    if (listed != null) v = listed;
+                    else if (v.startsWith("@")) throw new IllegalArgumentException(v + " isn't a model in the list; read " + name);
+                }
+                ready.accept(v);
+                return v;
+            }
+
+            @Override
+            String read() {
+                StringBuilder b = new StringBuilder(line());
+                for (String[] o : options.get()) {
+                    b.append(o[0] == null ? "\n" + o[1] + ":" : "\n  " + (o[0].isEmpty() ? "default" : o[0]) + " — " + o[1]);
+                }
+                return b.toString();
+            }
+        };
+    }
+
+    /** Writes a changed API key service (in production Providers.setOff / Providers.save with the saved key kept). */
+    interface Store {
+        void save(Providers.P p) throws Exception;
+    }
+
+    /**
+     * An API key service's use (part ""), name or shown models, looked up live by id each time: a removed service has
+     * no snapshot and is never written back. The snapshot holds the addresses, so it never leaves the row: view shows the part.
+     */
+    static Setting service(String id, String part, java.util.function.Function<String, Providers.P> find, Store store) {
+        return new Setting("service/" + id + (part.isEmpty() ? "" : "/" + part), part.isEmpty() ? "on, off"
+                : part.equals("name") ? "the service's name, one line" : "all, or model ids from the service's list, comma-separated") {
+            @Override
+            String get() {
+                Providers.P p = find.apply(id);
+                return p == null ? null : String.join("\u0000", p.name, p.anthropic, p.openai, String.valueOf(p.off),
+                        String.join(",", p.shown));
+            }
+
+            @Override
+            String view(String snapshot) {
+                if (snapshot == null) return "(none)";
+                String[] f = snapshot.split("\u0000", -1);
+                return part.isEmpty() ? f[3].equals("true") ? "off" : "on" : part.equals("name") ? f[0]
+                        : f[4].isEmpty() ? "all" : f[4];
+            }
+
+            @Override
+            String check(String value) {
+                String v = value.trim();
+                if (part.isEmpty()) {
+                    if (!v.equalsIgnoreCase("on") && !v.equalsIgnoreCase("off")) throw new IllegalArgumentException(name + " takes: on, off");
+                    v = v.toLowerCase(Locale.ROOT);
+                } else if (part.equals("name") && (v.isEmpty() || v.contains("\n") || v.contains("\r"))) {
+                    throw new IllegalArgumentException(name + " takes a name: one line, not blank");
+                }
+                Providers.P p = find.apply(id);
+                if (p == null) throw new IllegalArgumentException("no such service " + id);
+                if (!part.equals("models")) return v;
+                if (v.equalsIgnoreCase("all")) return "all";
+                java.util.Set<String> ids = new java.util.LinkedHashSet<>();
+                for (String m : v.split(",")) {
+                    String want = m.trim(), got = null;
+                    for (int i = 0; i < p.models.length(); i++) {
+                        String have = p.models.optJSONObject(i) == null ? "" : p.models.optJSONObject(i).optString("id");
+                        if (!want.isEmpty() && have.equalsIgnoreCase(want)) got = have;
+                    }
+                    if (got == null) throw new IllegalArgumentException("service " + id + " has no model \"" + want + "\"; read " + name);
+                    ids.add(got);
+                }
+                return String.join(",", ids);
+            }
+
+            @Override
+            Object lock() {
+                return Providers.class; // every Providers writer holds it
+            }
+
+            @Override
+            String set(String value) throws Exception {
+                Providers.P p = find.apply(id);
+                if (p == null) throw new IllegalStateException("service " + id + " was removed");
+                if (part.isEmpty()) {
+                    p.off = value.equals("off");
+                } else if (part.equals("name")) {
+                    p.name = value;
+                } else {
+                    p.shown.clear();
+                    if (!value.equals("all")) p.shown.addAll(Arrays.asList(value.split(",")));
+                }
+                store.save(p);
+                return "";
+            }
+
+            @Override
+            String read() {
+                Providers.P p = find.apply(id);
+                if (p == null || !part.equals("models")) return line();
+                StringBuilder b = new StringBuilder(line() + "\nthe service lists:");
+                for (int i = 0; i < p.models.length(); i++) {
+                    b.append("\n  ").append(p.models.optJSONObject(i) == null ? "" : p.models.optJSONObject(i).optString("id"));
+                }
+                return b.toString();
+            }
+        };
+    }
+
+    /** "service/deepseek = on  (DeepSeek; models shown: all of 12)": never an address or key. */
+    static String serviceLine(Providers.P p) {
+        return "service/" + p.id + " = " + (p.off ? "off" : "on") + "  (" + p.name + "; models shown: "
+                + (p.shown.isEmpty() ? "all of " : p.shown.size() + " of ") + p.models.length() + ")";
     }
 
     /** A chat's switch: Linux tools or background mode. */
@@ -725,6 +903,23 @@ final class SettingsTool {
             String id = name.substring(4);
             McpServers.S s = McpServers.find(id);
             return mcp(svc, id, s, s != null && McpServers.header(svc, id) != null);
+        }
+        if (name.startsWith("default_model/") && Account.known(name.substring(14))) {
+            String agent = name.substring(14);
+            return model(name, () -> Models.options(agent, true), true, () -> Prefs.agentDefault(svc, agent), v -> {
+                Prefs.setAgentDefault(svc, agent, v);
+                ChatHub.get(svc).changed();
+            }, " New chats on Default use it.").ready(v -> {
+                if (!SetupState.signedIn(svc, agent) && Providers.forAgent(agent).isEmpty()) {
+                    throw new IllegalArgumentException(Account.nameOf(agent) + " isn't on the Chats on Default screens: it isn't "
+                            + "signed in and has no API key service; only the user does that");
+                }
+            });
+        }
+        if (name.matches("service/[A-Za-z0-9_-]+(/(name|models))?")) {
+            String[] sp = name.substring(8).split("/");
+            Store store = sp.length == 1 ? q -> Providers.setOff(svc, q, q.off) : q -> Providers.save(svc, q, null);
+            return service(sp[0], sp.length == 1 ? "" : sp[1], Providers::find, store);
         }
         String[] p = name.split("/");
         if (p.length == 3 && p[0].equals("chat") && chat(svc, p[1]) != null && chat(svc, p[1]).parent.isEmpty()) {

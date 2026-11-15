@@ -137,3 +137,19 @@
   evidence. A missing prerequisite (no service, no signed-in harness, no OK for the browser download) leaves its row
   pending and the verdict PARTIAL.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Availability checks are a `Scalar.ready(...)` hook run after the shape check, not a `check` override per row
+- Options: an anonymous `Scalar` subclass overriding `check` per row (plan wording); one `ready` hook on `Scalar`
+  that `check` calls once the value matches a choice.
+- Choice: the hook (`new Scalar(...).ready(v -> ...)`). Same order the plan wants (shape, then what the screen
+  greys out) in one place, and rows with their own parsing (`model`, `service`, `button`) call it too. Fewer anonymous classes.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-15 - Unit tests run with javac + JUnitCore against a Robolectric android-all jar here, not Gradle
+- Options: install Gradle + the Android plugin (no SDK on this Alpine proot); `/tmp/buddy-build-004/check.sh` (gone).
+- Choice: `/tmp/buddy-build-005/check.sh github|fdroid` (JDK 17 from apk; Java 21 can't start here): compiles main and
+  tests against `org.robolectric:android-all:15` plus the real `org.json`, with a stub `R.java` made from `res/` names
+  and a two-method shim for `android.system.Os` (the stub jar CI uses returns defaults there; android-all needs natives).
+  One API-36 call (`setShortCriticalText`) is blanked in a scratch copy of the sources, never in the repo. Not Gradle: CI
+  is the first Gradle run of these tests.
+- By: Coder (claude-sonnet-5-5)
