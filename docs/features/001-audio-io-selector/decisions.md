@@ -65,3 +65,53 @@
 - Choice: leave it on Android's default, because it's a program's microphone in the Terminal, not one of Buddy's
   voice features (YAGNI). Buddy's own dictation through `MicServer.startCapture` is covered.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - The release poll also reconciles the chosen device (plan review round 1, F1)
+- Options: a device-change listener in `AudioRoute` (`AudioDeviceCallback` / `OnCommunicationDeviceChangedListener`);
+  checking only when `use()` is called (misses a device that comes or goes during a call); reconciling on every
+  poll tick while Buddy's voice is active, with a voice session that also runs under Auto.
+- Choice: the poll, because it already runs whenever Buddy's voice is on, so there's no listener lifecycle to add.
+  A session under Auto makes no audio calls, but it lets a switch to a device mid-call find the session already set
+  up, with its "another call" verdict and its clean-up. "Already applied" is Buddy's own record, not
+  `getCommunicationDevice()`, because a Bluetooth link takes about 1 s to come up and the poll would re-request it
+  during that time (kept as the fallback if Chromium moves the call itself).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Visible device state: chip from VoiceBar's ticker, Settings from an AudioDeviceCallback (round 1, F1)
+- Options: refresh only on `begin()`, a tap and `onResume`; a device callback in each view; the bar's existing
+  ticker for the chip plus a callback for Settings.
+- Choice: the last one. The bar already ticks every 70 ms, so a once-a-second label check costs one binder call.
+  Settings has no ticker, but it already re-renders from listeners registered in `onResume`/`onPause`.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - "Another call" is decided once per voice session, before live voice publishes its call (round 1, F3)
+- Options: refuse live voice during another call; check the mode at every `use()` (can't tell Buddy's or
+  Chromium's communication mode from another app's); decide when the session starts, from the mode read before
+  Buddy's voice starts, with `CodexLive.start` calling `use()` before `ses = s`.
+- Choice: decide at session start and keep the verdict, because it's one read that no Buddy mode can fool.
+  Refusing live voice would be new behavior beyond the brief. Ringing or a phone call mid-session also stops
+  routing, whatever Buddy applied.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Switching to Auto or losing the device mid-call keeps the session's clean-up (round 1, F4)
+- Options: release and forget at once; clear at once but keep a `dirty` mark, so the session's end clears again.
+- Choice: keep the mark. Chromium can select the speaker again at hang-up (restoring what it saved at the call's
+  start), and only a clear after the WebView's teardown undoes that.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - AutoPause exempts Buddy's own communication mode, not Buddy's route (round 1, F2; replaces the earlier AutoPause choice)
+- Options: exempt while Buddy's route is on (the earlier choice: picking Auto mid-call turned Buddy's own live call
+  into a "new call" and ended it); exempt only while `CodexLive.on()` (a card read aloud through a chosen device
+  would still pause the agent); exempt `MODE_IN_COMMUNICATION` while Buddy's live call is on or ended under 3 s ago,
+  or while `AudioRoute.ownsMode()`.
+- Choice: the last one, because those are the mode's two owners on Buddy's side (the WebView in live voice,
+  `AudioRoute` otherwise), and neither depends on the route choice. The 3 s tail covers the page's teardown after
+  End. Ringing, phone calls and call notifications still pause.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - Correction: "No BLUETOOTH_CONNECT" hasn't been checked on device yet (round 1, F5)
+- Options: n/a (correction to the earlier entry, which said "Checked on device (test A3)").
+- Choice: the no-permission approach stands but is waiting on A3. The research only shows the system sees the
+  watch (`dumpsys`), not that Buddy can list or route it without the permission. Add the permission only if A3
+  fails.
+- By: Planner (claude-opus-5-5)
