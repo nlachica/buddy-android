@@ -46,6 +46,11 @@ final class Helper {
 
     /** Runs `buddy-run <token> args…` in the background. Throws with a readable message if Linux isn't set up. */
     static void run(Context c, String... args) {
+        run(c, null, args);
+    }
+
+    /** As run(c, args), and `ended` runs (on the pool thread) when the helper process is gone, or never started. */
+    static void run(Context c, Runnable ended, String... args) {
         final Context app = c.getApplicationContext();
         if (!Linux.installed(app)) {
             throw new IllegalStateException(app.getString(R.string.helper_linux_missing)); // shown to the user
@@ -71,6 +76,8 @@ final class Helper {
                 p.waitFor();
             } catch (Exception e) {
                 android.util.Log.w("Buddy", "helper failed", e);
+            } finally {
+                if (ended != null) ended.run();
             }
         });
     }
