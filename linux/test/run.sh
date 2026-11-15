@@ -126,8 +126,8 @@ finish claude_runkill "$problem"
 
 # a session that is still working: the new request is refused with an error, and no done (the run in progress owns it)
 mkdir -p "${P%/pid}"
-sleep 60 & echo $! >"$P"
-busy=$!
+(sleep 60 >/dev/null 2>&1 & echo $! >"$P")
+busy=$(cat "$P")
 problem=""
 HOME=$H BUDDY_FAKE=orphan timeout 5 bash ../buddy-run test ask run claude 0 hi >"$H/out" 2>&1
 [ $? = 124 ] && problem="timed out"
