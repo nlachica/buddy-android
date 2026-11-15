@@ -42,12 +42,16 @@ public class TalkActivity extends Activity {
     /** Why listening can't start (no recognizer on the watch), shown under the conversation. */
     private String problem = "";
     private int accent;
+    /** ChatsActivity.relaunches when this screen was created: a change means a relaunch cleared it. */
+    private int opened;
+    private final Runnable redraw = this::changed;
     private ScrollView scroll;
     private LinearLayout body;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        opened = ChatsActivity.relaunches;
         chat = getIntent().getStringExtra("chat");
         title = getIntent().getStringExtra("title");
         accent = getIntent().getIntExtra("accent", Look.ACCENT);
@@ -83,15 +87,17 @@ public class TalkActivity extends Activity {
         root.addView(mic, lp);
         setContentView(root);
 
-        // a fresh open means "I want to say something"; not when Talk has news for this chat, or Android is recreating us
-        boolean news = chat.equals(Talk.chat) && (Talk.waiting || Talk.unseen);
+        // a fresh open means "I want to say something"; not when Talk has news for this chat, or Android is recreating us.
+        // Quick talk ("speak") listens even while a reply is awaited; an unseen reply is still shown first.
+        boolean speak = getIntent().getBooleanExtra("speak", false);
+        boolean news = chat.equals(Talk.chat) && (Talk.waiting ? !speak : Talk.unseen);
         if (b == null && !news) listen();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        Talk.onChange = this::changed;
+        Talk.onChange = redraw;
         changed();
         Talk.unseen = false;
     }
@@ -99,14 +105,12 @@ public class TalkActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        Talk.onChange = null;
+        if (Talk.onChange == redraw) Talk.onChange = null; // a newer screen may have taken it already
         main.removeCallbacks(dim);
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (isFinishing() && chat.equals(Talk.chat)) Talk.left(); // swiped away: no more waiting for this
+        // Back or a swipe while showing: no more waiting. Not a relaunch from the launcher (it clears this screen too):
+        // a screen that is showing is stopped only after ChatsActivity got the new intent, and one that is out of sight
+        // is destroyed without a finishing onStop.
+        if (isFinishing() && opened == ChatsActivity.relaunches && chat.equals(Talk.chat)) Talk.left();
     }
 
     private void listen() {

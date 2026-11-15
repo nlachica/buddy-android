@@ -26,6 +26,11 @@ import java.nio.charset.StandardCharsets;
 /** The watch's home screen: the chats on the phone, to pick one and talk to. */
 public class ChatsActivity extends Activity {
     private static final long NO_ANSWER_MS = 8000;
+    /**
+     * Counts launcher opens of the live task (main thread). Each one clears the talk screen above this one, which is
+     * not the user leaving it: TalkActivity compares this with its value at creation.
+     */
+    static int relaunches;
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable noAnswer = () -> showError(getString(R.string.chats_no_answer));
@@ -54,10 +59,11 @@ public class ChatsActivity extends Activity {
         if (b == null) talkToLast(); // not on recreation
     }
 
-    /** The launcher opens the app again while its task is alive (singleTask): same as a fresh open. */
+    /** The launcher opens the app again while its task is alive (singleTask): like a fresh open, and it listens even if a reply is awaited. */
     @Override
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
+        relaunches++; // first: the talk screen being cleared reads it
         talkToLast();
     }
 
@@ -66,7 +72,7 @@ public class ChatsActivity extends Activity {
         SharedPreferences last = getSharedPreferences("last", MODE_PRIVATE);
         if (last.contains("chat")) {
             startActivity(Talk.intent(this, last.getString("chat", ""), last.getString("title", ""),
-                    last.getInt("accent", Look.ACCENT)));
+                    last.getInt("accent", Look.ACCENT)).putExtra("speak", true));
         }
     }
 
