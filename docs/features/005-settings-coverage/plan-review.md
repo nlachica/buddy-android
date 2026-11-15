@@ -46,3 +46,11 @@ F4: accepted - an installed app is needed only to put an app-scoped rule that is
 already on a list can be read, moved or removed (`""` is always accepted), as the screen's chips allow
 (`AppPermissionsActivity:275-282`). The card names the installed label, else the stored `app`, else the package. The
 factory gains an `installed` flag so JVM tests cover orphan removal and the refused new rule.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+No new findings. Round 1 F1–F4 are resolved in the revised plan: the service name has its own row and inventory entry; the phone matrix requires actual approved and denied changes for every new family, with missing evidence remaining PARTIAL; service rows use live lookup, absent snapshots and missing-service write refusal; and existing button rules remain removable after app uninstall.
+
+Checked the proposed wiring against `SettingsTool.java:612-641`, `Providers.java:134-196`, `ApiKeysActivity.java:343-349,433-438`, and `AppPermissionsActivity.java:275-282`. The service snapshot and lock fit the existing gate without changing it. The planned validation, card, deletion/replacement and no-secret tests cover the revised paths. No blocker or major finding remains open.
+
+VERDICT: APPROVE
