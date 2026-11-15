@@ -105,3 +105,30 @@
   (talk swiped away while the run goes on) then wastes at most 10 s of voice. `cancel()` discards and closes the
   channel to unblock a stuck write; `finish()` drains for at most the queue's length plus 5 s.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - A reply's normal end is EOF on the stream; the watch closes the channel; 60 s abandoned bound (round 2, F1)
+- Options: drain then `close(channel)` (round 1; per ChannelClient's reference it makes the peer's reads fail, so a
+  waiting reply or its buffered tail is lost); drain then close only the OutputStream, the watch closes the channel
+  after reading EOF, plus a bound for a watch that never does.
+- Choice: EOF plus the watch's close, with PcmOut cancelling 60 s after `finish()` if the channel is still open. It
+  replaces round 1's drain bound (queue length plus 5 s). 60 s, because it is past the watch's 35 s head deadline and
+  any honest wait. A reply cut by that bound with nothing audible becomes the watch TTS, so the bound only changes
+  which voice says it. Calls keep cancel-only ends (a hang-up).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - CodexSpeech's re-call is isolated by a fresh thread and session checks; no JVM test of it (round 2, F2)
+- Options: wait for the old stop to finish before reusing the thread (depends on the server's event order); a fresh
+  thread for the re-call, with every posted runnable checked again when it runs and the start worker publishing only
+  under a lock; Robolectric or seams to unit-test CodexSpeech.
+- Choice: fresh thread plus checks, because the isolation holds on our side by construction. Retired threads stay
+  claimed so their late events don't reach dictation. No unit test: no Robolectric in the app, and CodexSpeech is a
+  static WebView class in an upstream file. Code review checks the rules, and a device run checks the outcome.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-15 - A watch call's cleanup clears its own chat's flag and the shared wake lock by separate rules (round 2, F3)
+- Options: keep both while any newer watch call is on (round 1); a per-chat rule for `ses.watch` and a global one for
+  `buddy:watch`.
+- Choice: separate. `ses.watch` stays only if the live call is in the same chat or a talk run tracks it. The wake lock
+  stays while any watch call is on or any run is tracked. Otherwise chat A, already untracked, would stay muted on the
+  phone with nothing left to clear it.
+- By: Planner (claude-opus-5-5)

@@ -63,3 +63,37 @@ F2 [major] The new cancellation restart can inherit old speech callbacks - `plan
 F3 [minor] Separate the per-chat flag guard from the shared wake-lock guard - `plan.md:110-111` preserves both `ses.watch` and the wake lock whenever a newer watch call is on. If delayed cleanup for chat A runs after a call in chat B starts, B needs the shared wake lock but does not own A's flag. Leaving A marked as a watch chat suppresses its future phone read-aloud and completion notifications (`ChatHub.java:989,1006-1007`), and A has been removed from the relay (`plan.md:104`), so `WatchLink.endCheck` will not clear it. -> Preserve A's `ses.watch` only if a replacement call owns A or a typed run still tracks A; preserve the shared wake lock while any watch call or tracked run needs it. Check rapid replacement across two different chats as well as within one chat.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+F1: accepted - a normal end no longer closes the channel. ChannelClient's reference confirms the finding (`close`
+"will cause remote reads and writes to the channel to fail", code 0 included) and the fix: the peer gets
+`onInputClosed` with `CLOSE_REASON_NORMAL` when "the OutputStream on the remote node was closed normally".
+`PcmOut.finish()` drains its queue, then closes only the OutputStream (EOF). The watch keeps the channel until it has
+read that end (or it hushes or converts the reply to TTS), then closes it. Only `onChannelClosed` drops a kept
+channel, never the phone's normal end. Abandoned peer: PcmOut cancels 60 s after `finish()` if the watch hasn't
+closed it. That is past the watch's 35 s head deadline, and a reply cancelled that way with nothing audible becomes
+the watch TTS, so the bound can't lose it. This bound replaces round 1's drain bound (queue length plus 5 s), which
+would also have cut a reply waiting behind a long TTS line. Link drops already close every channel. Calls are
+unchanged: their end is a hang-up. Speaker lines now tell `eof` from `closed`. Tests: a device case where "done" is
+voiced after the phone's stream has ended while the watch TTS is still saying a long first message (the engine is
+switched mid-run), then heard whole in the voice with `ended by eof` and played = received. No voice reply in row 2
+may end `closed` outside the Bluetooth-off cases. The JVM test now checks that `finish()` ends the stream without
+calling the channel closer, and that the bound does call it. As noted, it can't prove ChannelClient's side.
+F2: accepted (design), rejected (a JVM test of it) - three rules in CodexSpeech, Design "The re-call doesn't inherit
+the old call's late events". (1) `cancel()` re-calls on a fresh Codex thread, so old events carry the old id. Retired
+threads stay claimed by `owns()`, so their late SDP/closed/error are dropped rather than reaching dictation. (2) Every
+posted runnable checks again when it runs: `web == mine` for page callbacks and start/appendText failures,
+`t.equals(sessionThread)` for notifications. (3) `startCall` publishes `threadId`/`sessionThread` under the class
+lock, only if its page is still `web`. `close()` clears both under the same lock. The queue is kept, and the phone's
+own path (no cancel) still reuses its thread. A deterministic JVM test isn't affordable here. The app has no
+Robolectric (`app/build.gradle.kts` test deps: junit, org.json, android stubs returning defaults). CodexSpeech builds
+a WebView in `open()`, posts to a main-looper Handler and starts the Codex server in `startCall`. Driving it from the
+JVM would need seams across an upstream file the brief keeps unchanged for the phone. The rules hold by construction
+(the ids differ, every post checks again, publishing is locked), and the Code Reviewer checks them. The device run
+(reversed "not cutting others", 3 times) checks the outcome: the phone text is read in the voice after the re-call,
+the re-call is on a new thread id, and old events show up as `stale … ignored` lines.
+F3: accepted - cleanup's two rules are now separate. Chat A's `ses.watch` is cleared unless the live watch call is in
+A or a talk run tracks A. The shared wake lock is released only when no watch call is on and no run is tracked. A
+call sets its own flag and takes the wake lock once on, so cleanup order doesn't matter. Test: a call in chat B while
+A is on and while A is connecting. B keeps `buddy:watch`; afterwards A's run-ended notification shows again and no
+`buddy:watch` is left.

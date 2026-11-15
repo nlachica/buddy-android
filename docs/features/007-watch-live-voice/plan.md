@@ -1,5 +1,5 @@
 # Plan: 007-watch-live-voice
-<!-- Planner (claude-opus-5-5), 2026-11-15. Revised for plan-review round 1. -->
+<!-- Planner (claude-opus-5-5), 2026-11-15. Revised for plan-review rounds 1 and 2. -->
 
 ## Goal
 Phase 2 of 003, two parts. **(a) Calls from the watch:** from the Galaxy Watch4, start Buddy's live voice call
@@ -64,16 +64,28 @@ call on the phone's WebView and bridge its audio to the watch.** That is the res
   the last 300 ms); and when the stream ends or breaks. A `live` flag: **live (Call)** drops audio when more than ≈1 s
   behind, to stay a conversation; **not live (Talk)** never drops: every sample plays in order, and a full AudioTrack
   blocks the reading thread, which pushes back through the channel to the phone's bounded `PcmOut` (below). Each
-  stream logs one line at its end: bytes received, played, dropped; audible at (ms) or never; ended by.
+  stream logs one line at its end: bytes received, played, dropped; audible at (ms) or never; ended by (`eof` = the
+  phone's normal end read; `closed` = the channel closed or failed under it; `say`, `timeout`, `hush`).
 - The phone side: one `PcmOut` class (WatchCall and the relay both use it). Its core takes an `OutputStream` and a
   closer, so it is unit-tested without Play services. `write(byte[])` never blocks (the caller is the WebView's
   JavaBridge thread): a bounded queue and its own writer thread, which flushes after the header and after every chunk.
   Bounds: **a call** keeps 2 s (64 KB) and drops the oldest past that (live); **a reply** keeps 10 s (320 KB) and past
-  that is broken. `finish()` (normal end) lets the writer drain, for at most the queue's length plus 5 s, then closes;
-  `cancel()` discards the queue and closes the stream and the channel at once, which also unblocks a write stuck on a
-  peer that stopped reading. A one-time `broken` callback fires on overflow, an IOException, or the watch closing the
-  channel (a `ChannelClient.ChannelCallback` registered for it, so a queued reply the watch closed is known before
-  anything is written to it). The writer thread ends on any of these.
+  that is broken. **A normal end is not a cancel.** `ChannelClient.close(channel)` makes the peer's reads fail (its
+  reference: "will cause remote reads and writes to the channel to fail", error code 0 included), so a normal end
+  never closes the channel. `finish()` (no more audio): the writer drains the queue, then closes only the channel's
+  OutputStream. The watch reads every byte and then the end of the stream (its `onInputClosed`, `CLOSE_REASON_NORMAL`:
+  "the OutputStream on the remote node was closed normally"). The channel stays open until the watch closes it, after
+  it reads that end (or when it hushes or turns the reply into TTS). If the watch hasn't closed it 60 s after
+  `finish()` (abandoned), PcmOut cancels. 60 s is longer than any honest wait: a waiting reply only sits behind a
+  reply's tail or a watch TTS line, and the watch's own deadline at the head is 35 s. A link drop closes every channel
+  on its own (`onChannelClosed`, DISCONNECTED). A reply cancelled by that bound before anything was audible becomes
+  the watch TTS by the watch's rule, so the bound can't lose a reply. `cancel()` discards the queue and closes the
+  stream and the channel at once, which also unblocks a write stuck on a peer that stopped reading. A one-time
+  `broken` callback fires on overflow, an IOException, or the watch closing the channel before `finish()` (a
+  `ChannelClient.ChannelCallback` registered for it, so a queued reply the watch closed is known before anything is
+  written to it). The writer thread ends on any of these, or after it closes the OutputStream. The 60 s bound is a
+  timer in PcmOut's core (its length a constructor argument, so the test shortens it) that the watch's close cancels.
+  Calls never `finish()`: a call's end is a hang-up (`cancel()`).
 
 ### (a) Calls from the watch
 **Main code: a seam in CodexLive, no Google types.** `interface Remote { void pcm(byte[] pcm16k); void status(String
@@ -107,8 +119,11 @@ spoken approval answers (`answerCard`), the watchdog, the live bar and notificat
   already off in any call, `:1006`), the `buddy:watch` wake lock held and re-acquired every minute while audio comes
   in. `Remote.pcm` → a call `PcmOut` on the channel's output stream; `Remote.status` → `/buddy/live/status {chat, call,
   text}`; `Remote.ended` → `/buddy/live/end {chat, call, text}`, then the `PcmOut` is cancelled and the channel closed
-  ~500 ms later (so the reason usually lands first). Cleanup leaves `ses.watch` and the wake lock alone when a newer
-  watch call is on (a replacement) or a 003 talk run tracks the chat; otherwise clears and releases them. The input
+  ~500 ms later (so the reason usually lands first). Cleanup has two separate rules: its own chat's `ses.watch` is
+  cleared unless the live watch call is in that same chat (a replacement) or a 003 talk run tracks that chat; the
+  shared `buddy:watch` wake lock is released only when no watch call is on and no talk run is tracked (WatchLink's
+  `releaseWake` rule, below). A call sets its own chat's flag and takes the wake lock once it is on, so the old call's
+  cleanup running before or after the new call's start gives the same result. The input
   ending (the watch hung up or vanished) → `CodexLive.end(null)` on main, only if `CodexLive.on(remote)`.
 - `WatchLink`: `releaseWake()` callers also check that no watch call is on; `endCheck` leaves `ses.watch` set for a
   chat in a watch call; `untrack(chat)` (package-private).
@@ -157,6 +172,26 @@ closed, no Fallback); if it is the current item, the call is hung up and, when o
 the queue intact (today's path when a text comes after an idle hang-up); a Sink matching no item (a reply already
 read or dropped) is ignored, so a late failure can't touch a newer item or a phone read-aloud.
 
+**The re-call doesn't inherit the old call's late events.** Today's code routes notifications by thread id only
+(`CodexDictation.java:395`), reuses `threadId` (`CodexSpeech.java:116`), stops on a separate thread (`:232`), and posts
+`fail()` and the notification handlers without checking again when they run (`:152`, `:161-173`). Today that only
+matters after an idle hang-up; with `cancel()` an appendText or a start can still be pending. Three rules, all in
+CodexSpeech:
+1. *A fresh thread for the re-call.* `cancel()` sets `threadId = null` before `open()`, so `startCall` makes a new
+   Codex thread (one `thread/start` on the warm server). Every late event of the old call then carries the old id.
+   CodexSpeech keeps claiming the threads it retired this way (`owns()`; a small set, emptied when the server
+   changes), so their late SDP, closed and error events are dropped there and don't reach dictation's handlers.
+2. *Every posted runnable checks again when it runs.* Page callbacks and the start/appendText failures check
+   `web == mine`, the page they were started for (`next()` captures it as `startCall` already does). Notifications
+   check that their thread is the live call's (`t.equals(sessionThread)`); `owns()` claiming a retired thread only
+   routes its events here to be dropped.
+3. *A stale start worker can't take the call.* `startCall` picks its thread id locally, then publishes `threadId` and
+   `sessionThread` under the class lock, only if its page is still `web`. `close()` clears `web` and `sessionThread`
+   under the same lock.
+
+A dropped stale event logs one line (`BuddySpeech: stale <event> ignored`). The phone's own path is unchanged: without
+`cancel()` the thread is reused as today, and the rules only drop events that would have failed a newer call.
+
 **Phone relay** (`WatchLink.relay`, 003): for a `BUDDY` message to a tracked chat, when ChatGPT's voice is the
 phone's engine (the same test as `Voice.speak`: `"chatgpt".equals(Prefs.speechEngine(app)) &&
 SetupState.planSignedIn(app, "codex")`, `Voice.java:237`) and no live call is on (`!CodexLive.on()`, the phone's own
@@ -175,7 +210,10 @@ cold server cost ~5 s of the 7.7 s call setup in `live.log`). No `AudioRoute`/`S
   as today; so with ChatGPT's voice off nothing changes.
 - A voice item at the head waits until `pending` is empty (earlier TTS said), then plays its channel through a
   not-live Speaker (nothing dropped); the items after it wait. Its channel can come before its reply message:
-  channels are kept by id, and dropped from the map when the phone closes them.
+  channels are kept by id until the watch closes them: after its Speaker read the end of the stream (said), on
+  conversion to TTS, on hush, or when Talk stops. The phone's normal end (`onInputClosed`, NORMAL) doesn't drop a kept
+  channel: its audio is still there to be read. Only the channel closing (`onChannelClosed`: the phone cancelled it, or
+  the link dropped) drops it; with nothing audible yet that is "its channel ending" below.
 - **Said once; the watch alone decides, by whichever comes first:** its first audible block written to the
   AudioTrack → it is the voice's (a break later ends it, never re-spoken: CodexSpeech's own rule,
   `CodexSpeech.java:208`). Silent PCM (the tap streams silence before the voice starts) neither commits it nor resets
@@ -190,7 +228,7 @@ cold server cost ~5 s of the 7.7 s call setup in `live.log`). No `AudioRoute`/`S
   `maybeStop()` counts voice items. The 5-minute force stop
   after the end still caps it.
 - Log lines (`BuddyTalk`): reply arrived, first sound (voice or TTS) per reply, for the latency measurement; the
-  Speaker's per-stream line (bytes, audible at, dropped, ended by eof / say / timeout / hush).
+  Speaker's per-stream line (bytes, audible at, dropped, ended by eof / closed / say / timeout / hush).
 
 ### Cost of (b), Nicholas's question
 Yes, it costs something, mostly time:
@@ -241,13 +279,14 @@ One commit each on `feat/007-watch-live-voice`. Main-code steps must keep `FLAVO
 1. **CodexLive remote mode (main).** `CodexLive.java`: `Remote`, `start(c, s, r)`, `push(r, pcm)`, `on(r)`, `Buddy.remote()` /
    `ownMic()` / `pcm()` interface methods, the skips listed in Design, `remote.status/ended`, PAGE: remote branch in
    `start()` and `ontrack`. `CodexSpeech.java`: the `TAP_JS` constant only. Log lines in `live.log` mark a watch call.
-2. **Phone: the call bridge (watchlink).** New `PcmOut.java` (bounds, finish/cancel, peer-close callback), new
-   `WatchCall.java` (call id, header timeout, `untrack`, identity-bound cleanup); `WatchLink.java` (`onChannelOpened`,
+2. **Phone: the call bridge (watchlink).** New `PcmOut.java` (bounds; `finish()` = drain then end the OutputStream, the
+   channel kept until the watch closes it or 60 s; `cancel()`; peer-close callback), new `WatchCall.java` (call id,
+   header timeout, `untrack`, identity-bound cleanup with separate flag and wake-lock rules); `WatchLink.java` (`onChannelOpened`,
    `untrack`, wake-lock and `ses.watch` rules); `app/src/watchlink/AndroidManifest.xml` (`CHANNEL_EVENT`). New
    `app/src/testGithub/java/app/buddy/assistant/PcmOutTest.java` (github-only test source set: PcmOut isn't in the
    F-Droid build; CI's `testGithubDebugUnitTest` runs it).
 3. **Watch: Speaker and phone lookup.** New `wear/.../Speaker.java` (`live` flag, first audible block, per-stream log
-   line); `Phone.java`: `find()` factored out of `send()` (same behaviour), the new path constants.
+   line with `eof` vs `closed`); `Phone.java`: `find()` factored out of `send()` (same behaviour), the new path constants.
 4. **Watch: the call.** New `Call.java` (call id, setup bound, stale-message and late-channel rules),
    `CallActivity.java`; `TalkActivity.java` (call button: permission, Talk yields); `Talk.java` (ignore
    `/buddy/live/*`; `begin` hangs up a call); `wear/src/main/AndroidManifest.xml` (`RECORD_AUDIO`,
@@ -258,12 +297,14 @@ One commit each on `feat/007-watch-live-voice`. Main-code steps must keep `FLAVO
    doesn't starve). A WebView call that dies with the screen off, or a link that can't carry 32 KB/s, goes back to the
    Planner (Risks 1, 3) before (b) is verified.
 5. **CodexSpeech per-item routing (main).** `CodexSpeech.java`: `Item`, `Sink`, `speak(c, text, f, sink)`, `route()`
-   in its page plus `TAP_JS`, `cancel(sink)`, fail (phone items joined as today) / stop / close as in Design. Phone
+   in its page plus `TAP_JS`, `cancel(sink)` with the re-call rules 1-3 (fresh thread, posted runnables checked when
+   they run, start published under the lock, the stale-event log line), fail (phone items joined as today) / stop / close as in Design. Phone
    read-aloud unchanged.
 6. **Phone: watch replies in ChatGPT's voice (watchlink).** `WatchLink.java`: the relay's voice branch (not during a
    call), `/buddy/say`, per-reply `PcmOut` channel, broken Sink → `CodexSpeech.cancel(sink)`, `CodexDictation.prepare`
    in `deliver()`.
-7. **Watch: voice replies in Talk.** `Talk.java`: the ordered queue, channel callback, the audible commit rule,
+7. **Watch: voice replies in Talk.** `Talk.java`: the ordered queue, channels kept until read to their end or closed by the
+   watch, channel callback, the audible commit rule,
    `/buddy/say`, timeouts, failure conversion, `hush()`, `maybeStop()`, log lines (as in Design).
 8. **Docs.** `README.md` watch section: calls (the button, mic permission, End/swipe hangs up, half-duplex, needs Codex
    signed in), and that replies use ChatGPT's voice when it is the phone's engine. `docs/PRIVACY.md` watch section:
@@ -278,10 +319,10 @@ during the session, playbook `buddy-fork-verify`).
 
 | Done-when | Proof |
 |---|---|
-| 1 call from the watch, phone locked | Devices. Phone screen off and locked for 1+ min, in a pocket. Watch: chat → call button → (first time) allow the mic → "Connecting…" then "Listening…"; ask "what time is it" → the voice answers from the **watch** speaker; the phone stays silent; the phone chat shows the words as the user's message and the reply. Talk for 2+ min with the wrist down part of the time. `~/.buddy/live.log`: the watch-call line, no `getUserMedia`, `rtp 10 s` lines all along, no "screen off". End on the watch → the call ends within 2 s: the phone's live notification and live bar go, the chat notes "Live voice ended.", watch `dumpsys activity services app.buddy.assistant` shows no `Call`, `dumpsys power` on both shows no `buddy:call` / `buddy:watch`. Also: End on the phone's notification → the watch shows "Live voice ended." and stops; swipe `CallActivity` away → hangs up; Codex signed out → the watch shows `dictation_codex_sign_in`'s text; Bluetooth off mid-call → the watch says it lost the phone, the phone ends the call. **Replaced calls:** End then the call button again within 1 s, and the call button tapped again while "Connecting…": the newest call stays on, the watch never shows an end that isn't its call's (`BuddyCall` log: "ignored end/status for call n"), one `CodexLive` call in `live.log`. End during "Connecting…" → within 2 s no `Call`, no `buddy:call`/`buddy:watch`, the phone's live notification gone. **One audio owner, each engine:** a typed talk, then the call button while its reply is being said → the reply stops at once and is not said again, the call starts; the call button while that typed run is still working → its later replies are heard only in the call's voice, once (no watch TTS, no `/buddy/reply` in the phone's relay log); a new typed talk during a call hangs the call up. |
-| 2 replies in ChatGPT's voice, else watch TTS, once | Devices. Phone Settings → Voice → ChatGPT voice. Watch talk "tell me a short joke" → the reply text shows, then is heard in ChatGPT's voice (Juniper etc., clearly not the watch TTS) from the watch; the phone is silent; `BuddyTalk` log: one "voice" first-sound line for the id, no "tts" line. Engine set back to the phone voice → the same question is said by the watch TTS (003 path, no `voice` in the reply). **Failing, once each:** (i) `pkill -f "codex app-server"` in Buddy's Linux the moment the reply text shows on the watch (not right after sending: `CodexDictation.ensureServer` restarts a dead server, `:249`), so the speech call is connecting or connected and streaming silence → CodexSpeech fails → `/buddy/say` and the channel ends → the watch TTS says it once (log: one "tts" line, no "voice" line; Speaker line `audible never`, ended by `say` or `eof`). Run it 3 times; a kill that lands after the voice was audible must give a cut-off voice and no TTS, never both; (ii) watch Bluetooth and Wi-Fi off once the text has shown → the watch TTS says it within ~40 s, once; (iii) a long reply, Bluetooth off mid-sentence → the voice stops, nothing is repeated; (iv) the mic button mid-reply → silence, and the next question's reply comes without waiting for the old one (the phone's `CodexSpeech` retired that reply only). **Not cutting others:** a phone chat read aloud in ChatGPT's voice (read-aloud on) and, while it plays, a watch talk whose reply queues behind it; the mic button on the watch → the phone keeps reading its text to the end. Reversed: the watch reply plays, a phone read-aloud waits; the mic button → the phone's text is still read (after a reconnect). **No words lost:** a reply in two messages ("answer in two separate messages: …") is heard in order, whole; every Speaker line in the run says `dropped 0`. |
+| 1 call from the watch, phone locked | Devices. Phone screen off and locked for 1+ min, in a pocket. Watch: chat → call button → (first time) allow the mic → "Connecting…" then "Listening…"; ask "what time is it" → the voice answers from the **watch** speaker; the phone stays silent; the phone chat shows the words as the user's message and the reply. Talk for 2+ min with the wrist down part of the time. `~/.buddy/live.log`: the watch-call line, no `getUserMedia`, `rtp 10 s` lines all along, no "screen off". End on the watch → the call ends within 2 s: the phone's live notification and live bar go, the chat notes "Live voice ended.", watch `dumpsys activity services app.buddy.assistant` shows no `Call`, `dumpsys power` on both shows no `buddy:call` / `buddy:watch`. Also: End on the phone's notification → the watch shows "Live voice ended." and stops; swipe `CallActivity` away → hangs up; Codex signed out → the watch shows `dictation_codex_sign_in`'s text; Bluetooth off mid-call → the watch says it lost the phone, the phone ends the call. **Replaced calls:** End then the call button again within 1 s, and the call button tapped again while "Connecting…": the newest call stays on, the watch never shows an end that isn't its call's (`BuddyCall` log: "ignored end/status for call n"), one `CodexLive` call in `live.log`. End during "Connecting…" → within 2 s no `Call`, no `buddy:call`/`buddy:watch`, the phone's live notification gone. **Across chats:** a call in chat A, then from the watch a call in chat B while A is on, and again while A is still "Connecting…" → B stays on and `buddy:watch` stays held while it is; after B ends, `dumpsys power` shows no `buddy:watch`, and a message sent to A from the phone with the screen off ends with A's run-ended notification (A's `ses.watch` was cleared, `ChatHub.java:989`). **One audio owner, each engine:** a typed talk, then the call button while its reply is being said → the reply stops at once and is not said again, the call starts; the call button while that typed run is still working → its later replies are heard only in the call's voice, once (no watch TTS, no `/buddy/reply` in the phone's relay log); a new typed talk during a call hangs the call up. |
+| 2 replies in ChatGPT's voice, else watch TTS, once | Devices. Phone Settings → Voice → ChatGPT voice. Watch talk "tell me a short joke" → the reply text shows, then is heard in ChatGPT's voice (Juniper etc., clearly not the watch TTS) from the watch; the phone is silent; `BuddyTalk` log: one "voice" first-sound line for the id, no "tts" line. Engine set back to the phone voice → the same question is said by the watch TTS (003 path, no `voice` in the reply). **Failing, once each:** (i) `pkill -f "codex app-server"` in Buddy's Linux the moment the reply text shows on the watch (not right after sending: `CodexDictation.ensureServer` restarts a dead server, `:249`), so the speech call is connecting or connected and streaming silence → CodexSpeech fails → `/buddy/say` and the channel ends → the watch TTS says it once (log: one "tts" line, no "voice" line; Speaker line `audible never`, ended by `say` or `eof`). Run it 3 times; a kill that lands after the voice was audible must give a cut-off voice and no TTS, never both; (ii) watch Bluetooth and Wi-Fi off once the text has shown → the watch TTS says it within ~40 s, once; (iii) a long reply, Bluetooth off mid-sentence → the voice stops, nothing is repeated; (iv) the mic button mid-reply → silence, and the next question's reply comes without waiting for the old one (the phone's `CodexSpeech` retired that reply only). **Not cutting others:** a phone chat read aloud in ChatGPT's voice (read-aloud on) and, while it plays, a watch talk whose reply queues behind it; the mic button on the watch → the phone keeps reading its text to the end. Reversed: the watch reply plays, a phone read-aloud waits; the mic button → the phone's text is still read in ChatGPT's voice after a reconnect, not by the phone's TTS; 3 runs, and `BuddySpeech` shows the re-call on a new thread id (and any `stale … ignored` lines). The late-event rules (Design, rules 1-3) are by construction, since a device can't force an old event to arrive late: the Code Reviewer checks that every runnable CodexSpeech posts checks its call when it runs and that `startCall` publishes only under the lock. **No words lost:** a reply in two messages ("answer in two separate messages: …") is heard in order, whole; every Speaker line in the run says `dropped 0`. **A reply that waits keeps its voice and its end:** engine set to the phone's voice; watch talk "answer in two separate messages: first about 80 words on anything, then only the word done"; while the watch TTS is saying the long text, switch the phone's engine to ChatGPT voice (`buddy_settings`) → "done" goes out with `voice`, and its stream ends on the phone (PcmOut log: end sent) well before the watch TTS finishes → after the long text, "done" is heard in ChatGPT's voice, whole, and no "tts" line for it; its Speaker line says `ended by eof`, played = received. Across the row, no voice reply's Speaker line says `closed` except in the Bluetooth-off cases (ii, iii): the phone never closes a channel under a reader. |
 | 3 cost of (b) in verify.md | Devices. Latency: 5 replies with each engine; `BuddyTalk` "reply arrived" → "first sound" per reply, median and range, cold and warm. Battery: watch and phone unplugged, `dumpsys batterystats --reset` on both, the same 5-question script per engine, then `dumpsys batterystats --charged` per UID (watch: `app.buddy.assistant` and the TTS engine's package; phone: Buddy). The table plus this plan's estimate go into verify.md. |
-| 4 003/006 unchanged, CI, F-Droid | With the phone voice engine: 003's talk row (list, speak, reply shown and said once, reopening shows it without speaking again, 006) and quick talk. The phone's own live call from the chat screen still works and still ends when the screen goes off; phone read-aloud in ChatGPT's voice for a phone chat still plays on the phone. CI `build.yml` on the branch green, including the "F-Droid APK has no Google code" step (`build.yml:80`). `FLAVOR=github bash build.sh`'s javac step compiles `app/src/main` (or `javac` against android.jar as in 003). `PcmOutTest` (CI, `testGithubDebugUnitTest`): a consumer that never reads → queued bytes stay ≤ the cap; a reply PcmOut reports broken once, a call PcmOut drops the oldest; `cancel()` with a write blocked on it ends the writer thread within 1 s and calls the closer; `finish()` drains what a slow consumer reads, and gives up at its bound. Diff holds only the files in Steps 1-9. |
+| 4 003/006 unchanged, CI, F-Droid | With the phone voice engine: 003's talk row (list, speak, reply shown and said once, reopening shows it without speaking again, 006) and quick talk. The phone's own live call from the chat screen still works and still ends when the screen goes off; phone read-aloud in ChatGPT's voice for a phone chat still plays on the phone. CI `build.yml` on the branch green, including the "F-Droid APK has no Google code" step (`build.yml:80`). `FLAVOR=github bash build.sh`'s javac step compiles `app/src/main` (or `javac` against android.jar as in 003). `PcmOutTest` (CI, `testGithubDebugUnitTest`): a consumer that never reads → queued bytes stay ≤ the cap; a reply PcmOut reports broken once, a call PcmOut drops the oldest; `cancel()` with a write blocked on it ends the writer thread within 1 s and calls the closer; `finish()` drains what a slow consumer reads, then closes the OutputStream but does not call the channel closer; the closer runs when the abandoned bound passes (test-sized), and never if the peer closes first. The JVM test can't show ChannelClient's side, that a closed OutputStream reads as a normal end on the watch while the channel stays open: row 2's `ended by eof` lines show it on the devices. Diff holds only the files in Steps 1-9. |
 
 ## Risks
 1. **The WebView call with the phone screen off is unverified.** In remote mode the page opens no mic (so Android's
@@ -305,7 +346,8 @@ during the session, playbook `buddy-fork-verify`).
 7. **ChatGPT plan voice use:** (b) opens a realtime session per burst of watch replies.
 8. **Retiring the reply being read costs a reconnect** for whatever waits behind it (`cancel()` hangs up and calls
    again, ~1-3 s warm). A watch reply queued more than 10 s behind a watch TTS line (a long error) is said by the
-   watch TTS instead (its queue overflows before it plays); and if the watch stopped listening (talk swiped away
+   watch TTS instead (its queue overflows before it plays), and so is one whose stream ended more than 60 s before the
+   watch got to it (PcmOut's abandoned bound); and if the watch stopped listening (talk swiped away
    while its run goes on), at most 10 s of voice is read into nothing before the reply is retired.
 9. **Phone notification mirrored to the watch:** the phone's ongoing live notification may also appear on the watch
    during a call (Galaxy Wearable). Seen in the gate; a follow-up if it bothers.
