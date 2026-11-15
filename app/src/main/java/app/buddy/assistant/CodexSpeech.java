@@ -114,17 +114,23 @@ final class CodexSpeech {
             if (i.sink == sink) {
                 it.remove();
                 closeSink(i);
+                if (current == null && queue.isEmpty() && web != null) hangUp(); // nothing left for the call to do
                 return;
             }
         }
         Item cur = current;
         if (cur == null || cur.sink != sink) return;
+        hangUp();
+        closeSink(cur);
+        if (!queue.isEmpty()) open();
+    }
+
+    /** Ends the call so its late events can't reach a later one. */
+    private static void hangUp() {
         String old = sessionThread;
         if (old != null) retired.add(old);
         threadId = null;
         close();
-        closeSink(cur);
-        if (!queue.isEmpty()) open();
     }
 
     private static void closeSink(Item i) {
