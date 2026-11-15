@@ -4,6 +4,9 @@ import android.app.Dialog;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Intent;
+import android.media.AudioDeviceCallback;
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -33,6 +36,18 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
     private LinearLayout list;
     /** Setup card open state; null = automatic (open until all steps are done). */
     private Boolean setupOpen;
+    /** A watch or headset coming or going while this screen is open (the Audio device row). */
+    private final AudioDeviceCallback audioDevices = new AudioDeviceCallback() {
+        @Override
+        public void onAudioDevicesAdded(AudioDeviceInfo[] added) {
+            if (!isFinishing() && !isDestroyed()) render();
+        }
+
+        @Override
+        public void onAudioDevicesRemoved(AudioDeviceInfo[] removed) {
+            if (!isFinishing() && !isDestroyed()) render();
+        }
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -63,6 +78,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         SshServer.addListener(this);
         CodexRemote.addListener(this);
         Browser.addListener(this);
+        getSystemService(AudioManager.class).registerAudioDeviceCallback(audioDevices, null);
         Account.CLAUDE.refresh(this);
         Account.CODEX.refresh(this);
         Account.OPENCODE.refresh(this);
@@ -78,6 +94,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         SshServer.removeListener(this);
         CodexRemote.removeListener(this);
         Browser.removeListener(this);
+        getSystemService(AudioManager.class).unregisterAudioDeviceCallback(audioDevices);
         super.onPause();
     }
 
@@ -457,6 +474,21 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                 Voice.speak(this, getString(R.string.setup_voice_sample));
             });
             vc.addView(voices, topGap(8));
+        }
+        String[][] devices = AudioRoute.choices(this);
+        if (devices.length > 1) { // Android 12+
+            String saved = Prefs.audioDevice(this);
+            vc.addView(fieldLabel(getString(R.string.setup_audio_device), null), topGap(16));
+            // a saved device that is away matches no segment, so Auto can be tapped to clear it
+            vc.addView(segmented(this, devices, saved, false, v -> {
+                Prefs.setAudioDevice(this, v);
+                render();
+                Voice.stopSpeaking();
+                Voice.speak(this, getString(R.string.setup_voice_sample));
+            }), topGap(8));
+            boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
+            vc.addView(text(this, away ? getString(R.string.setup_audio_device_missing, saved.substring(saved.indexOf(':') + 1))
+                    : getString(R.string.setup_audio_device_info), 13, MUTED), topGap(8));
         }
         vc.addView(fieldLabel(getString(R.string.setup_languages), Voice.languageName(Prefs.voiceLang(this))), topGap(16));
         TextView lh = text(this, getString(R.string.setup_languages_hint), 13, MUTED);
