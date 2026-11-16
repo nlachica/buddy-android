@@ -84,3 +84,15 @@ decisions.md: overlapping ChatGPT readings no longer share one call (a connect p
 CodexSpeech's dequeue would keep the shared call, but it's more code in CodexSpeech's threaded part, so it is the
 follow-up if the pause is noticeable. Risks 6 and 7 updated (the 11-min cap bounds a wait; the gap is now only a
 ChatGPT-to-TTS failure).
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No open blocker or major findings.
+
+Round 2 F1 is addressed by `plan.md:90-120,177-186,198`: every github-build reading enters ReadQueue, a quiet reading waits while the phone is busy, and routing is re-evaluated after that wait and after the asynchronous watch lookup. The proposed busy check matches the current ChatGPT voice lifecycle: `CodexSpeech.java:76-77,89-93,150-154` makes it active synchronously on handoff, including call startup; `:303-310,360-375` keeps it active until completion and teardown. The next reading therefore stays eligible for routing instead of entering the phone queue with the previous route. Planned tests cover headset removal both before and after the next reading is submitted, plus a busy phone when the lookup returns. Phone-voice readings retain the waitable completion path (`Voice.java:412-440`).
+
+Round 1 F2-F6 remain addressed. Each done-when item has planned unit, device or CI evidence (`plan.md:195-205`), including selected-device reconnection, visible Watch status refresh and the no-link build. The API 33 routing query and empty-result fallback agree with the [Android AudioManager reference](https://developer.android.com/reference/android/media/AudioManager#getAudioDevicesForAttributes(android.media.AudioAttributes)).
+
+Review was static; no implementation, CI or device tests were run. The documented FreeCom availability uncertainty, ChatGPT-to-TTS startup gap and extra connection pause remain verification risks, not newly discovered blocker/major findings in this final round.
+
+VERDICT: APPROVE
