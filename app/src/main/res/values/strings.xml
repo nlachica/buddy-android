@@ -1345,6 +1345,8 @@
     <string name="setup_audio_device_info">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto leaves it to Android.</string>
     <!-- %1$s = the device's name. -->
     <string name="setup_audio_device_missing">%1$s isn\'t connected: Auto until it is.</string>
+    <string name="setup_audio_device_watch">Watch: read aloud plays on your Galaxy Watch (it needs the watch app from the same version). If the watch can\'t play it, the phone reads it instead.</string>
+    <string name="setup_audio_device_watch_away">No watch found: the phone reads replies aloud until it\'s back.</string>
     <!-- Audio device choices. Keep short. -->
     <string name="audio_auto">Auto</string>
     <string name="audio_speaker">Speaker</string>

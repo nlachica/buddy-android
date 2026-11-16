@@ -345,10 +345,15 @@ final class SettingsTool {
         }, "", () -> {
             List<String> ids = new ArrayList<>();
             ids.add("auto");
-            String[][] devices = AudioRoute.choices(svc); // Android 12+ lists the devices connected now
+            String[][] devices = AudioRoute.choices(svc); // Android 12+ lists the devices connected now; then watch
             for (int i = 1; i < devices.length; i++) ids.add(devices[i][0]);
             return ids.toArray(new String[0]);
-        }));
+        }) {
+            @Override
+            String allowed() {
+                return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can";
+            }
+        });
         l.add(voiceLanguages(() -> {
             List<String> all = new ArrayList<>(Arrays.asList(Prefs.voiceLangs(svc).split(",")));
             all.remove(Prefs.voiceLang(svc));
