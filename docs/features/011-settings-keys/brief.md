@@ -2,7 +2,7 @@
 type: brief
 feature: 011-settings-keys
 created: 2026-11-16
-skipped_stages: []   # e.g. [research, plan-review] for small tasks; never code-review or verify
+skipped_stages: [research]   # e.g. [research, plan-review] for small tasks; never code-review or verify
 ---
 # Brief: 011-settings-keys
 
