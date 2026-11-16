@@ -64,3 +64,23 @@ F1 [major] Phone-side queued readings still keep a stale route - Round 1 F1 is o
 Round 1 F2-F6 are addressed by the revised plan. Review was static; no implementation or device tests were run.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - Readings no longer wait with an old answer in the phone's own queues. In the github build every
+reading goes through ReadQueue (`Voice.speak`: link → `WatchVoice.speak(c, clean, quiet)`, else `here` as today), so
+none skips it when a headset wins. A quiet reading that becomes current while the phone speaks (`phoneBusy`) now
+**waits** instead of going to the phone. It stays current, so later readings wait behind it, and ReadQueue asks again
+every 300 ms (`out.after`). Once the phone is quiet it decides by the order. The same re-decision runs when a find
+returns and `phoneBusy` or `watchWins` changed meanwhile. So in both of your cases (buds removed before b, or after b
+was submitted) b goes to the watch once a is done, and a reaches the phone once. Phone-voice readings are waited for
+anyway (round 1 F3). ChatGPT-voice readings still end at once on hand-off, and the next one waits for that call to
+close. A picked Watch ignores `phoneBusy` (012 unchanged). The round 1 test that sent b to the phone while it was
+busy is replaced. New tests, with the fake's phone queue (`here`) in the log: the route changed before b; the route
+changed after b, during the wait; still the phone's after the wait (`here b`, no find); busy after the find (a
+second find, then the watch). Each asserts `here a` once and no `here b`. Device check added: ChatGPT voice, two
+replies, buds taken out during the first → the second plays on the watch. Cost, recorded as Risk 9 and in
+decisions.md: overlapping ChatGPT readings no longer share one call (a connect pause between them). A route check at
+CodexSpeech's dequeue would keep the shared call, but it's more code in CodexSpeech's threaded part, so it is the
+follow-up if the pause is noticeable. Risks 6 and 7 updated (the 11-min cap bounds a wait; the gap is now only a
+ChatGPT-to-TTS failure).

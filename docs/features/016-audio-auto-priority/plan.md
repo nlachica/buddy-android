@@ -1,7 +1,7 @@
 # Plan: 016-audio-auto-priority
 <!-- Planner (claude-opus-5-5), 2026-11-16. Sources: brief.md, research.md, code read at bd595f3, 001/012 decisions and
      verify, Android reference for AudioManager/AudioDeviceInfo (fetched 2026-11-16, facts quoted under Design).
-     Revised for plan review round 1 (F1-F6). -->
+     Revised for plan review round 1 (F1-F6) and round 2 (F1). -->
 
 ## Goal
 Buddy's audio device setting (001's selector plus 012's Watch) must never stay stuck on a device that is gone. **Auto**
@@ -87,33 +87,40 @@ Android's routing.
 `Voice.speak` (`Voice.java:234-241`) today sends the text to the watch only when Watch is saved. New:
 
 ```java
-boolean toWatch = WatchVoice.KEY.equals(AudioRoute.target(c));
-if (toWatch || WatchVoice.active()) WatchVoice.speak(c, clean, !WatchVoice.KEY.equals(Prefs.audioDevice(c))); // quiet = not picked
-else here(c, clean);
+if (WatchVoice.link() != null) WatchVoice.speak(c, clean, !WatchVoice.KEY.equals(Prefs.audioDevice(c))); // quiet = Watch not picked
+else here(c, clean); // F-Droid: no watch step; Android's routing when the voice starts already is the order
 ```
 
-A reading that might go to the watch goes through `ReadQueue`. While the queue is busy, every new reading lines up
-behind it (also one headed for a headset), so replies keep their order across a switch. `ReadQueue` asks where a
-reading goes **when it becomes current, and again when its find returns** (the find takes up to 3 s). That makes the
-answer fresh at the moment of speaking, not at submission. New `Out` methods:
-- `boolean watchWins()`: `AudioRoute.target` is Watch now. False when a headset connected or the pick came back. Then
-  the reading takes the quiet phone path below: Android's routing or the pick.
+In the github build **every reading goes through `ReadQueue`**, whatever its device, so readings go one at a time and in
+order. `ReadQueue` decides where a reading goes **when it becomes current, and again when its find returns** (the find
+takes up to 3 s). Nothing waits in the phone's own queues with an old answer: a reading reaches the phone only when
+nothing is playing there, so the answer is the one at the moment of speaking (round 2 F1). New `Out` methods:
+- `boolean watchWins()`: `AudioRoute.target` is Watch now. False when a headset connected or the pick is in effect.
+  Then the reading takes the quiet phone path below: Android's routing or the pick.
 - `boolean phoneBusy()`: the phone is still speaking (`CodexSpeech.active()` or the TTS `isSpeaking()`; new
-  `Voice.phoneSpeaking()`). An Auto (quiet) reading goes to the watch only when the phone is quiet, otherwise it follows
-  on the phone. This is the reverse transition: a watch that becomes reachable while the phone is still starting or
-  reading an earlier reply doesn't make two voices talk at once or swap their order. A picked Watch ignores it (012
-  unchanged).
+  `Voice.phoneSpeaking()`). A quiet reading **waits** while it is: it stays current, so the readings behind it wait too,
+  and `ReadQueue` asks again every `WAIT_MS` = 300 ms (`out.after`, like 001's route poll). Once the phone is quiet it
+  decides by the order. Example: the buds are taken out while a plays in them. b goes to the watch once a is done,
+  whether b came before or after the buds left. This also handles the reverse transition: a watch that becomes
+  reachable while the phone still speaks can't make two voices talk at once or swap their order. A picked Watch ignores
+  it (012 unchanged).
 - `void here(String text)`: ChatGPT's voice on the phone (`SpeechPause.begin` + `Voice.here`). Not waited for.
 
-The rule in `ReadQueue` (`quiet` = Auto's step, the user didn't pick Watch):
-- at start: `!watchWins() || (quiet && phoneBusy())` → quiet phone path, no find;
-- find returns a node: the same check again → quiet phone path; else play on the watch, exactly as in 012;
-- no watch, or the watch refused: quiet → quiet phone path; picked → 012's `phone(r)` (notice once, then phone TTS).
+The rule in `ReadQueue`, `start(r)` (`quiet` = the user didn't pick Watch):
+- `quiet && phoneBusy()` → wait `WAIT_MS`, then `start(r)` again (dropped if `r` is no longer current);
+- `!watchWins()` → quiet phone path, no find;
+- else find. When it returns: if the answer changed meanwhile (`!watchWins()`, or `quiet && phoneBusy()`), `start(r)`
+  again. No node: quiet → quiet phone path, picked → 012's `phone(r)` (notice once, then phone TTS). A node: play on
+  the watch, exactly as in 012;
+- the watch refused: quiet → quiet phone path; picked → 012's `phone(r)`.
 - **Quiet phone path**, no notice, `noticeDue` untouched (the 012 notice still comes the first time a *picked* Watch
   can't play): a reading in the phone's voice uses the existing waitable `out.tts(text, null, () -> end(r))`
   (`Voice.routed`, one request at a time, so a cold engine can't drop one). A reading in ChatGPT's voice goes to
-  `out.here(text)` and ends at once. CodexSpeech's queue keeps the order and its `fail()` joins phone fallbacks. ChatGPT's
-  voice has no "done" callback, and swapping in the phone's voice would be a regression for Auto users.
+  `out.here(text)` and ends at once; the next reading then waits on `phoneBusy` until that voice is done (its call
+  closes), and `fail()` still hands a failed one to the phone voice. ChatGPT's voice has no "done" callback, and
+  swapping in the phone's voice would be a regression for Auto users.
+
+The 11-min cap (`READ_MAX_MS`) is still armed once, when a reading becomes current, so it bounds a wait too.
 
 With Watch picked, nothing changes (012: notice, then the phone TTS). Its phone fallback plays through Android's
 routing, so it already follows the order: a connected headset, else the speaker.
@@ -146,6 +153,13 @@ that is away).
 - Prefer the connected list over Android's API 33 answer: names a headset Android isn't using. Rejected.
 - A cached watch reachability (listener or periodic) checked in `Voice.speak`: stale at speak time. Rejected.
 - Deciding watch-or-phone once at submission: stale by the time a queued reading starts (round 1 F1). Rejected.
+- A quiet reading follows on the phone while the phone speaks (round 1), or skips ReadQueue when a headset wins: it
+  waits in CodexSpeech's queue with an answer that can be gone by its turn (round 2 F1). Rejected.
+- Only readings that come while the phone or the queue is busy go through ReadQueue: the same call cost as Risk 9, and
+  a phone-voice reading sent directly isn't waited for, so the TTS gap stays open. Rejected.
+- A route check at CodexSpeech's dequeue (`next()`) that hands a reading back to ReadQueue when the watch wins: keeps
+  one call for overlapping replies, but adds a hook, a hand-back and new call-closing cases to CodexSpeech's threaded
+  code. It's the follow-up if Risk 9 is noticeable.
 - Quiet fallback ends at once for every voice: a cold phone TTS keeps only the last text (round 1 F3). Rejected.
 - Quiet fallback through phone TTS for ChatGPT readings too: swaps ChatGPT's voice for the phone's. Rejected.
 - Clearing the saved pick when its device disconnects: breaks "reconnects → used again". Rejected.
@@ -161,14 +175,15 @@ that is away).
 2. **Android side of the order.** `AudioRoute.java`: `headsetNow` (private), `target`, `androidNow`, `autoNow`, each with
    a one-line comment pointing at this plan. No change to `use`/`want`/`reconcile`.
 3. **Speaking in the order.** `ReadQueue.java`: `speak(text, chatgpt)` delegates to new `speak(text, chatgpt, quiet)`;
-   `Item.quiet`; `Out.watchWins()`, `Out.phoneBusy()`, `Out.here(String)`; the checks at start and after find, and the
-   quiet phone path as above; class comment covers Auto's step. `WatchVoice.java`: `speak(c, clean, quiet)`; `Phone`
+   `Item.quiet`; `Out.watchWins()`, `Out.phoneBusy()`, `Out.here(String)`; `WAIT_MS`; `start(r)` (called by `pump`
+   after it arms the cap, again after a wait, and when the find's answer changed) and the quiet phone path as above;
+   class comment covers every reading in the github build and Auto's step. `WatchVoice.java`: `speak(c, clean, quiet)`; `Phone`
    implements the three methods (`watchWins` = `KEY.equals(AudioRoute.target(app))`, `phoneBusy` =
    `Voice.phoneSpeaking()`, `here` = `SpeechPause.begin(app); Voice.here(app, text)`); remove `chosen()` (its only
    caller is `Voice.speak`). `Voice.java`: `here` becomes package-private; new `phoneSpeaking()` (`isSpeaking()` minus
-   `WatchVoice.active()`, which `isSpeaking()` then reuses); `speak` routes as above. `ReadQueueTest.java`: the Fake
-   gets `watchWins`/`phoneBusy` fields (default true/false, so existing tests are unchanged) and logs `here`, plus the
-   new tests.
+   `WatchVoice.active()`, which `isSpeaking()` then reuses); `speak` routes as above (link → ReadQueue, else `here`).
+   `ReadQueueTest.java`: the Fake gets `watchWins`/`phoneBusy` fields (default true/false, so existing tests are
+   unchanged) and logs `here`, plus the new tests.
 4. **Showing it.** `SetupActivity.java` (audio device section: label and note always, segments with two or more choices,
    the Auto line, the 5-s refresh and its `onPause` removal); `res/values/strings.xml`: new `setup_audio_device_now`
    ("Auto is using %1$s now."), `setup_audio_device_info_watch`; reword `setup_audio_device_info` (rule without watch).
@@ -180,13 +195,14 @@ that is away).
 ## Test plan
 | Done-when | Proof |
 |---|---|
-| 1. Auto: buds → buds; off → watch; unreachable → speaker; not stale | **Unit** `AudioRouteTest`. `pick("", false, true, true)` = "" (headset wins over watch); `pick("", false, false, true)` = "watch"; `pick("", false, false, false)` = "" (speaker / F-Droid). `headset()` is true for the 7 media types and false for BLUETOOTH_SCO, BUILTIN_SPEAKER, BUILTIN_EARPIECE, BUILTIN_SPEAKER_SAFE, TELEPHONY, REMOTE_SUBMIX. `headsetIn`: routed [SPEAKER] with connected [SPEAKER, SCO, A2DP] → NONE (Android's answer wins); routed [A2DP] with connected [A2DP, A2DP] → 0 (the routed one, not the first enumerated); routed null with connected [SPEAKER, SCO] → NONE (call-only link); routed empty with connected [SPEAKER, A2DP] → UNNAMED. **Unit** `ReadQueueTest`. Quiet, phone voice, no node → `[find, phone a]`, no NOTICE, b's find waits for a's done. Quiet, ChatGPT voice, no node → `[find, here a]` and b's find starts at once. Quiet + refused → stopProducers, then the quiet phone path. Quiet + node → plays on the watch. A quiet fallback, then a picked one with no node → NOTICE still said. *Fresh at start:* a plays on the watch, b queued, `watchWins` turns false → after `played`, b goes `phone b` with no find. *Fresh after find:* `watchWins` turns false while a's find is pending, find returns "w" → no open, `phone a`. *Reverse:* quiet a with `phoneBusy` true → `here a` / `phone a`, no find; picked a with `phoneBusy` true → find (012 unchanged). **Device** (Verifier with Nicholas, github build): Auto, Buds2 on → a reply heard in the buds. Buds in case → next reply on the watch, no notice. Watch Bluetooth off → next reply on the speaker, no notice, delay to speech noted (Risk 1). Two replies in a row while the buds connect → the second in the buds. Buds2 on with "Media audio" off in Bluetooth settings → reply on the watch (call-only link ignored). |
+| 1. Auto: buds → buds; off → watch; unreachable → speaker; not stale | **Unit** `AudioRouteTest`. `pick("", false, true, true)` = "" (headset wins over watch); `pick("", false, false, true)` = "watch"; `pick("", false, false, false)` = "" (speaker / F-Droid). `headset()` is true for the 7 media types and false for BLUETOOTH_SCO, BUILTIN_SPEAKER, BUILTIN_EARPIECE, BUILTIN_SPEAKER_SAFE, TELEPHONY, REMOTE_SUBMIX. `headsetIn`: routed [SPEAKER] with connected [SPEAKER, SCO, A2DP] → NONE (Android's answer wins); routed [A2DP] with connected [A2DP, A2DP] → 0 (the routed one, not the first enumerated); routed null with connected [SPEAKER, SCO] → NONE (call-only link); routed empty with connected [SPEAKER, A2DP] → UNNAMED. **Unit** `ReadQueueTest`. Quiet, phone voice, no node → `[find, phone a]`, no NOTICE, b's find waits for a's done. Quiet, ChatGPT voice, no node → `[find, here a]`, and a ends at once (with `phoneBusy` false in the fake, b's find starts). Quiet + refused → stopProducers, then the quiet phone path. Quiet + node → plays on the watch. A quiet fallback, then a picked one with no node → NOTICE still said. *Fresh at start:* a plays on the watch, b queued, `watchWins` turns false → after `played`, b goes `phone b` with no find. *Fresh after find:* `watchWins` turns false while a's find is pending, find returns "w" → no open, `phone a`. *Phone busy, route changed before b (round 2 F1):* quiet ChatGPT a with `watchWins` false → `here a`, a ends; `phoneBusy` true, `watchWins` true, then quiet b → nothing logged; run the wait → still nothing; `phoneBusy` false, run the wait → `find`, "w" → `open w`, `chatgpt b`. The log has `here a` once and no `here b`: a reached the phone queue once and b never did. *Phone busy, route changed after b was submitted:* the same, but `watchWins` is still false when b comes and turns true during the wait → the same log. *Phone busy, still the phone's:* `watchWins` stays false → after the wait `here b`, no find. *Busy after find:* quiet a, find pending, `phoneBusy` turns true, find returns "w" → no open; `phoneBusy` false, run the wait → a second `find`, "w" → `open w`. *Picked:* picked a with `phoneBusy` true → find at once (012 unchanged). **Device** (Verifier with Nicholas, github build): Auto, Buds2 on → a reply heard in the buds. Buds in case → next reply on the watch, no notice. Watch Bluetooth off → next reply on the speaker, no notice, delay to speech noted (Risk 1). Two replies in a row while the buds connect → the second in the buds. ChatGPT voice, buds on: a long reply, then a second one while it plays; take the buds out during the first → the first finishes on the speaker (Risk 6), the second plays on the watch after it, not on the speaker. Buds2 on with "Media audio" off in Bluetooth settings → reply on the watch (call-only link ignored). |
 | 2. Picked gone → order, no silence; back → used | **Unit**: `pick("7:LS2 FreeCom", false, true, true)` = ""; `pick("7:LS2 FreeCom", false, false, true)` = "watch"; `pick("7:LS2 FreeCom", true, true, true)` = the key (a pick beats a headset); `pick("watch", true, true, true)` = "watch"; `pick("watch", false, false, false)` = "" (stale "watch" in a build without the link). The "fresh at start" ReadQueue test covers a pick reconnecting while a reading waits. **Device**: pick the FreeCom (or Buds2) in Settings. Turn it off → reply on the other headset / watch / speaker by the order, and Settings says "… isn't connected: Auto until it is. Auto is using <X> now.". Turn it on → next reply on it, its segment highlighted. While it's off, `buddy_settings` read's allowed list must not include it (Risk 2). |
 | 3. Shows what Auto uses; F-Droid minus Watch; CI; order tests | **Device**: the Settings note shows "Auto is using <X> now." for each step above, and `buddy_settings` read shows `now: …`. Leave the voice page open with Auto and no headset, turn the watch's Bluetooth off, then on → the note goes to Speaker and back to Watch within ~10 s, with no headset change. **F-Droid**: no link → `pick(…, watch=false)` never returns "watch" (unit). The rule text without the watch, and the label + note shown with only Auto (API 30), are checked by code review: there is no API 30 device or emulator here. `assembleFdroidRelease` in CI compiles it. **CI**: `./gradlew testGithubDebugUnitTest assembleGithubRelease assembleFdroidRelease :wear:assembleRelease` (`build.yml:63`) green. No Android SDK on the phone: CI is the build and test run. |
 
 001/012 regressions to re-check on device: a picked Speaker/Phone still applies (call mode) and cleans up after;
 Watch picked still plays on the watch and gives the notice when it can't; live voice unchanged; the voice bar chip
-unchanged.
+unchanged; picking a device in Settings still plays the sample on it (in the github build it now goes through
+ReadQueue too).
 
 ## Risks
 1. **Delay in Auto's watch step with no watch around.** Each reading waits for `find` before the phone speaks. With the
@@ -209,13 +225,22 @@ unchanged.
    name. The order itself is right. Nicholas's phone is API 33+.
 6. **Mid-reading changes.** A picked device that leaves mid-reading: the 300-ms poll drops it, and Android's routing
    finishes the reading on a headset or the speaker (no silence). The watch step applies only from the next reading.
-   Readings lined up behind a long watch reading wait for it, even if a headset connects meanwhile (order over speed).
-7. **`phoneBusy` gap.** TTS reports speaking only once audio starts, so a quiet reading could reach the watch in the
-   short gap while the phone voice detects a language. That needs a reading that is not waited for (ChatGPT's voice
-   failing over to the phone TTS) and a watch that appears in that gap. Accepted.
+   Readings lined up behind a long reading (watch or phone) wait for it, even if a headset connects meanwhile (order
+   over speed). If a phone reading runs past the 11-min cap, the reading waiting behind it is dropped, as a stuck one
+   is today.
+7. **`phoneBusy` gap.** TTS reports speaking only once audio starts. When ChatGPT's voice fails, `fail()` hands its text
+   to the phone TTS, which isn't waited for, so a quiet reading could reach the watch in the short gap while that
+   voice starts and detects a language. The re-check after the find narrows the gap. It needs that failure and a
+   reachable watch at that moment. Accepted.
 8. **Profile flapping** (research): a headset whose communication type changes (SCO ↔ LE) changes its key, so a pick
    can look away for a moment. Auto then plays on the same headset through Android anyway (output), and the pick
    returns on the next match.
+9. **Overlapping ChatGPT readings no longer share one call** (github build). Today a reply that comes while one is
+   read joins the open ChatGPT voice call. Now it waits until that call is done and closed, then opens its own, so
+   there's a pause of the voice's connect time between them. It's the price of choosing each reading's device when it
+   starts (round 2 F1). The phone voice has no such cost: its next reading starts on the done callback. The Verifier
+   notes the pause in the two-replies device check. If it's noticeable, the follow-up is the dequeue check under
+   Alternatives.
 
 ## Open questions
 None blocking. (Risk 4, Auto also taking the headset's mic, is for Nicholas after he tries it; the plan doesn't need

@@ -93,3 +93,15 @@
   chip stays as it is and the memo goes. The label and note show even when Auto is the only choice (F-Droid API 30);
   the segments still need two or more.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - In the github build every reading goes through ReadQueue; a quiet reading waits while the phone speaks, then decides (replaces the `phoneBusy` part of the entry above)
+- Options: a quiet reading follows on the phone while the phone is busy, and headset readings skip ReadQueue (round 1);
+  a route check at CodexSpeech's dequeue that hands a reading back to ReadQueue; every reading through ReadQueue, and a
+  quiet one waits (re-asked every 300 ms with `out.after`) until the phone is quiet, then decides by the order.
+- Choice: the last (plan review round 2 F1). A reading queued in CodexSpeech's or the TTS queue keeps a route that can
+  be gone by its turn, for example buds taken out while the reply before it plays. When nothing reaches the phone while
+  it is busy, there is no stale queue there. It needs no new CodexSpeech API, and all the rules stay in the unit-tested
+  ReadQueue. Phone-voice readings are now always waited for. F-Droid (no link) is unchanged: there, Android's routing
+  when the voice starts is already the order. Cost: overlapping ChatGPT readings each open their own call (plan
+  Risk 9). The dequeue check is the follow-up if that pause is noticeable.
+- By: Planner (claude-opus-5-5)
