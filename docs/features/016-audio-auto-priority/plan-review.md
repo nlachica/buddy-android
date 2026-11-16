@@ -16,3 +16,43 @@ F5 [minor] The live-voice chip would announce a Watch route that live voice neve
 F6 [minor] The new Auto status remains hidden on F-Droid API 30 - `AudioRoute.java:35-44` returns only Auto on API 30 without the Watch link. `SetupActivity.java:615` hides the entire device row when that is the only choice, and `VoiceBar.java:168` hides the chip. The plan adds status inside these existing surfaces without changing their visibility rules, despite explicitly supporting API 30 (`plan.md:60-61`) and promising the same status without Watch on F-Droid. -> Show the read-only Auto status even when there is no device to select; the redundant selector can remain hidden. Add an API 30/no-link display check.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - A reading now decides watch-or-phone when it becomes current and again when its find returns
+(`Out.watchWins()`, which re-runs `AudioRoute.target`). A queued or pending reading therefore goes to a headset, or to
+a pick that has reconnected, if one is there by then. While the queue is busy, new readings line up behind it
+(`Voice.speak`), so order holds across the switch. Reverse transition (phone still starting or speaking): an Auto
+(quiet) reading goes to the watch only when the phone isn't speaking (`Out.phoneBusy()`), otherwise it follows on the
+phone. Phone-voice fallbacks are waited for anyway (F3). A picked Watch ignores `phoneBusy`. New tests: a queued reading
+with a headset arriving while the first plays on the watch; a pending find with a headset arriving; a quiet reading
+while the phone is busy; a picked Watch while the phone is busy.
+
+F2: accepted - Detection and label now follow one rule. On API 33+ Android's own answer
+(`getAudioDevicesForAttributes(USAGE_ASSISTANT)`) wins, even when it names only the speaker. `getDevices` is used only
+when there is no answer (API 30-32, or an empty list), and then the label is the generic "Headset", because Buddy can't
+see which one Android uses. `BLUETOOTH_SCO` is no longer a headset type: a call-only (HFP) link isn't a media output, so
+Auto treats it as not connected (watch, then speaker). Picking it (001) still routes there through call mode. This also
+fixes a case the plan missed: the Galaxy Watch's own call link is listed as SCO and would have blocked the watch step.
+New pure `AudioRoute.headsetIn(routed, connected)`, unit-tested for: routed speaker with SCO listed → none; two
+headsets, the active one second in enumeration → the routed one; no answer and SCO only → none; no answer and A2DP →
+an unnamed headset. Device check added: Buds2 with "Media audio" off in Bluetooth settings → Auto uses the watch.
+
+F3: accepted - A quiet fallback in the phone's voice now reuses ReadQueue's waitable path (`out.tts(text, null, done)`
+→ `Voice.routed`, one request at a time), without the notice. Only ChatGPT-voice readings go to `Out.here`, ending at
+once. CodexSpeech's queue keeps them in order and its `fail()` joins the phone fallbacks. ChatGPT's voice is kept. New
+test: two quiet phone-voice fallbacks; the second isn't handed over until the first's done; both arrive, in order.
+
+F4: accepted - While the Auto note is on screen, Setup asks `autoNow` again every 5 s (posted in render, removed in
+onPause, restarted by onResume's render). A result is applied only for the newest ask and only while the note is
+attached. The 5-s display memo is dropped: it existed only for the chip (F5). Device check added: page left open, watch
+Bluetooth off then on, no headset change → the note follows within ~10 s.
+
+F5: accepted - The voice bar chip is out of this feature and stays as it is today (the pick's label, or "Auto"). The bar
+is a dictation/live-voice surface. Auto's watch step is read aloud only, and Auto's mic is Android's default (Risk 4),
+so naming an output there would mislead either way. The done-when asks for the setting, and Setup plus `buddy_settings`
+cover it. This drops the chip width change and the `audio_auto_now` string.
+
+F6: accepted - Setup shows the Audio device label and the Auto note whenever the voice page is shown. The segments
+still need two or more choices. Proof: code review plus CI's F-Droid build. There is no API 30 device or emulator here,
+and the test plan says so.

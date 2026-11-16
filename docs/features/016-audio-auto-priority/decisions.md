@@ -61,3 +61,35 @@
 - Choice: fixed. It's a brief non-goal, and research found no such list on stock Android (the platform orders by device
   class and then recency).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - A headset means a media output, and Android's API 33 answer wins (replaces the detection entry above)
+- Options: any connected headset type, SCO included, with the `getDevices` list allowed to override Android's answer
+  (round 0); Android's `getAudioDevicesForAttributes(USAGE_ASSISTANT)` answer final on API 33+, `getDevices` only
+  without it, SCO not a headset.
+- Choice: the second (plan review round 1 F2). A call-only (HFP/SCO) link gets no media in normal mode, which is where
+  Auto stays. The Galaxy Watch's own call link is SCO and would have blocked the watch step. Android's answer names the
+  output it really uses. Without an answer (API 30-32), the label is the generic "Headset". Pure
+  `headsetIn(routed, connected)` holds the rule and is unit-tested. A call-only headset can still be picked (001).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Each reading decides watch-or-phone when it starts and after its find; quiet phone fallbacks keep the voice and are waited when they can be (replaces the "quiet item" entry above)
+- Options: decide once in `Voice.speak` and end quiet fallbacks at once (round 0); re-check in ReadQueue at start and
+  after find, line new readings up behind a busy queue, keep a quiet reading on the phone while the phone speaks, wait
+  for phone-voice fallbacks.
+- Choice: the second (round 1 F1, F3). Submission-time answers go stale while a reading waits or a find runs. Lining
+  up keeps order across a switch. `phoneBusy` stops two voices at once when a watch appears while the phone still
+  speaks (a picked Watch ignores it). Phone-voice fallbacks use the waitable `Voice.routed`, so a cold TTS can't drop
+  one. ChatGPT-voice fallbacks go to CodexSpeech's own queue (no done callback; it keeps order and joins fallbacks), so
+  the voice stays ChatGPT's. Two new `Out` methods (`watchWins`, `phoneBusy`) keep the rule inside the tested
+  ReadQueue.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Auto's status shows in Setup (always, refreshed every 5 s while on screen) and the settings read; not on the voice bar (replaces the "showing what Auto uses" entry above)
+- Options: Setup + voice bar chip + read with a 5-s display memo (round 0); Setup + read only, Setup re-asking every 5 s
+  while visible; a Wear capability listener in the link.
+- Choice: Setup + read, with a 5-s re-ask (round 1 F4-F6). The watch isn't an Android device, so no callback re-renders
+  Setup when it comes or goes. A 5-s re-ask while the page is resumed is the smallest fix, and a listener would be new
+  link API for display only. The voice bar is dictation and live voice, where Auto's watch step never applies, so the
+  chip stays as it is and the memo goes. The label and note show even when Auto is the only choice (F-Droid API 30);
+  the segments still need two or more.
+- By: Planner (claude-opus-5-5)
