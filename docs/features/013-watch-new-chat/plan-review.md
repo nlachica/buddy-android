@@ -21,3 +21,13 @@ stays. Changes: plan Design 2, Step 4 (`Talk.java`: field, `begin` parameter, no
 new device row in the Test plan for done-when 2 (reopen from the notification during a failed first send: no Call,
 previous default kept; retry after recovery: exactly one new chat, its reply on that screen), a code-walk item, one
 Risk (process death leaves the screen fresh until words are heard, which is safe), and a decision in `decisions.md`.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+Round 1 F1 is resolved by the planned `Talk.fresh` field, propagation through `begin` and the notification intent, and clearing at HEARD (`docs/features/013-watch-new-chat/plan.md:33-40,106-111`). The creation checks, default settings, refused-send cleanup, stable id on retries, and existing-chat paths agree with the code. No blocker or major finding remains.
+
+F2 [minor] Notification regression test clears the screen it then tries to retry from - The new device row says to reopen the pending talk screen, launch from the app list to check the previous default, then go "Back to the reopened screen" to retry (`docs/features/013-watch-new-chat/plan.md:124`). `ChatsActivity` is `singleTask` (`wear/src/main/AndroidManifest.xml:38-41`), and its relaunch explicitly clears the talk screens above it before routing to the default (`wear/src/main/java/app/buddy/assistant/wear/ChatsActivity.java:31-35,64-88`; `TalkActivity.java:152-155`). Back therefore cannot recover that pending screen in the normal existing task. -> Split this into two trials: one checks that the failed first send preserves the previous default; the other reopens the notification, checks Call is hidden, restores connectivity and retries on that same screen without an intervening app-list launch. No implementation change is needed.
+
+Review scope: source and plan inspection only; CI and device behavior remain for implementation and verification.
+
+VERDICT: APPROVE
