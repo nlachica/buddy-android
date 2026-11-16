@@ -74,8 +74,13 @@ public class ReadAloud extends WearableListenerService {
         instance = this;
         NotificationManager nm = getSystemService(NotificationManager.class);
         nm.createNotificationChannel(new NotificationChannel(CHANNEL, getString(R.string.read_channel), NotificationManager.IMPORTANCE_LOW));
-        startForeground(3, new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ms_mic)
-                .setContentText(getString(R.string.read_notif)).setOngoing(true).build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        try {
+            startForeground(3, new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ms_mic)
+                    .setContentText(getString(R.string.read_notif)).setOngoing(true).build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK);
+        } catch (RuntimeException e) { // Android may refuse the promotion after accepting the start: nothing played, the phone reads it
+            finish(NOT_PLAYED);
+            return START_NOT_STICKY;
+        }
         if (wake == null) {
             wake = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "buddy:read");
             wake.setReferenceCounted(false);
@@ -86,7 +91,7 @@ public class ReadAloud extends WearableListenerService {
             down();
         } else if (busy()) { // the state may have changed since the channel came
             finish(NOT_PLAYED);
-        } else {
+        } else if (speaker == null) { // a second start command for the same reading finds its player already made
             final Speaker[] me = new Speaker[1];
             final Speaker sp = me[0] = new Speaker(false, "read " + ch.getPath().substring(PATH.length()), new Speaker.Listener() {
                 @Override
@@ -103,7 +108,10 @@ public class ReadAloud extends WearableListenerService {
             Wearable.getChannelClient(this).getInputStream(ch)
                     .addOnSuccessListener(in -> {
                         if (speaker == sp) sp.play(in);
-                        else sp.stop("replaced");
+                        else {
+                            sp.stop("replaced");
+                            sp.play(in); // stopped: play() only closes the late stream
+                        }
                     })
                     .addOnFailureListener(e -> {
                         if (speaker == sp) finish(NOT_PLAYED);
