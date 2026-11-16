@@ -719,6 +719,62 @@ final class SettingsTool {
         };
     }
 
+    /** The stored approvals mode as the tool names it: "" is ask (an empty value means "delete" in change()). */
+    static String approvalsChoice(String stored) {
+        return "".equals(stored) ? "ask" : stored;
+    }
+
+    /**
+     * A chat's approvals mode (Session.approvals, the screen's Approvals sheet): ask, routine or strict. get/set use the
+     * stored value ("", "routine", "strict"); get is null when the chat is gone. refusal: why it can't be set (null: it can).
+     */
+    static Scalar approvals(String chat, String title, String refusal, Supplier<String> get, Consumer<String> set) {
+        return new Scalar("chat/" + chat + "/approvals", () -> {
+            String s = get.get();
+            return s == null ? null : approvalsChoice(s);
+        }, v -> set.accept(v.equals("ask") ? "" : v), " It applies from the chat's next step.", "ask", "routine", "strict") {
+            @Override
+            String allowed() {
+                return "ask (Ask), routine (Routine allowed), strict (Always ask)";
+            }
+
+            @Override
+            String read() {
+                return line() + (refusal == null ? "" : "\n" + refusal);
+            }
+
+            // the effects follow the chat_approvals_*_info strings
+            @Override
+            String[] card(String snapshot, String value) {
+                if (snapshot == null) throw new IllegalStateException("that chat is gone");
+                String t = CONTROL.matcher(title).replaceAll(" ").trim();
+                if (t.length() > 60) t = t.substring(0, 60) + "…";
+                return new String[]{snapshot + " (" + label(snapshot) + ")" + (t.isEmpty() ? "" : " in chat “" + t + "”"),
+                        value + " (" + label(value) + "): " + effect(value)};
+            }
+        }.ready(v -> {
+            if (refusal != null) throw new IllegalArgumentException(refusal);
+        });
+    }
+
+    private static String label(String choice) {
+        return choice.equals("ask") ? "Ask" : choice.equals("routine") ? "Routine allowed" : choice.equals("strict") ? "Always ask" : "?";
+    }
+
+    private static String effect(String choice) {
+        switch (choice) {
+            case "routine":
+                return "until it's changed, routine steps go ahead in every app without a card (sending a message, or a step the "
+                        + "reviewer would ask about); paying, buying, deleting, installing, passwords and security settings still "
+                        + "ask, and so does everything in banking and payment apps, Settings and app stores";
+            case "strict":
+                return "also in apps set to Trust, Buddy asks before sending, posting, buying or deleting, and the chat's "
+                        + "Allowed without asking list doesn't apply";
+            default:
+                return "each app follows its App permissions setting, and the chat's Allowed without asking list applies";
+        }
+    }
+
     /** A chat's scheduled task, as Schedules.Plan's JSON; "" removes it. */
     static Setting schedule(BuddyService svc, String id) {
         return new Setting("chat/" + id + "/schedule", "a schedule as JSON, or \"\" to remove it") {
