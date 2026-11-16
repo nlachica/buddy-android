@@ -12,3 +12,30 @@ F3 [major] Finding the device cause is optional rather than part of completion -
 F4 [minor] The named CI unit-test task is incorrect - `plan.md:103` names CI `testGithubReleaseUnitTest`, but `.github/workflows/build.yml:63` runs `testGithubDebugUnitTest`. Tests in the common test source directory should still run, so this does not require changing the workflow. -> Name the actual CI task and record its result in verification.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - The check now counts only Android's installer: a window whose package contains `packageinstaller`
+(static `Updates.installerPkg`, same rule as `BuddyService.installerInFront`), read through a new
+`Tools.installerShown()` over `svc.getWindows()`. Play Store, Play Protect, the chooser and other system windows no
+longer count. `installerOnScreen()`/`wait_for_install` stay untouched. Unit tests add true cases (Google and Samsung
+installer) and false ones (`com.android.vending`, `android`, `com.android.chrome`, null). No separate "intermediate"
+outcome (YAGNI: no such screen was seen on this phone). Instead, the NOTIFIED/NOT_SHOWN texts say "couldn't see the
+installer" and add one clause: finish a Play Protect / "Open with" screen first. Old Risk "False on screen" replaced.
+
+F2: accepted - A throw on the first start leaves `openChecked`. `install` deletes the file as today, and
+`Tools.updateBuddy` catches `RuntimeException` and returns "Couldn't open Android's installer (...), so it isn't on
+screen" plus buddy.apk / Update and `MANUAL`, through `afterInstall`'s error path. No notification, since a missing
+handler isn't fixed by a PendingIntent. A throw on the retry only is caught inside `openChecked` and handled as not
+shown (wait, then the notification). The file stays, because the delete-on-throw only wraps the call and the retry's
+exception never leaves it. Tests: first-launch throw propagates (1 launch, no fallback); retry throw → `NOTIFIED`
+(2 launches, fallback once); afterInstall on an error string → string + `MANUAL`.
+
+F3: accepted - The Test plan has a required "Cause" step. Updating to the fix release still runs the old code, so that
+update is the reproduction: dumpsys before, read_screen + logcat + dumpsys right after. Raw lines and the hypothesis
+they support (BAL / cold-late installer / leftover task / Play Protect) go in `verify.md`. With no reproduction or no
+Phone commands, it says "cause unresolved". `OPENED_RETRY` alone never counts as the cause. DW1 passes only on
+`OPENED`/`OPENED_RETRY` with the installer on screen after the first call. `NOTIFIED`/`NOT_SHOWN` fail DW1. No other
+installer architecture added.
+
+F4: accepted - Test plan names `testGithubDebugUnitTest` (`build.yml:63`). DW3 records its result in `verify.md`.

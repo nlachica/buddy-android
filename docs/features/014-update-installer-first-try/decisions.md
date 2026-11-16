@@ -44,3 +44,28 @@
 - Choice: count it. With the new check window, a user touching the screen while the installer is late would
   otherwise auto-pause the chat. It's 3 lines and matches the field's documented intent.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - The launch check counts only Android's installer (supersedes "wait_for_install's predicate")
+- Options: reuse `installerOnScreen` (also Play Store, any active "android" window, system "install" titles); a strict
+  `packageinstaller`-package check; strict plus a separate "intermediate screen" outcome.
+- Choice: strict check (`Updates.installerPkg`, via `Tools.installerShown()` over `svc.getWindows()`) because the
+  loose one turns any Play Store or system window into a false "open", which is the brief's bug. No intermediate
+  outcome: no chooser or Play Protect screen was seen on this phone, so the failure texts get one clause about them
+  instead. `wait_for_install` keeps its looser predicate (there it only extends a timeout).
+- By: Planner (claude-opus-5-5), plan review round 1 F1
+
+## 2026-11-16 - A throwing start: first start fails with a manual route, retry throw falls through to the notification
+- Options: let it reach the MCP boundary ("Error: ..."); catch everywhere and notify; catch the first start's throw in
+  `Tools.updateBuddy` (file deleted, no notification), swallow a retry's throw in `openChecked`.
+- Choice: the last. A first-start throw means Android has no usable installer for the intent, so a PendingIntent of
+  the same intent won't help; the user gets buddy.apk on the release page. After a dispatched first start, a retry
+  throw is just "not shown", and the file must stay for a late installer or the notification.
+- By: Planner (claude-opus-5-5), plan review round 1 F2
+
+## 2026-11-16 - The cause is captured on the device around the update to the fix release
+- Options: optional diagnostics; infer the cause from `OPENED_RETRY`; a required logcat/dumpsys capture around a real
+  reproduction.
+- Choice: required capture. The update to the fix release still runs the old code, so it reproduces the bug for free.
+  Its evidence goes in `verify.md` as "Cause", or "cause unresolved" with the reason. The brief asks for the real
+  cause, and a retry result alone can't tell the hypotheses apart.
+- By: Planner (claude-opus-5-5), plan review round 1 F3
