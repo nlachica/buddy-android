@@ -1284,6 +1284,21 @@ final class SettingsTool {
                     return chatSwitch(svc, p[1], p[2], c -> c.background, (c, on) -> ChatHub.get(svc).setBackground(c, on), "");
                 case "schedule":
                     return schedule(svc, p[1]);
+                case "approvals": {
+                    String id = p[1];
+                    Sessions.Session c = chat(svc, id);
+                    // the screen hides this line for a notification rule's chat, so it can't be set here either
+                    String refusal = ChatHub.get(svc).approvalsEditable(c) ? null : "chat/" + id
+                            + " is a notification rule's chat: its runs follow the rule, so its approvals can't be set here";
+                    return approvals(id, c.title, refusal, () -> {
+                        Sessions.Session now = chat(svc, id);
+                        return now == null ? null : now.approvals;
+                    }, v -> {
+                        Sessions.Session now = chat(svc, id);
+                        if (now == null) throw new IllegalStateException("that chat is gone");
+                        ChatHub.get(svc).setApprovals(now, v);
+                    });
+                }
                 default:
                     return null;
             }
