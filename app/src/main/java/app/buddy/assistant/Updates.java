@@ -29,6 +29,7 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.util.function.BooleanSupplier;
 
 import static app.buddy.assistant.Ui.*;
 
@@ -124,17 +125,93 @@ public final class Updates extends BroadcastReceiver {
 
     /** Result of {@link #install}: the installer is open, or Android's "allow installs" page is (then try again). */
     static final String OPENED = "opened", NEEDS_PERMISSION = "permission";
+    /**
+     * Only from {@link #openChecked} (the agent path): the installer came up on the second start / it never showed, so
+     * a "ready to install" notification waits for the user's tap / it never showed and notifications are off.
+     */
+    static final String OPENED_RETRY = "opened_retry", NOTIFIED = "notified", NOT_SHOWN = "not_shown";
+
+    /** Android's own installer (Google's and Samsung's): the only window that counts as "the installer is open". */
+    static boolean installerPkg(CharSequence pkg) {
+        return pkg != null && pkg.toString().contains("packageinstaller");
+    }
+
+    /** Polls every 250 ms for up to waitMs until shown says true. */
+    static boolean appears(BooleanSupplier shown, long waitMs) {
+        long end = System.currentTimeMillis() + waitMs;
+        while (!shown.getAsBoolean()) {
+            long left = end - System.currentTimeMillis();
+            if (left <= 0) return false;
+            try {
+                Thread.sleep(Math.min(250, left));
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                return shown.getAsBoolean();
+            }
+        }
+        return true;
+    }
+
+    /**
+     * Starts the installer and checks it shows (within waitMs); if not, starts it once more; if still not, fallback
+     * (the notification) decides NOTIFIED or NOT_SHOWN. Without a check (shown == null, the sheet) it starts once and
+     * says OPENED. The first start's exception propagates; the retry's means "not shown", the first did dispatch.
+     */
+    static String openChecked(Runnable launch, BooleanSupplier shown, BooleanSupplier fallback, long waitMs) {
+        launch.run();
+        if (shown == null || appears(shown, waitMs)) return OPENED;
+        try {
+            launch.run();
+        } catch (RuntimeException ignored) {
+            // the first start went out; carry on as "not shown"
+        }
+        if (appears(shown, waitMs)) return OPENED_RETRY;
+        return fallback.getAsBoolean() ? NOTIFIED : NOT_SHOWN;
+    }
+
+    private static final String PROTECT = " If a Play Protect or \"Open with\" screen is showing instead, the user finishes "
+            + "that first, then taps Update.";
+
+    /** What update_buddy tells the agent after {@link #install}; anything but the cases below is an error. */
+    static String afterInstall(String res, String version) {
+        String done = "Tell the user now, in one line, to tap Update (only they can): Buddy restarts once it's installed, "
+                + "which ends this task, and their chats stay. Then stop; don't call wait_for_install.";
+        switch (res) {
+            case OPENED:
+                return "The installer is open with Buddy " + version + ". " + done;
+            case OPENED_RETRY:
+                return "The installer is open with Buddy " + version + " (it came up on Buddy's second try). " + done;
+            case NOTIFIED:
+                return "Downloaded Buddy " + version + ", but Buddy couldn't see Android's installer on screen. A "
+                        + "notification \"Buddy " + version + " is ready to install\" is waiting: ask the user to tap it, "
+                        + "then tap Update (only they can)." + PROTECT + " Buddy restarts once it's installed, which ends "
+                        + "this task, and their chats stay. Then stop; don't call wait_for_install.";
+            case NOT_SHOWN:
+                return "Downloaded Buddy " + version + ", but Buddy couldn't see Android's installer on screen, and "
+                        + "notifications are off, so there is nothing to tap. Ask the user to open the Buddy app, then "
+                        + "call update_buddy with install=true again." + PROTECT + " " + MANUAL;
+            case NEEDS_PERMISSION:
+                return "Downloaded Buddy " + version + ", but Buddy isn't allowed to install apps yet. Android's settings page "
+                        + "for that is open now: ask the user to turn on 'Allow from this source' for Buddy, then call "
+                        + "update_buddy with install=true again.";
+            default:
+                return res + " " + MANUAL;
+        }
+    }
 
     /**
      * Downloads the release's buddy.apk, checks it's a newer Buddy, and opens Android's installer (network: off the
      * main thread). Returns OPENED, NEEDS_PERMISSION, or what went wrong (in English, for the agent).
      */
-    static String install(Context c, Release r) {
-        return install(c, r, false);
+    static String install(Context c, Release r, BooleanSupplier shown) {
+        return install(c, r, false, shown);
     }
 
-    /** {@link #install(Context, Release)}; with user, what went wrong is in the user's language (for the sheet). */
-    private static String install(Context c, Release r, boolean user) {
+    /**
+     * {@link #install(Context, Release, BooleanSupplier)}; shown says whether Android's installer is on screen (null:
+     * don't check). With user, what went wrong is in the user's language (for the sheet).
+     */
+    private static String install(Context c, Release r, boolean user, BooleanSupplier shown) {
         if (r.apkUrl == null) return user ? c.getString(R.string.update_error_no_apk) : "The release has no buddy.apk yet.";
         File out = null;
         try {
@@ -164,17 +241,50 @@ public final class Updates extends BroadcastReceiver {
                     Uri.parse("package:" + c.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return NEEDS_PERMISSION;
         }
-        boolean opened = false;
+        final File apk = out;
+        String res = null;
         try {
-            c.startActivity(new Intent(Intent.ACTION_VIEW)
-                    .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
-            opened = true;
+            res = openChecked(() -> c.startActivity(installer(apk)), shown, () -> notifyInstall(c, r.version, apk), 8000);
         } finally {
-            if (!opened) out.delete(); // a file the installer will open later is left as it is
+            if (res == null) out.delete(); // the first start threw; a file the installer or notification may open later stays
         }
-        cancel(c);
-        return OPENED;
+        if (OPENED.equals(res) || OPENED_RETRY.equals(res)) cancel(c);
+        return res;
+    }
+
+    private static Intent installer(File apk) {
+        return new Intent(Intent.ACTION_VIEW)
+                .setDataAndType(FilesProvider.apkUri(apk), "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION);
+    }
+
+    /** "Ready to install", whose tap starts the installer (a user's tap may start an activity from anywhere). False if it can't be shown. */
+    private static boolean notifyInstall(Context c, String version, File apk) {
+        NotificationManager nm = channel(c);
+        if (!nm.areNotificationsEnabled() || nm.getNotificationChannel(CHANNEL).getImportance() == NotificationManager.IMPORTANCE_NONE) {
+            return false;
+        }
+        Notification n = new Notification.Builder(c, CHANNEL)
+                .setSmallIcon(R.drawable.ic_launcher_monochrome)
+                .setContentTitle(c.getString(R.string.update_ready_title, version))
+                .setContentText(c.getString(R.string.update_ready_text))
+                .setContentIntent(PendingIntent.getActivity(c, 32, installer(apk),
+                        PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT))
+                .setAutoCancel(true)
+                .build();
+        try {
+            nm.notify(ID, n);
+            return true;
+        } catch (SecurityException e) {
+            return false;
+        }
+    }
+
+    private static NotificationManager channel(Context c) {
+        NotificationManager nm = c.getSystemService(NotificationManager.class);
+        nm.createNotificationChannel(new NotificationChannel(CHANNEL, c.getString(R.string.update_channel_name),
+                NotificationManager.IMPORTANCE_DEFAULT));
+        return nm;
     }
 
     // ------------------------------------------------------------ daily check
@@ -199,9 +309,7 @@ public final class Updates extends BroadcastReceiver {
     }
 
     private static void notify(Context c, Release r) {
-        NotificationManager nm = c.getSystemService(NotificationManager.class);
-        nm.createNotificationChannel(new NotificationChannel(CHANNEL, c.getString(R.string.update_channel_name),
-                NotificationManager.IMPORTANCE_DEFAULT));
+        NotificationManager nm = channel(c);
         PendingIntent open = PendingIntent.getActivity(c, 30,
                 new Intent(c, MainActivity.class).putExtra("update", true).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
@@ -303,7 +411,7 @@ public final class Updates extends BroadcastReceiver {
             update.setEnabled(false);
             update.setText(R.string.update_downloading);
             new Thread(() -> {
-                String res = install(a, r, true);
+                String res = install(a, r, true, null);
                 main.post(() -> {
                     if (OPENED.equals(res)) {
                         d.dismiss();
