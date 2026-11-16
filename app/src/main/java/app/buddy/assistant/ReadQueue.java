@@ -4,14 +4,16 @@ import java.util.ArrayDeque;
 import java.util.function.Consumer;
 
 /**
- * The rules for reading replies aloud when the audio device is Watch (docs/features/012-watch-audio-device/plan.md).
- * One reading is in flight at a time; the next starts when it has settled. A reading goes to the watch when one can
- * play it, and otherwise (nothing found, or the watch refused it) the phone reads it, after a spoken notice once per
- * stretch of fallbacks. Android is behind {@link Out}, so this is unit-tested. Main thread only; every callback is
+ * The rules for reading replies aloud in the github build (docs/features/012-watch-audio-device/plan.md,
+ * 016-audio-auto-priority/plan.md). One reading is in flight at a time; the next starts when it has settled. A picked
+ * Watch plays a reading on the watch when one can, and otherwise (nothing found, or the watch refused it) the phone
+ * reads it, after a spoken notice once per stretch of fallbacks. A quiet reading (Watch not picked: Auto's step) decides
+ * when it starts: it waits while the phone is still speaking, goes to the watch only if the order says so and one
+ * answers, and otherwise takes the phone's own path with no notice. Android is behind {@link Out}, so this is unit-tested. Main thread only; every callback is
  * dropped unless its reading (and stream) are still the current ones.
  */
 final class ReadQueue {
-    static final long READ_MAX_MS = 11 * 60_000L;
+    static final long READ_MAX_MS = 11 * 60_000L, WAIT_MS = 300;
 
     /** One reading's audio stream to the watch. Its events never run from inside one of these calls, nor after cancel(). */
     interface Stream extends CodexSpeech.Sink {
@@ -48,17 +50,27 @@ final class ReadQueue {
 
         void after(long ms, Runnable r);
 
+        /** The order puts the watch first now (no headset, the user's pick not in effect). */
+        boolean watchWins();
+
+        /** The phone is still speaking a reading. */
+        boolean phoneBusy();
+
+        /** ChatGPT's voice on the phone (its own fallback to the phone's voice); not waited for. */
+        void here(String text);
+
         /** The sentence said before the first reading read on the phone instead. */
         String notice();
     }
 
     private static final class Item {
         final String text;
-        final boolean chatgpt;
+        final boolean chatgpt, quiet;
 
-        Item(String text, boolean chatgpt) {
+        Item(String text, boolean chatgpt, boolean quiet) {
             this.text = text;
             this.chatgpt = chatgpt;
+            this.quiet = quiet;
         }
     }
 
@@ -120,7 +132,11 @@ final class ReadQueue {
     }
 
     void speak(String text, boolean chatgpt) {
-        fifo.add(new Item(text, chatgpt));
+        speak(text, chatgpt, false);
+    }
+
+    void speak(String text, boolean chatgpt, boolean quiet) {
+        fifo.add(new Item(text, chatgpt, quiet));
         pump();
     }
 
@@ -146,9 +162,25 @@ final class ReadQueue {
             out.stopProducers(r.s);
             end(r);
         });
+        start(r);
+    }
+
+    /** Where the reading goes, decided now and again when its find returns. */
+    private void start(Reading r) {
+        if (cur != r) return;
+        final boolean q = r.item.quiet;
+        if (q && out.phoneBusy()) {
+            out.after(WAIT_MS, () -> start(r));
+            return;
+        }
+        if (q && !out.watchWins()) {
+            quiet(r);
+            return;
+        }
         out.find(node -> {
             if (cur != r) return;
-            if (node == null) phone(r);
+            if (q && (!out.watchWins() || out.phoneBusy())) start(r); // the answer changed while the find ran
+            else if (node == null) phone(r);
             else watch(r, node, r.item.chatgpt);
         });
     }
@@ -177,7 +209,21 @@ final class ReadQueue {
         }
     }
 
+    /** The phone's own path, no notice: ChatGPT's voice is not waited for, the phone's voice is. */
+    private void quiet(Reading r) {
+        if (r.item.chatgpt) {
+            out.here(r.item.text);
+            end(r);
+        } else {
+            readHere(r);
+        }
+    }
+
     private void phone(Reading r) {
+        if (r.item.quiet) {
+            quiet(r);
+            return;
+        }
         if (!noticeDue) {
             readHere(r);
             return;

@@ -58,6 +58,12 @@ public class ReadQueueTest {
         @Override public void stopProducers(ReadQueue.Stream s) { log.add("stopProducers"); }
         @Override public void after(long ms, Runnable r) { timers.add(r); }
         @Override public String notice() { return "NOTICE"; }
+        @Override public boolean watchWins() { return watchWins; }
+        @Override public boolean phoneBusy() { return phoneBusy; }
+        @Override public void here(String text) { log.add("here " + text); }
+
+        boolean watchWins = true, phoneBusy = false;
+        void runWait() { timers.get(timers.size() - 1).run(); }
 
         Consumer<String> lastFind() { return finds.get(finds.size() - 1); }
         FakeStream lastStream() { return streams.get(streams.size() - 1); }
@@ -248,5 +254,131 @@ public class ReadQueueTest {
         f.lastFind().accept("w");
         f.lastStream().ev.played();
         assertFalse(q.active());
+    }
+
+    // ---- 016: quiet readings (Watch not picked: Auto's step)
+
+    @Test
+    public void quietNoWatchReadsOnThePhoneWithNoNotice() {
+        q.speak("a", false, true);
+        q.speak("b", false, true);
+        f.lastFind().accept(null);
+        assertEquals("[find, phone a]", f.log.toString());
+        assertEquals(1, f.finds.size()); // b's find waits for a's done
+        f.lastDone().run();
+        assertEquals("find", f.log.get(f.log.size() - 1));
+    }
+
+    @Test
+    public void quietChatgptFallbackEndsAtOnce() {
+        q.speak("a", true, true);
+        q.speak("b", true, true);
+        f.lastFind().accept(null);
+        assertEquals("[find, here a, find]", f.log.toString());
+    }
+
+    @Test
+    public void quietRefusedGoesToThePhoneQuietly() {
+        q.speak("a", false, true);
+        f.lastFind().accept("w");
+        f.lastStream().ev.refused();
+        assertEquals("[find, open w, tts a, stopProducers, phone a]", f.log.toString());
+    }
+
+    @Test
+    public void quietWithAWatchPlaysOnIt() {
+        q.speak("a", false, true);
+        f.lastFind().accept("w");
+        assertEquals("[find, open w, tts a]", f.log.toString());
+    }
+
+    @Test
+    public void aQuietFallbackDoesNotUseUpTheNotice() {
+        q.speak("a", false, true);
+        f.lastFind().accept(null);
+        f.lastDone().run();
+        q.speak("b", false); // picked Watch, no node
+        f.lastFind().accept(null);
+        assertEquals("phone NOTICE", f.log.get(f.log.size() - 1));
+    }
+
+    @Test
+    public void theRouteIsDecidedWhenTheReadingStarts() {
+        q.speak("a", false, true);
+        q.speak("b", false, true);
+        f.lastFind().accept("w");
+        f.lastDone().run();
+        f.watchWins = false; // the buds came on while a played
+        f.lastStream().ev.played();
+        assertEquals("[find, open w, tts a, phone b]", f.log.toString()); // no find for b
+    }
+
+    @Test
+    public void theRouteIsDecidedAgainWhenTheFindReturns() {
+        q.speak("a", false, true);
+        f.watchWins = false;
+        f.lastFind().accept("w");
+        assertEquals("[find, phone a]", f.log.toString());
+    }
+
+    @Test
+    public void aQuietReadingWaitsWhileThePhoneSpeaks() {
+        f.watchWins = false; // the buds are in
+        q.speak("a", true, true);
+        assertEquals("[here a]", f.log.toString());
+        f.phoneBusy = true; // a's voice is still going
+        f.watchWins = true; // the buds left
+        q.speak("b", true, true);
+        assertEquals("[here a]", f.log.toString());
+        f.runWait();
+        assertEquals("[here a]", f.log.toString());
+        f.phoneBusy = false;
+        f.runWait();
+        assertEquals("[here a, find]", f.log.toString());
+        f.lastFind().accept("w");
+        assertEquals("[here a, find, open w, chatgpt b]", f.log.toString());
+    }
+
+    @Test
+    public void aQuietReadingWaitingForThePhoneFollowsARouteThatChangesDuringTheWait() {
+        f.phoneBusy = true;
+        f.watchWins = false;
+        q.speak("b", true, true);
+        f.watchWins = true;
+        f.phoneBusy = false;
+        f.runWait();
+        assertEquals("[find]", f.log.toString());
+        f.lastFind().accept("w");
+        assertEquals("[find, open w, chatgpt b]", f.log.toString());
+    }
+
+    @Test
+    public void aQuietReadingThatStaysWithThePhoneReadsThereAfterTheWait() {
+        f.phoneBusy = true;
+        f.watchWins = false;
+        q.speak("b", true, true);
+        f.phoneBusy = false;
+        f.runWait();
+        assertEquals("[here b]", f.log.toString());
+    }
+
+    @Test
+    public void thePhoneGettingBusyDuringTheFindWaitsAndAsksAgain() {
+        q.speak("a", false, true);
+        f.phoneBusy = true;
+        f.lastFind().accept("w");
+        assertEquals("[find]", f.log.toString());
+        f.phoneBusy = false;
+        f.runWait();
+        assertEquals("[find, find]", f.log.toString());
+        f.lastFind().accept("w");
+        assertEquals("[find, find, open w, tts a]", f.log.toString());
+    }
+
+    @Test
+    public void aPickedWatchIgnoresAPhoneThatIsBusy() {
+        f.phoneBusy = true;
+        q.speak("a", false);
+        assertEquals("[find]", f.log.toString());
     }
 }

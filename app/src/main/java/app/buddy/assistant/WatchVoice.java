@@ -49,14 +49,10 @@ final class WatchVoice {
         }
     }
 
-    /** Whether read aloud goes to the watch now. */
-    static boolean chosen(Context c) {
-        return KEY.equals(Prefs.audioDevice(c)) && link() != null;
-    }
-
-    static void speak(Context c, String clean) {
+    /** quiet: Watch isn't the user's pick, so it is Auto's step (016): no notice when the watch can't play it. */
+    static void speak(Context c, String clean, boolean quiet) {
         if (queue == null) queue = new ReadQueue(new Phone(c.getApplicationContext()));
-        queue.speak(clean, Voice.chatgptVoice(c));
+        queue.speak(clean, Voice.chatgptVoice(c), quiet);
     }
 
     static boolean active() {
@@ -94,6 +90,22 @@ final class WatchVoice {
         public void tts(String text, ReadQueue.Stream s, Runnable done) {
             if (s == null) SpeechPause.begin(app);
             Voice.routed(app, text, s, done);
+        }
+
+        @Override
+        public boolean watchWins() {
+            return KEY.equals(AudioRoute.target(app));
+        }
+
+        @Override
+        public boolean phoneBusy() {
+            return Voice.phoneSpeaking();
+        }
+
+        @Override
+        public void here(String text) {
+            SpeechPause.begin(app);
+            Voice.here(app, text);
         }
 
         @Override

@@ -115,7 +115,26 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         CodexRemote.removeListener(this);
         Browser.removeListener(this);
         getSystemService(AudioManager.class).unregisterAudioDeviceCallback(audioDevices);
+        if (autoNote != null) autoNote.removeCallbacks(autoTick);
         super.onPause();
+    }
+
+    // 016: the Auto note says what Auto uses now; the watch isn't an Android device, so ask again every 5 s while it shows
+    private TextView autoNote;
+    private String autoBase;
+    private int autoSeq;
+    private final Runnable autoTick = this::autoAsk;
+
+    private void autoAsk() {
+        final TextView n = autoNote;
+        if (n == null || !n.isAttachedToWindow()) return;
+        final int seq = ++autoSeq;
+        AudioRoute.autoNow(this, now -> { // only the newest ask counts, and only while the note is still on screen
+            if (seq == autoSeq && n.isAttachedToWindow()) {
+                n.setText(autoBase + " " + getString(R.string.setup_audio_device_now, now));
+            }
+        });
+        n.postDelayed(autoTick, 5000);
     }
 
     @Override
@@ -210,6 +229,10 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
 
     private void render() {
         if (isFinishing() || isDestroyed()) return;
+        // one refresh chain: cancel the old note's tick while it is still attached (removeCallbacks needs that)
+        if (autoNote != null) autoNote.removeCallbacks(autoTick);
+        autoNote = null;
+        autoSeq++;
         list.removeAllViews();
         if (page == null) {
             menu();
@@ -612,9 +635,9 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
             vc.addView(voices, topGap(8));
         }
         String[][] devices = AudioRoute.choices(this);
+        String saved = Prefs.audioDevice(this);
+        vc.addView(fieldLabel(getString(R.string.setup_audio_device), null), topGap(16));
         if (devices.length > 1) { // Android 12+ lists the devices; Watch (github build) is listed on any version
-            String saved = Prefs.audioDevice(this);
-            vc.addView(fieldLabel(getString(R.string.setup_audio_device), null), topGap(16));
             // a saved device that is away matches no segment, so Auto can be tapped to clear it
             vc.addView(segmented(this, devices, saved, false, v -> {
                 Prefs.setAudioDevice(this, v);
@@ -622,16 +645,22 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                 Voice.stopSpeaking();
                 Voice.speak(this, getString(R.string.setup_voice_sample));
             }), topGap(8));
-            boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
-            boolean watch = WatchVoice.KEY.equals(saved) && !away;
-            TextView note = text(this, away ? getString(R.string.setup_audio_device_missing, saved.substring(saved.indexOf(':') + 1))
-                    : getString(watch ? R.string.setup_audio_device_watch : R.string.setup_audio_device_info), 13, MUTED);
-            vc.addView(note, topGap(8));
-            if (watch) { // the unreachable state: no watch with the Buddy watch app answers
-                WatchVoice.link().find(this, node -> {
-                    if (node == null && note.isAttachedToWindow()) note.setText(R.string.setup_audio_device_watch_away);
-                });
-            }
+        }
+        boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
+        boolean watch = WatchVoice.KEY.equals(saved) && !away;
+        autoBase = away ? getString(R.string.setup_audio_device_missing, saved.substring(saved.indexOf(':') + 1))
+                : getString(watch ? R.string.setup_audio_device_watch : WatchVoice.link() != null
+                        ? R.string.setup_audio_device_info_watch : R.string.setup_audio_device_info);
+        TextView note = text(this, autoBase, 13, MUTED);
+        vc.addView(note, topGap(8));
+        boolean autoUsed = saved.isEmpty() || away; // a connected pick is used as picked; only Auto and a missing pick show "now"
+        autoNote = watch || !autoUsed ? null : note;
+        if (watch) { // the unreachable state: no watch with the Buddy watch app answers
+            WatchVoice.link().find(this, node -> {
+                if (node == null && note.isAttachedToWindow()) note.setText(R.string.setup_audio_device_watch_away);
+            });
+        } else if (autoUsed) {
+            note.post(autoTick);
         }
         vc.addView(fieldLabel(getString(R.string.setup_languages), Voice.languageName(Prefs.voiceLang(this))), topGap(16));
         TextView lh = text(this, getString(R.string.setup_languages_hint), 13, MUTED);

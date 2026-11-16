@@ -2,6 +2,7 @@ package app.buddy.assistant;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
@@ -9,14 +10,18 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
- * Which audio device Buddy's voice uses: Auto (Android decides) or one of the devices Android offers for calls
- * (speaker, earpiece, a Bluetooth watch or headset). While Buddy's voice is on and a device is chosen, Buddy runs as a
+ * Which audio device Buddy's voice uses: Auto or one of the devices Android offers for calls (speaker, earpiece, a
+ * Bluetooth watch or headset). Auto is the order phones use: a connected media headset (Android's own routing, the
+ * latest one), then the Galaxy Watch for read aloud, then the phone speaker (docs/features/016-audio-auto-priority). While Buddy's voice is on and a device is chosen, Buddy runs as a
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
  * and puts everything back, so no end of voice needs a hook. Android 12+ (setCommunicationDevice); below, only Auto.
  * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice).
+ * A picked device that is away is Auto until it is back.
  * All state lives on the main thread.
  */
 final class AudioRoute {
@@ -42,6 +47,88 @@ final class AudioRoute {
         }
         if (WatchVoice.link() != null) l.add(new String[]{WatchVoice.KEY, c.getString(R.string.audio_watch)});
         return l.toArray(new String[0][]);
+    }
+
+    /** Media outputs Android plays on before the phone itself. Not BLUETOOTH_SCO: a call-only link gets no media. */
+    static boolean headset(int type) {
+        switch (type) {
+            case AudioDeviceInfo.TYPE_WIRED_HEADSET:
+            case AudioDeviceInfo.TYPE_WIRED_HEADPHONES:
+            case AudioDeviceInfo.TYPE_USB_HEADSET:
+            case AudioDeviceInfo.TYPE_BLUETOOTH_A2DP:
+            case AudioDeviceInfo.TYPE_HEARING_AID:
+            case 26: // TYPE_BLE_HEADSET (API 31)
+            case 27: // TYPE_BLE_SPEAKER (API 31)
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    static final int NONE = -1, UNNAMED = -2;
+
+    /**
+     * The headset Android plays Buddy's voice on, from output types. routed: Android's own answer for Buddy's voice
+     * (API 33+), null or empty when there is none; it wins, even when it names only the speaker. Without it, any
+     * connected headset counts, but which one Android uses can't be seen. Returns the index in routed, UNNAMED, or
+     * NONE (the phone).
+     */
+    static int headsetIn(int[] routed, int[] connected) {
+        if (routed != null && routed.length > 0) {
+            for (int i = 0; i < routed.length; i++) if (headset(routed[i])) return i;
+            return NONE;
+        }
+        for (int t : connected) if (headset(t)) return UNNAMED;
+        return NONE;
+    }
+
+    /** Where Buddy's voice goes. Returns the saved key, WatchVoice.KEY, or "" (Android's own routing). */
+    static String pick(String saved, boolean savedHere, boolean headset, boolean watch) {
+        if (!saved.isEmpty() && savedHere) return saved; // a pick in effect (Watch: when this build has the link)
+        if (headset || !watch) return "";                // a headset (Android picks the latest), or no watch link
+        return WatchVoice.KEY;                           // the watch; the phone (speaker) when none answers
+    }
+
+    // 016: the label of the headset Android plays Buddy's voice on now ("Headset" when it can't be named), or null
+    private static String headsetNow(Context c) {
+        AudioManager am = c.getSystemService(AudioManager.class);
+        List<AudioDeviceInfo> r = null;
+        if (Build.VERSION.SDK_INT >= 33) {
+            r = am.getAudioDevicesForAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+        }
+        int i = headsetIn(types(r), types(java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))));
+        if (i >= 0) return label(c, r.get(i));
+        return i == UNNAMED ? c.getString(R.string.audio_headset) : null;
+    }
+
+    private static int[] types(List<AudioDeviceInfo> l) {
+        if (l == null) return null;
+        int[] t = new int[l.size()];
+        for (int i = 0; i < t.length; i++) t[i] = l.get(i).getType();
+        return t;
+    }
+
+    /** 016: where Buddy's voice goes now: the saved key, WatchVoice.KEY, or "" (Android's own routing). */
+    static String target(Context c) {
+        String saved = Prefs.audioDevice(c);
+        return pick(saved, indexOf(choices(c), saved) >= 0, headsetNow(c) != null, WatchVoice.link() != null);
+    }
+
+    /** 016: what Android's routing uses now, as a label. */
+    static String androidNow(Context c) {
+        String h = headsetNow(c);
+        return h != null ? h : c.getString(R.string.audio_speaker);
+    }
+
+    /** 016: what Auto uses right now, as a label: asks the watch when it is next in the order. */
+    static void autoNow(Context c, Consumer<String> label) {
+        WatchVoice.Link link = WatchVoice.link();
+        if (!pick("", false, headsetNow(c) != null, link != null).equals(WatchVoice.KEY)) {
+            label.accept(androidNow(c));
+            return;
+        }
+        link.find(c, node -> label.accept(node != null ? c.getString(R.string.audio_watch) : androidNow(c)));
     }
 
     /** Index of the key in choices(), or -1 when that device isn't there. */
