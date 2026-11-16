@@ -48,3 +48,24 @@ VERDICT: REVISE
 - F1: fixed. The test fixture now uses production-shaped keys (`7:FreeCom`, as `AudioRoute.key()` emits); the expected label and `audioNow` are unchanged.
 - F2: fixed. `render()` now cancels the old note's `autoTick`, clears `autoNote` and bumps `autoSeq` at its start, before `list.removeAllViews()`, while the note is still attached. The later cancel after the note was added is gone. `onPause` is unchanged. Not unit-testable (view lifecycle).
 - Run: Gradle can't start on this host (JVM "Failed to mark memory page as executable"), so the build and tests were NOT run. Left to CI / the Verifier.
+
+
+## Round 3 - Code Reviewer (gpt-6-astra)
+
+No new findings. No blocker or major finding remains open.
+
+Prior findings resolved:
+- Round 2 F1: `AudioRouteTest.settingsReadSurvivesAPickThatVanishedBetweenQueries` now uses `7:FreeCom` consistently, matching the production key shape. The expected disconnected name remains unchanged, and the test passes. CI is green at the reviewed commit.
+- Round 2 F2 / round 1 F2: `SetupActivity.render()` now removes the old note's `autoTick`, clears `autoNote`, and invalidates `autoSeq` before `list.removeAllViews()`. This fixes the attachment-order defect; the replacement Auto note starts one refresh chain, and `onPause()` removes its pending tick. Confirmed by code inspection; no Android lifecycle test was run.
+- Round 1 F1 and F3 remain fixed: `audioNow()` guards its device index, and the Auto status/refresh is restricted to Auto or an unavailable saved pick.
+
+Coverage and validation: reviewed `git diff main...HEAD` at `45757fd3c9c40bb19022f7e64d4bb361021645eb`, all changed production/test sections, and their routing, speech, watch-link and Settings lifecycle connections. The planned tests cover priority and media-type filtering, unavailable/reconnected picks, decisions at queue start and after discovery, waits for phone speech, quiet fallbacks, and picked-Watch compatibility. F-Droid keeps the no-link path and its watch-free Settings description, including the status when Auto is the only choice. No additional security, data-handling, or YAGNI findings for this single-user phone app. No soundly rejected decision was reopened.
+
+- Recompiled current main/github/watchlink sources and ran all 146 JVM tests successfully using the existing temporary harness, with outputs isolated in `/tmp/buddy-review-016-r3`. This harness uses an API-35 jar, generated resources, Wearable stubs and Android runtime shims, and omits an unrelated API-36 call only from its temporary source copy; it is not an Android build.
+- Local `./gradlew --no-daemon testGithubDebugUnitTest --offline` still fails before tasks run with "Failed to mark memory page as executable".
+- Independently checked [CI run 43819577651](https://github.com/nlachica/buddy-android/actions/runs/43819577651) against the exact reviewed HEAD: both jobs succeeded. The release-build step runs the planned GitHub unit tests and GitHub, F-Droid and Wear release builds; the Google-code exclusion and F-Droid reproducibility checks also succeeded.
+- Device checks remain with the Verifier: actual Buds/FreeCom disconnect/reconnect behavior, watch reachability and fallback delays, Settings redraw/pause behavior, and the documented ChatGPT startup/fallback risks. `verify.md` still contains no device evidence. This is code-review approval, not a claim that the hardware smoke checks passed.
+
+Only this review document was changed.
+
+VERDICT: APPROVE
