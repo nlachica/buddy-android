@@ -1205,7 +1205,7 @@ final class SettingsTool {
                         + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
                         + "page: agents and models (default agent and models, API key services' use, name and shown models, "
                         + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
-                        + "chat's allowed apps. Keys, tokens and server addresses are never shown or changed here.",
+                        + "chat's approvals (Ask, Routine allowed, Always ask) and allowed apps. Keys, tokens and server addresses are never shown or changed here.",
                 Tools.props().put("name", Tools.strProp("Optional: the setting, as listed (e.g. read_aloud)"))
                         .put("value", Tools.strProp("Optional: the new value; needs name"))));
     }
@@ -1367,14 +1367,15 @@ final class SettingsTool {
     }
 
     /** The chats section of the listing; here = the calling agent's chat id (or null) gets "(this chat)". */
-    static void chatLines(StringBuilder b, java.util.List<Sessions.Session> all, String here) {
+    static void chatLines(StringBuilder b, java.util.List<Sessions.Session> all, String here, Predicate<Sessions.Session> editable) {
         int n = 0;
         for (Sessions.Session c : all) {
             if (!c.parent.isEmpty() || n++ >= 30) continue;
             b.append("chat/").append(c.id).append(" \"").append(c.title).append("\"").append(c.id.equals(here) ? " (this chat)" : "")
                     .append(": linux_tools ").append(c.dev ? "on" : "off").append(", background ")
                     .append(c.background ? "on" : "off").append(", schedule ").append(c.schedule == null ? "none"
-                            : c.schedule.paused ? "paused" : "set");
+                            : c.schedule.paused ? "paused" : "set")
+                    .append(", approvals ").append(editable.test(c) ? approvalsChoice(c.approvals) : "n/a (notification rule's chat)");
             synchronized (c.allowed) {
                 b.append(", allowed: ").append(c.allowed.isEmpty() ? "none" : String.join(",", c.allowed));
             }
@@ -1413,8 +1414,9 @@ final class SettingsTool {
             b.append("app/").append(e.getKey()).append(" = ").append(e.getValue()).append('\n');
         }
         b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off), "
-                + "chat/<id>/schedule (JSON) and chat/<id>/allowed/<package> (on, off: apps allowed without asking):\n");
-        chatLines(b, ChatHub.get(svc).sessions.all, here);
+                + "chat/<id>/schedule (JSON), chat/<id>/approvals (ask, routine: Routine allowed, strict: Always ask) and "
+                + "chat/<id>/allowed/<package> (on, off: apps allowed without asking):\n");
+        chatLines(b, ChatHub.get(svc).sessions.all, here, ChatHub.get(svc)::approvalsEditable);
         b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
         for (Rules.Rule r : Rules.all(svc)) {
             b.append("rule/").append(r.id).append(" = ").append(r.on ? "on" : "off").append("  ").append(r.pkg).append(": ")

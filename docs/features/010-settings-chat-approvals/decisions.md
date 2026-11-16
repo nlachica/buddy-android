@@ -50,3 +50,16 @@
 - Choice: rely on `docs/GUIDE.md:204`'s fork note (agents change settings through `buddy_settings` behind a card).
   Another fork line inside upstream's paragraph is one more future sync conflict for little gain.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Listing keeps the plan's `approvals n/a` for a rule chat; plan-review F1 (minor) not adopted
+- Options: `approvals n/a (notification rule's chat)` (plan.md); `approvals <mode> (read-only: …)` (plan-review F1, a
+  minor suggestion on an APPROVE, with no Planner response and no plan change).
+- Choice: the plan as approved, per "implement the plan, don't redesign". The individual read still shows the stored
+  mode with the refusal. Switching is one line in `chatLines` plus T8 if the orchestrator wants it.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-16 - The row's snapshot is the plain choice (`ask|routine|strict`), not the stored value
+- Options: snapshot the stored value and map in `view()`; snapshot the choice.
+- Choice: the factory's getter maps `""` to `ask` (`approvalsChoice`), so `view()` stays default, `change()`'s
+  "Already" check compares `v.equals(old)`, and `card()` needs no mapping. The setter maps `ask` back to `""`.
+- By: Coder (claude-sonnet-5-5)

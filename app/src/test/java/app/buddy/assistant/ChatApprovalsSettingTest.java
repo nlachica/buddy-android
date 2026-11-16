@@ -142,4 +142,28 @@ public class ChatApprovalsSettingTest {
         assertTrue(cards.get(0), cards.get(0).contains("…”\nNew:"));
         assertFalse(cards.get(0), cards.get(0).contains("\r"));
     }
+
+    @Test
+    public void theChatListingShowsEachChatsMode() {
+        String[] modes = {"", "routine", "strict", "routine"};
+        List<Sessions.Session> all = new ArrayList<>();
+        for (int i = 0; i < modes.length; i++) {
+            Sessions.Session c = new Sessions.Session("c" + i, "claude");
+            c.approvals = modes[i];
+            all.add(c);
+        }
+        Sessions.Session sub = new Sessions.Session("sub", "claude");
+        sub.parent = "c0";
+        all.add(sub);
+        StringBuilder out = new StringBuilder();
+        SettingsTool.chatLines(out, all, null, c -> !c.id.equals("c3")); // c3 is a notification rule's chat
+        String s = out.toString();
+        String[] lines = s.split("\n");
+        assertEquals(s, 4, lines.length);
+        assertTrue(s, lines[0].contains("schedule none, approvals ask, allowed:"));
+        assertTrue(s, lines[1].contains("approvals routine,"));
+        assertTrue(s, lines[2].contains("approvals strict,"));
+        assertTrue(s, lines[3].contains("approvals n/a (notification rule's chat),"));
+        assertFalse(s, s.contains("chat/sub"));
+    }
 }
