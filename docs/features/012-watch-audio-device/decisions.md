@@ -115,3 +115,23 @@
   inside the grace window whatever order the Data Layer uses, cancellation still closes promptly and silently, and
   PcmOut (007) stays unchanged.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Coder: small choices the plan left open
+- Options / Choice (each because it is the smallest thing that satisfies the plan):
+  - `ReadStream` takes a `Clock` (for the 3-s grace, so tests drive it) and an `ended` callback (runs once when the stream
+    settles or is cancelled); `WatchVoiceLink` uses `ended` to drop the stream from its map and release the wake lock.
+    `WatchVoiceLink` posts events to the main Handler and creates it lazily (JVM tests load the class).
+  - `Pcm16k` at 16 kHz mono copies samples as they are (interpolation would delay them one sample). For other rates, feeding in
+    pieces can differ from feeding at once by one step in the last place (a double phase carried across chunks); the test
+    allows 1.
+  - `Voice` uses a lazily made main Handler (`post`), not a static one: `SettingsCoverageTest` loads `Voice` in the JVM.
+  - `Voice.dropRouted` calls `tts.stop()` only when a routed utterance is in flight (the plan said whenever the engine is
+    ready); `stopSpeaking` still stops the engine for everything else as before.
+  - `ReadQueue.stop` calls `stopProducers` only when a reading was current (nothing is producing otherwise).
+  - A reading read on the phone (fallback) uses the phone's TTS even with ChatGPT's voice chosen, as the plan's `phone` step says.
+  - Setup: the Watch note and its async "unreachable" replacement are in `SetupActivity` (`find` per render, only when Watch
+    is saved); the answer is dropped if the note is no longer attached.
+  - Watch app: `ReadAloud` uses notification id 3 (Talk 1, Call 2); if the foreground start inside `onStartCommand` finds the
+    reading already gone (hushed or replaced) it still calls `startForeground` first (the 5-s rule), then stops.
+  - README: one bullet in the Galaxy Watch section, with the `deviceidle whitelist` line from plan Risk 1.
+- By: Coder (claude-sonnet-5-5)
