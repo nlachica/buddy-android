@@ -1,6 +1,7 @@
 package app.buddy.assistant.wear;
 
 import android.app.Activity;
+import android.content.ComponentName;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
@@ -27,8 +28,8 @@ import java.nio.charset.StandardCharsets;
 public class ChatsActivity extends Activity {
     private static final long NO_ANSWER_MS = 8000;
     /**
-     * Counts launcher opens of the live task (main thread). Each one clears the talk screen above this one, which is
-     * not the user leaving it: TalkActivity compares this with its value at creation.
+     * Counts explicit starts of the live task (main thread: app list, quick talk, the chat button). Each one clears
+     * the talk screen above this one, which is not the user leaving it: TalkActivity compares this with its value at creation.
      */
     static int relaunches;
 
@@ -56,23 +57,34 @@ public class ChatsActivity extends Activity {
         scroll.addView(body);
         setContentView(scroll);
         header();
-        if (b == null) talkToLast(); // not on recreation
+        if (b == null) route(getIntent()); // not on recreation
     }
 
-    /** The launcher opens the app again while its task is alive (singleTask): like a fresh open, and it listens even if a reply is awaited. */
+    /** The app is started again while its task is alive (singleTask): the same routing as a fresh start. */
     @Override
     protected void onNewIntent(Intent i) {
         super.onNewIntent(i);
         relaunches++; // first: the talk screen being cleared reads it
-        talkToLast();
+        route(i);
     }
 
-    /** Opening the app means "I want to say something": straight to the last chat; the list is one Back away. */
-    private void talkToLast() {
+    /** The chat button ("list") shows the list; any other start goes to the default chat, listening only for quick talk (the Home double-press, via the QuickTalk alias). */
+    private void route(Intent i) {
+        if (i.getBooleanExtra("list", false)) return;
+        ComponentName c = i.getComponent();
+        talkToLast(c != null && c.getClassName().endsWith(".QuickTalk"));
+    }
+
+    /**
+     * Opening the app means "I want to say something": straight to the default chat (the last one talked to or whose
+     * reply the watch took; a pick alone doesn't change it). The list is one Back away.
+     */
+    private void talkToLast(boolean speak) {
         SharedPreferences last = getSharedPreferences("last", MODE_PRIVATE);
         if (last.contains("chat")) {
-            startActivity(Talk.intent(this, last.getString("chat", ""), last.getString("title", ""),
-                    last.getInt("accent", Look.ACCENT)).putExtra("speak", true));
+            Intent talk = Talk.intent(this, last.getString("chat", ""), last.getString("title", ""),
+                    last.getInt("accent", Look.ACCENT));
+            startActivity(speak ? talk.putExtra("speak", true) : talk);
         }
     }
 
