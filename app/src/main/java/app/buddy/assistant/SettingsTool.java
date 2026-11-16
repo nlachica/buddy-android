@@ -1045,6 +1045,251 @@ final class SettingsTool {
         return b.toString();
     }
 
+    // ------------------------------------------------------------ keys (read from a file, never shown)
+
+    private static final int KEY_MAX = 4096;
+
+    /**
+     * The key held in a file of Buddy's Linux (root = Linux.root; inside, "/" is root and "~" is /root). The file must be
+     * a regular file whose real path stays inside root, one line, no JSON. No message repeats the path or the content,
+     * in case the agent passed the key itself as the path.
+     */
+    static String keyFrom(File root, String path) {
+        String p = path.trim();
+        if (p.isEmpty() || p.length() > 1000 || CONTROL.matcher(p).find() || !(p.startsWith("/") || p.startsWith("~/"))) {
+            throw new IllegalArgumentException("key_file must be a path in Buddy's Linux starting with / or ~/");
+        }
+        String bad = "key_file: the file must hold just the key, one line (for a Bitwarden secret, its value)";
+        try {
+            java.nio.file.Path real = new File(root, p.startsWith("~") ? "/root" + p.substring(1) : p).toPath().toRealPath();
+            if (!real.startsWith(root.toPath().toRealPath())
+                    || !java.nio.file.Files.isRegularFile(real, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    || java.nio.file.Files.size(real) > KEY_MAX) {
+                throw new IllegalArgumentException(bad);
+            }
+            java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(KEY_MAX);
+            try (java.nio.channels.SeekableByteChannel ch = java.nio.file.Files.newByteChannel(real,
+                    java.nio.file.StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                while (b.hasRemaining() && ch.read(b) > 0) { // read to the end (a short read is not the end)
+                }
+            }
+            String key = new String(b.array(), 0, b.position(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            if (key.isEmpty() || CONTROL.matcher(key).find() || key.startsWith("{") || key.startsWith("[")) {
+                throw new IllegalArgumentException(bad);
+            }
+            return key;
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException(bad);
+        }
+    }
+
+    /** The secret part of a key: what a header line "Name: value" or "Bearer value" carries (the relay's own grammar). */
+    static String credential(String key) {
+        String c = McpServers.header(key)[1];
+        return c.regionMatches(true, 0, "Bearer ", 0, 7) ? c.substring(7) : c;
+    }
+
+    /** At most the credential's last 4 characters (only when it has 16 or more) and its length: "…ab12 (40 characters)". */
+    static String mask(String key) {
+        String c = credential(key);
+        return (c.length() >= 16 ? "…" + c.substring(c.length() - 4) + " " : "") + "(" + c.length() + " characters)";
+    }
+
+    /** The text without the key: the whole key, its header value and its credential, longest first. */
+    static String redact(String text, String key) {
+        String[] parts = {key.trim(), McpServers.header(key)[1], credential(key)};
+        Arrays.sort(parts, (x, y) -> y.length() - x.length());
+        for (String s : parts) text = text.replace(s, "…");
+        return text;
+    }
+
+    /** SHA-256 in hex, "" for no key: a snapshot compares keys without holding one. */
+    static String digest(String key) {
+        if (key == null || key.isEmpty()) return "";
+        try {
+            StringBuilder b = new StringBuilder();
+            for (byte x : java.security.MessageDigest.getInstance("SHA-256").digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                b.append(String.format("%02x", x));
+            }
+            return b.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** May this caller read Buddy's Linux? No chat (a terminal or Remote Control session there), or a chat with Linux tools on. */
+    static boolean linuxCaller(String here, Sessions.Session c) {
+        return here == null || c != null && c.dev;
+    }
+
+    /**
+     * A saved key of an MCP server or an API key service: set from a key file, or removed with value "". The snapshot
+     * holds the record's address and a digest of its key, so the key never leaves {@link #saved}, and an address or key
+     * edited while the card is open makes the write stale. The key is checked with the server after the card
+     * ({@link #verify}), only at the address the card was built from.
+     */
+    abstract static class KeySetting extends Setting {
+        private final File root;
+        private final String file, gone; // file: null removes the key; gone: what to say when the record doesn't exist
+        private String key, shown;       // shown: the record's address(es) as the card saw them
+
+        KeySetting(String name, String gone, File root, String file) {
+            super(name, "a key from key_file, or \"\" to remove it; never shown");
+            this.gone = gone;
+            this.root = root;
+            this.file = file;
+        }
+
+        /** The address(es) the key goes to, as a JSONArray string; null when the record is gone. Never shown. */
+        abstract String target();
+
+        /** The saved key, or null. */
+        abstract String saved();
+
+        /** Checks the key with the server at target (off the main thread) and keeps what it returns for {@link #store}. */
+        void verify(JSONArray target, String key) throws Exception {
+        }
+
+        /** Saves the key ("" removes it); returns a note. Main thread, under {@link #lock}. */
+        abstract String store(String key) throws Exception;
+
+        @Override
+        String get() {
+            String t = target();
+            return t == null ? null : new JSONArray().put(t).put(digest(saved())).toString();
+        }
+
+        @Override
+        String view(String snapshot) {
+            if (snapshot == null) return "(none)";
+            try {
+                return new JSONArray(snapshot).getString(1).isEmpty() ? "none" : "set";
+            } catch (org.json.JSONException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @Override
+        String check(String value) {
+            if (!value.trim().isEmpty()) throw new IllegalArgumentException(name + " takes its key from key_file, never in value; value \"\" removes it");
+            if (target() == null) throw new IllegalArgumentException(gone);
+            if (file == null) {
+                if (digest(saved()).isEmpty()) throw new IllegalArgumentException(name + ": there is no key to remove");
+                return "";
+            }
+            key = keyFrom(root, file);
+            return mask(key) + ", from " + file.trim();
+        }
+
+        @Override
+        String[] card(String snapshot, String value) {
+            if (snapshot != null) {
+                try {
+                    shown = new JSONArray(snapshot).getString(0);
+                } catch (org.json.JSONException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+            return new String[]{view(snapshot), value.isEmpty() ? "none (the key is removed)" : value};
+        }
+
+        @Override
+        void prepare(String value) throws Exception {
+            if (value.isEmpty()) return;
+            try {
+                verify(new JSONArray(shown), key);
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (Exception e) { // its words can quote the stored address, which no output shows
+                throw new Exception(name + ": the server refused the key or couldn't be reached (its own words aren't shown: "
+                        + "they can carry its address)");
+            }
+        }
+
+        @Override
+        String set(String value) throws Exception {
+            return store(value.isEmpty() ? "" : key);
+        }
+    }
+
+    /** mcp/&lt;id&gt;/key: the MCP screen's save of a key, which checks it with the server and keeps the tools it lists. */
+    static Setting mcpKey(BuddyService svc, String id, File root, String file) {
+        return new KeySetting("mcp/" + id + "/key", "no MCP server " + id, root, file) {
+            private JSONArray found = new JSONArray();
+
+            @Override
+            String target() {
+                McpServers.S s = McpServers.find(id);
+                return s == null ? null : new JSONArray().put(s.url).toString();
+            }
+
+            @Override
+            String saved() {
+                return Secrets.get(svc, McpServers.secretName(id));
+            }
+
+            @Override
+            void verify(JSONArray t, String key) throws Exception {
+                found = McpServers.discover(t.getString(0), McpServers.header(key));
+            }
+
+            @Override
+            Object lock() {
+                return McpServers.class; // every McpServers writer holds it
+            }
+
+            @Override
+            String store(String key) throws Exception {
+                McpServers.S s = McpServers.find(id);
+                if (s == null) throw new IllegalStateException("mcp/" + id + " was removed");
+                if (key.isEmpty()) {
+                    McpServers.save(svc, s, ""); // removes the key; the tools stay as they are
+                    return "";
+                }
+                s.tools = found;
+                McpServers.save(svc, s, key);
+                return " It lists " + found.length() + " tools.";
+            }
+        };
+    }
+
+    /** service/&lt;id&gt;/key: the API keys screen's save of a key, which checks it with the service and keeps the models. */
+    static Setting serviceKey(BuddyService svc, String id, File root, String file) {
+        return new KeySetting("service/" + id + "/key", "no such service " + id, root, file) {
+            private JSONArray found = new JSONArray();
+
+            @Override
+            String target() {
+                Providers.P p = Providers.find(id);
+                return p == null ? null : new JSONArray().put(p.anthropic).put(p.openai).toString();
+            }
+
+            @Override
+            String saved() {
+                return Secrets.get(svc, Providers.secretName(id));
+            }
+
+            @Override
+            void verify(JSONArray t, String key) throws Exception {
+                found = Providers.list(key, t.getString(0), t.getString(1));
+            }
+
+            @Override
+            Object lock() {
+                return Providers.class; // every Providers writer holds it
+            }
+
+            @Override
+            String store(String key) throws Exception {
+                Providers.P p = Providers.find(id);
+                if (p == null) throw new IllegalStateException("service " + id + " was removed");
+                if (!key.isEmpty()) p.models = found;
+                Providers.save(svc, p, key); // "" is the screen's own state for a service with no key
+                return key.isEmpty() ? "" : " It lists " + found.length() + " models.";
+            }
+        };
+    }
+
     // ------------------------------------------------------------ MCP servers
 
     /** "mcp/notes = on  (key: set, 3 tools)": never the server's address. */
@@ -1053,11 +1298,15 @@ final class SettingsTool {
                 + " tools)";
     }
 
-    /** mcp/&lt;id&gt;: an existing server takes on, off or ""; a new id takes the server's https address (no key). */
-    static Setting mcp(BuddyService svc, String id, McpServers.S existing, boolean keySet) {
-        return new Setting("mcp/" + id, "on, off or \"\" to remove it; a new id takes the server's address (https://…) and "
-                + "is added without a key") {
+    /**
+     * mcp/&lt;id&gt;: an existing server takes on, off or ""; a new id takes the server's https address, with the key in
+     * keyFile if there is one (a file of Buddy's Linux under root).
+     */
+    static Setting mcp(BuddyService svc, String id, McpServers.S existing, boolean keySet, File root, String keyFile) {
+        return new Setting("mcp/" + id, "on, off or \"\" to remove it; a new id takes the server's address (https://…), "
+                + "and key_file for its key") {
             private JSONArray found = new JSONArray();
+            private String key; // the new server's key, from keyFile
 
             @Override
             String get() {
@@ -1078,6 +1327,9 @@ final class SettingsTool {
             @Override
             String check(String value) {
                 String v = value.trim();
+                if (existing != null && keyFile != null) {
+                    throw new IllegalArgumentException("mcp/" + id + " exists: set its key with mcp/" + id + "/key");
+                }
                 if (existing != null) {
                     if (!Arrays.asList("on", "off", "").contains(v.toLowerCase(Locale.ROOT))) {
                         throw new IllegalArgumentException("mcp/" + id + " exists: its address can't be changed here "
@@ -1089,18 +1341,30 @@ final class SettingsTool {
                     throw new IllegalArgumentException("no server " + id + ", and that isn't a free name (lower-case letters, digits, _)");
                 }
                 if (!McpServers.addressOk(v)) throw new IllegalArgumentException("the address must be https://… (or http on this phone or the user's own network)");
+                if (keyFile != null) key = keyFrom(root, keyFile);
                 return v;
             }
 
             @Override
             String[] card(String snapshot, String value) {
-                if (snapshot == null) return new String[]{"(none)", "add the server at " + value + " (no key)"};
+                if (snapshot == null) {
+                    return new String[]{"(none)", "add the server at " + value + (key == null ? " (no key)"
+                            : " with the key " + mask(key) + ", from " + keyFile.trim())};
+                }
                 return new String[]{view(snapshot), value.isEmpty() ? "(deleted)" : value};
             }
 
             @Override
             void prepare(String value) throws Exception {
-                if (existing == null) found = McpServers.discover(value, null);
+                if (existing != null) return;
+                try {
+                    found = McpServers.discover(value, key == null ? null : McpServers.header(key));
+                } catch (InterruptedException e) {
+                    throw e;
+                } catch (Exception e) { // the caller gave this address, but the server may quote the key back
+                    String m = e.getMessage() == null ? e.toString() : e.getMessage();
+                    throw new Exception(key == null ? m : redact(m, key));
+                }
             }
 
             @Override
@@ -1110,7 +1374,8 @@ final class SettingsTool {
                     McpServers.S s = new McpServers.S(id);
                     s.url = value;
                     s.tools = found;
-                    McpServers.save(svc, s, ""); // "" so no saved key can follow it
+                    McpServers.save(svc, s, key == null ? "" : key); // "" so no saved key can follow it
+                    return key == null ? "" : " It lists " + found.length() + " tools.";
                 } else if (value.isEmpty()) {
                     McpServers.remove(svc, id);
                 } else {
@@ -1205,9 +1470,17 @@ final class SettingsTool {
                         + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
                         + "page: agents and models (default agent and models, API key services' use, name and shown models, "
                         + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
-                        + "chat's approvals (Ask, Routine allowed, Always ask) and allowed apps. Keys, tokens and server addresses are never shown or changed here.",
+                        + "chat's approvals (Ask, Routine allowed, Always ask) and allowed apps. Keys are never shown. To set one (mcp/<id>/key, service/<id>/key, or a new "
+                        + "mcp/<id> with its address), put just the key in a file in Buddy's Linux, without printing it (from "
+                        + "Bitwarden: the secret's value), and pass its path as key_file. An MCP server that wants its key in "
+                        + "another header than Authorization: Bearer takes the line \"Header-Name: key\". On a /key name, value "
+                        + "\"\" removes the key. Needs Linux tools in this chat. Tokens and server addresses are never shown "
+                        + "or changed here.",
                 Tools.props().put("name", Tools.strProp("Optional: the setting, as listed (e.g. read_aloud)"))
-                        .put("value", Tools.strProp("Optional: the new value; needs name"))));
+                        .put("value", Tools.strProp("Optional: the new value; needs name"))
+                        .put("key_file", Tools.strProp("Optional: a file in Buddy's Linux that holds just the key (e.g. "
+                                + "~/.config/composio/key). Buddy reads it itself and never shows it. Goes with mcp/<id>/key, "
+                                + "service/<id>/key, or a new mcp/<id> with its address"))));
     }
 
     /** buddy_settings: what the agent is told. */
@@ -1215,8 +1488,17 @@ final class SettingsTool {
         String name = a.optString("name").trim();
         java.util.concurrent.Executor main = svc::runOnMain;
         String here = McpServer.CALLER_CHAT.get(); // a request-thread ThreadLocal: read it before going to the main thread
-        if (name.isEmpty()) return onMain(main, () -> listing(here));
-        if (!a.has("value")) {
+        String file = a.has("key_file") ? a.optString("key_file") : null;
+        if (name.isEmpty()) return file != null ? "key_file needs a name" : onMain(main, () -> listing(here));
+        if (file != null) {
+            if (!name.matches("mcp/[a-z0-9_]+(/key)?|service/[A-Za-z0-9_-]+/key")) {
+                return "key_file goes with mcp/<id>/key, service/<id>/key, or a new mcp/<id> with its address";
+            }
+            if (!onMain(main, () -> linuxCaller(here, here == null ? null : chat(svc, here)))) {
+                return "key_file needs Linux tools in this chat";
+            }
+        }
+        if (!a.has("value") && file == null) {
             return onMain(main, () -> {
                 try {
                     Setting s = find(svc, name);
@@ -1226,7 +1508,7 @@ final class SettingsTool {
                 }
             });
         }
-        Setting s = onMain(main, () -> find(svc, name));
+        Setting s = onMain(main, () -> find(svc, name, file));
         if (s == null) return unknown(name);
         return change(s, a.optString("value"), svc.getString(R.string.tools_card_setting),
                 card -> svc.askConfirm(card, false), main);
@@ -1238,6 +1520,11 @@ final class SettingsTool {
 
     /** The setting with this name, or null (main thread). */
     static Setting find(BuddyService svc, String name) {
+        return find(svc, name, null);
+    }
+
+    /** The same, with the key_file the caller gave (null: none), for the names that take one. */
+    static Setting find(BuddyService svc, String name, String file) {
         for (Setting s : scalars(svc)) if (s.name.equals(name)) return s;
         if (name.startsWith("app/") && name.substring(4).matches("[A-Za-z0-9_.]+")) return app(svc, name.substring(4));
         if (name.startsWith("rule/")) {
@@ -1245,10 +1532,13 @@ final class SettingsTool {
             return id.matches("[A-Za-z0-9]+") ? rule(svc, id.equals("new") ? null : id) : null;
         }
         if (name.startsWith("skill/")) return skill(Skills.dir(svc), name.substring(6));
+        if (name.matches("mcp/[a-z0-9_]+/key")) {
+            return mcpKey(svc, name.substring(4, name.length() - 4), Linux.root(svc), file);
+        }
         if (name.startsWith("mcp/") && name.substring(4).matches("[a-z0-9_]+")) {
             String id = name.substring(4);
             McpServers.S s = McpServers.find(id);
-            return mcp(svc, id, s, s != null && McpServers.header(svc, id) != null);
+            return mcp(svc, id, s, s != null && McpServers.header(svc, id) != null, Linux.root(svc), file);
         }
         if (name.startsWith("default_model/") && Account.known(name.substring(14))) {
             String agent = name.substring(14);
@@ -1266,6 +1556,9 @@ final class SettingsTool {
             String h = name.substring(15);
             return model(name, () -> Models.options(h, false), false, () -> Prefs.reviewerModel(svc, h),
                     v -> Prefs.setReviewerModel(svc, h, v), " The reviewer uses it from its next review.").ready(v -> signedIn(svc, h));
+        }
+        if (name.matches("service/[A-Za-z0-9_-]+/key")) {
+            return serviceKey(svc, name.substring(8, name.length() - 4), Linux.root(svc), file);
         }
         if (name.matches("service/[A-Za-z0-9_-]+(/(name|models))?")) {
             String[] sp = name.substring(8).split("/");
@@ -1403,7 +1696,7 @@ final class SettingsTool {
                 b.append(find(svc, "default_model/" + a.agent).line()).append('\n');
             }
         }
-        b.append("\nAPI key services (service/<id> = on, off; each also has service/<id>/name and service/<id>/models; "
+        b.append("\nAPI key services (service/<id> = on, off; each also has service/<id>/name, /models and /key; "
                 + "keys and addresses are never shown):\n");
         synchronized (Providers.class) {
             for (Providers.P p : Providers.all()) b.append(serviceLine(p)).append('\n');
@@ -1424,7 +1717,7 @@ final class SettingsTool {
                     .append("  (approval ").append(r.approval).append(")\n");
         }
         b.append("\nSkills (skill/<name>):\n").append(skillLines(Skills.dir(svc)));
-        b.append("\nMCP servers (mcp/<id>; a new id with an address adds one):\n");
+        b.append("\nMCP servers (mcp/<id>; a new id with an address adds one, key_file adds its key; each also has mcp/<id>/key):\n");
         for (McpServers.S m : McpServers.all()) b.append(mcpLine(m, McpServers.header(svc, m.id) != null)).append('\n');
         return b.toString().trim();
     }
