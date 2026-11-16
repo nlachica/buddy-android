@@ -83,8 +83,9 @@ when `c` has at least 16 characters (so at most a quarter shows), then `"(" + c.
 `…ab12 (40 characters)`. `x-consumer-api-key: abc` and `Authorization: Bearer abc` both show as `(3 characters)`. A
 stored key shows only as `set` or `none`, never by its characters. **Redaction**: `static String redact(String text,
 String key)` replaces with `…`, longest first, the whole trimmed key, its header value (`header(key)[1]`) and its
-credential, so a server that quotes back only the bare token is covered too. Every network error on the key path goes
-through it before it reaches a reply.
+credential, so a server that quotes back only the bare token is covered too. A new server's discovery error goes
+through it before it reaches a reply (Design C: the caller gave that address). An existing record's verify error
+never reaches a reply at all, only a fixed message (Design B, `prepare`).
 
 ### B. `KeySetting`: one Setting kind for a saved key (two uses: MCP server, API key service)
 
@@ -120,9 +121,13 @@ The class fixes the rest. Each point is tied to the gate in `change()` (`Setting
   (`SettingsTool.java:1096-1099`), and each call gets a new `Setting` from `find`, so `shown` is the address of the
   record the card named.
 - `prepare(v)`: removal does nothing. A set calls `verify(new JSONArray(shown), key)`, so the key goes only to the
-  card's record at its address as it was when the card was built, never to an address edited meanwhile. Any exception
-  is rethrown as `new Exception(redact(message, key))`. The compare-and-save in `change()` then refuses the write if
-  the address or key changed while the card was open or during `verify`. The gate itself is unchanged.
+  card's record at its address as it was when the card was built, never to an address edited meanwhile. If `verify`
+  throws, its message is dropped: `prepare` throws `new Exception(name + ": the server refused the key or couldn't be
+  reached (its own words aren't shown: they can carry its address)")`, and an `InterruptedException` passes through
+  as in `change()`. Scrubbing is not enough here. A server's error body (`McpServers.rpc`, `Relay.models`) or a
+  connection error can quote the stored address, its path or its host, and 004 shows no part of a stored address.
+  The compare-and-save in `change()` then refuses the write if the address or key changed while the card was open or
+  during `verify`. The gate itself is unchanged.
 - `set(v)`: `store(v.isEmpty() ? "" : key)`.
 - `read()`: `name = set|none  (a key from key_file, or "" to remove it; never shown)`.
 
