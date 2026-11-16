@@ -54,6 +54,9 @@ public class TalkActivity extends Activity {
     /** Why listening can't start (no recognizer on the watch), shown under the conversation. */
     private String problem = "";
     private int accent;
+    /** A New chat the phone hasn't heard yet (Talk.fresh): no call button; cleared when a YOU line shows. */
+    private boolean fresh;
+    private ImageView call;
     /** ChatsActivity.relaunches when this screen was created: a change means a relaunch cleared it. */
     private int opened;
     private final Runnable redraw = this::changed;
@@ -67,6 +70,7 @@ public class TalkActivity extends Activity {
         chat = getIntent().getStringExtra("chat");
         title = getIntent().getStringExtra("title");
         accent = getIntent().getIntExtra("accent", Look.ACCENT);
+        fresh = getIntent().getBooleanExtra("new", false);
         boolean round = getResources().getConfiguration().isScreenRound();
 
         LinearLayout root = new LinearLayout(this);
@@ -108,7 +112,7 @@ public class TalkActivity extends Activity {
             Talk.silence();
             listen();
         });
-        ImageView call = new ImageView(this); // a call: the live voice, with the watch's microphone and speaker
+        call = new ImageView(this); // a call: the live voice, with the watch's microphone and speaker
         call.setImageResource(R.drawable.ms_graphic_eq);
         call.setColorFilter(0xFF1A1714);
         call.setContentDescription(getString(R.string.call_button));
@@ -204,10 +208,13 @@ public class TalkActivity extends Activity {
         ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (request != LISTEN || result != RESULT_OK || heard == null || heard.isEmpty()) return; // cancelled: the mic button is there
         final String text = heard.get(0);
-        ChatsActivity.remember(this, chat, title, accent);
-        Talk.begin(this, chat, title, accent, (valid, done) -> {
+        final boolean isNew = fresh; // the chat may never exist: Talk remembers it when the phone has heard
+        if (!isNew) ChatsActivity.remember(this, chat, title, accent);
+        Talk.begin(this, chat, title, accent, isNew, (valid, done) -> {
             try {
-                Phone.send(this, Phone.SEND, new JSONObject().put("chat", chat).put("text", text), valid, done);
+                JSONObject msg = new JSONObject().put("chat", chat).put("text", text);
+                if (isNew) msg.put("new", true);
+                Phone.send(this, Phone.SEND, msg, valid, done);
             } catch (JSONException e) {
                 throw new IllegalStateException(e);
             }
@@ -236,6 +243,7 @@ public class TalkActivity extends Activity {
         body.addView(face);
         if (mine) {
             for (Talk.Line l : Talk.lines) {
+                if (l.kind == Talk.YOU) fresh = false; // only /buddy/heard adds one: the chat exists
                 TextView t = Look.text(this, l.kind == Talk.YOU ? getString(R.string.talk_you, l.text) : l.text, 15,
                         l.kind == Talk.ERROR ? Look.ERR : l.kind == Talk.YOU ? Look.TEXT2 : Look.TEXT);
                 t.setPadding(0, Look.dp(this, 8), 0, 0);
@@ -250,6 +258,7 @@ public class TalkActivity extends Activity {
             }
         }
         if (!problem.isEmpty()) body.addView(Look.text(this, problem, 14, Look.ERR));
+        call.setVisibility(fresh ? View.GONE : View.VISIBLE);
         scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 }

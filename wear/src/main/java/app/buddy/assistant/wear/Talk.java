@@ -76,6 +76,8 @@ public class Talk extends Service {
     private static int run;
     /** Goes up with each words sent and words given up: their callbacks must not send them late or settle the next words. */
     private static int sends;
+    /** A New chat whose words the phone hasn't heard yet: its chat may not exist there (no call, no default-chat write). Set by begin, cleared at HEARD. */
+    static boolean fresh;
     /** The latest step of the run ("Opening Calendar"), shown while it works. */
     static String status = "";
     /** Lines that came while no screen showed them: reopening the chat just shows them, it doesn't listen again. */
@@ -153,7 +155,7 @@ public class Talk extends Service {
      * Starts the conversation: the listener first, then {@code send}, so a fast answer can't come before anyone listens.
      * If this chat's conversation is still live the words join it (lines and speech stay) instead of replacing it.
      */
-    static void begin(Context c, String chat, String title, int accent, Sender send) {
+    static void begin(Context c, String chat, String title, int accent, boolean fresh, Sender send) {
         Call.hangUp(); // the last one started owns the speaker
         boolean join = instance != null && chat.equals(Talk.chat);
         boolean wasWaiting = waiting;
@@ -167,6 +169,7 @@ public class Talk extends Service {
             accepted = false;
             run++;
         }
+        Talk.fresh = fresh;
         waiting = true;
         status = "";
         unseen = false;
@@ -300,7 +303,7 @@ public class Talk extends Service {
     }
 
     private Notification notification(int text) {
-        PendingIntent open = PendingIntent.getActivity(this, 0, intent(this, chat, title, accent),
+        PendingIntent open = PendingIntent.getActivity(this, 0, intent(this, chat, title, accent).putExtra("new", fresh),
                 PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
         return new Notification.Builder(this, CHANNEL).setSmallIcon(R.drawable.ms_mic)
                 .setContentText(getString(text, title)).setContentIntent(open).setOngoing(true).build();
@@ -326,6 +329,8 @@ public class Talk extends Service {
         switch (e.getPath()) {
             case Phone.HEARD:
                 heard = accepted = true;
+                fresh = false;
+                ChatsActivity.remember(this, chat, title, accent); // words sent (009); for a New chat, now that the chat exists
                 h.removeCallbacks(noHeard);
                 lines.add(new Line(YOU, text));
                 if (!queue.isEmpty()) next();
