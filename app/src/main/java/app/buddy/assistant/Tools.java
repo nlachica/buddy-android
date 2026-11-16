@@ -2139,6 +2139,15 @@ final class Tools {
         return false;
     }
 
+    /** Is Android's installer itself a window on the real screen? (The default display: the installer lands there.) */
+    private boolean installerShown() {
+        for (AccessibilityWindowInfo w : svc.getWindows()) {
+            AccessibilityNodeInfo r = w.getRoot();
+            if (r != null && Updates.installerPkg(r.getPackageName())) return true;
+        }
+        return false;
+    }
+
     private String waitForInstall(String pkg, long minVersion, int timeoutS) throws InterruptedException {
         long before = installedVersion(pkg);
         long need = minVersion > 0 ? minVersion : (before < 0 ? 0 : before + 1);
@@ -2236,16 +2245,17 @@ final class Tools {
                 svc.getString(R.string.tools_card_update, r.version, BuildInfo.VERSION, r.notes));
         if (no != null) return "Not installed. " + no;
         svc.showStatus(svc.getString(R.string.tools_status_downloading, r.version));
-        String res = Updates.install(svc, r);
-        if (Updates.NEEDS_PERMISSION.equals(res)) {
-            return "Downloaded Buddy " + r.version + ", but Buddy isn't allowed to install apps yet. Android's settings page "
-                    + "for that is open now: ask the user to turn on 'Allow from this source' for Buddy, then call "
-                    + "update_buddy with install=true again.";
+        String res;
+        svc.installWaits++; // the install can wait for a late installer: the user's touches aren't a takeover
+        try {
+            res = Updates.install(svc, r, this::installerShown);
+        } catch (RuntimeException e) {
+            res = "Couldn't open Android's installer (" + e.getMessage() + "), so it isn't on screen. The user can tap "
+                    + "buddy.apk on the release page below, then Update.";
+        } finally {
+            svc.installWaits--;
         }
-        if (!Updates.OPENED.equals(res)) return res + " " + Updates.MANUAL;
-        return "The installer is open with Buddy " + r.version + ". Tell the user now, in one line, to tap Update (only "
-                + "they can): Buddy restarts once it's installed, which ends this task, and their chats stay. Then stop; "
-                + "don't call wait_for_install.";
+        return Updates.afterInstall(res, r.version);
     }
 
     private static void copy(java.io.InputStream in, java.io.OutputStream o) throws java.io.IOException {

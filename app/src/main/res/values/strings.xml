@@ -225,6 +225,10 @@
     <string name="update_channel_name">Buddy updates</string>
     <!-- Notification and sheet title. %1$s = the new version number, e.g. 2.1.14. -->
     <string name="update_available_title">Buddy %1$s is available</string>
+    <!-- Notification title when Buddy downloaded the update but Android's installer didn't come up by itself. %1$s = the new version. -->
+    <string name="update_ready_title">Buddy %1$s is ready to install</string>
+    <!-- Text of that notification; a tap opens the installer. -->
+    <string name="update_ready_text">Tap to open Android\'s installer, then tap Update. Your chats stay.</string>
     <!-- %1$s = the installed version number. -->
     <string name="update_notification_text">You have %1$s. Tap to see what\'s new and update; your chats stay.</string>
     <!-- Verb: download and install the new version. Notification button and sheet button (half width). Keep short. -->
