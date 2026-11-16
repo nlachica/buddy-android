@@ -307,8 +307,11 @@ final class Tools {
                             + "Buddy shows the user an approval card, then downloads it and opens Android's installer. Use it "
                             + "when the user asks to update Buddy or whether there's a new version. Only the user can approve "
                             + "and tap Update. To ship your own change to Buddy's code, see \"Updating Buddy on the phone\" in "
-                            + "the buddy-fork repo's AGENTS.md: a version bump and a tag make the fork's CI publish the release.",
-                    props().put("install", boolProp("true: download the update and open the installer (after the user said yes)"))));
+                            + "the buddy-fork repo's AGENTS.md: a version bump and a tag make the fork's CI publish the release. It also says "
+                            + "when official Buddy has a release the fork lacks; see \"Bringing in official Buddy\" in the same AGENTS.md.",
+                    props().put("install", boolProp("true: download the update and open the installer (after the user said yes)"))
+                            .put("skip_upstream", boolProp("true: install this fork release without first bringing in a newer "
+                                    + "official Buddy (the user chose that, or bringing it in stopped)"))));
         }
         t.put(tool("wait_for_install",
                 "After opening the Android installer for an APK, wait until the user has tapped Install/Update and confirmed. "
@@ -666,7 +669,7 @@ final class Tools {
         switch (name) {
             case "update_buddy":
                 if (Flavor.FDROID) return fdroidUpdates();
-                return updateBuddy(a.optBoolean("install", false));
+                return updateBuddy(a.optBoolean("install", false), a.optBoolean("skip_upstream", false));
             case "install_apk":
                 return installApk(a.getString("path"));
             default:
@@ -2154,19 +2157,16 @@ final class Tools {
     }
 
     /** Buddy's own updates (see {@link Updates}). */
-    private String updateBuddy(boolean install) throws InterruptedException {
+    private String updateBuddy(boolean install, boolean skipUpstream) throws InterruptedException {
         Updates.Release r;
         try {
             r = Updates.latest();
         } catch (Exception e) {
             return "Couldn't reach GitHub to check for updates (" + e.getMessage() + "). " + Updates.MANUAL;
         }
-        String head = "Installed: Buddy " + BuildInfo.VERSION + ". Latest release: " + r.version + ".";
-        if (!r.newer()) return head + " Buddy is up to date.";
-        if (!install) {
-            return head + " An update is available. What's new:\n" + r.notes + "\n\nAsk the user if they want it now; "
-                    + "if yes, call update_buddy with install=true.";
-        }
+        String note = skipUpstream ? "" : Updates.upstreamNote(Updates.upstreamVersion(), r.version);
+        String text = Updates.report(BuildInfo.VERSION, r, note, install);
+        if (text != null) return text;
         String no = SettingsTool.approval(c -> svc.askConfirm(c, false),
                 svc.getString(R.string.tools_card_update, r.version, BuildInfo.VERSION, r.notes));
         if (no != null) return "Not installed. " + no;

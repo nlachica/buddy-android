@@ -236,6 +236,8 @@
     <string name="update_checking">Checking for updates…</string>
     <string name="update_check_failed">Couldn\'t reach GitHub. Try again later.</string>
     <!-- %1$s = the installed version number. -->
+    <!-- Only in English, like the other fork-only strings; %1$s is official Buddy's version, e.g. 2.3.10 -->
+    <string name="update_upstream_ahead">Official Buddy %1$s isn\'t in your fork yet: ask Buddy in a chat to update.</string>
     <string name="update_up_to_date">Buddy %1$s is up to date.</string>
     <!-- Under the sheet title. %1$s = the installed version number. -->
     <string name="update_sheet_text">You have %1$s. Updating keeps your chats, settings and sign-ins.</string>
