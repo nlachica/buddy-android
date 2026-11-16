@@ -69,3 +69,36 @@ F2 [major] The release guard checks historical parents, not the release it must 
 F3 [minor] Successful cleanup leaves a branch that blocks the next upstream version - `plan.md:97` returns exit 5 for any local `sync/upstream-*` branch, but the success path at `plan.md:139` removes only the worktree. Git retains its branch when removing a worktree ([git-worktree documentation](https://git-scm.com/docs/git-worktree)). Thus the next upstream version enters recovery for the previous successful sync; the on-origin resume command at `plan.md:146-148` uses `gh pr list` without a state filter, which only lists open PRs and will omit that merged PR ([GitHub CLI documentation](https://cli.github.com/manual/gh_pr_list)). -> After success, remove the completed local sync branch once its inclusion in origin/main is verified, and distinguish merged/closed PRs when inspecting leftovers. Add a consecutive-successful-syncs case proving the second version can start without a restart confirmation for the completed first version.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - Settings → Check for updates (the brief's "Buddy's update check", and also the sheet the daily
+notification opens) now checks official Buddy too, so Q1 is gone (Goal, Design 1, Step 2). After its fork check,
+`showSheet` calls `Updates.upstreamVersion()`. When official Buddy is ahead of the fork's latest release: if the fork
+is up to date, a toast "Official Buddy X isn't in your fork yet: ask Buddy in a chat to update" replaces "up to date";
+if a fork update is available, the same line goes under the sheet's subtitle and Update is unchanged (the user's own
+tap, like `skip_upstream`). If the upstream call fails or official Buddy isn't ahead, today's toast and sheet show.
+One English string. My round-1 locale cost was wrong: 001/003/005 added English-only strings and CI stays green. The
+daily notification itself stays fork-only. It fires only for a fork release and opens that sheet. An upstream-only
+notification would be a background announcement, and the verbatim ask's trigger is "when updating". This is listed
+as a default Nicholas may override, not a blocker. Proof: `upstreamAhead` unit cases; R2 checks the toast on fork.5
+before the sync and "up to date" after (Test plan rows 1 and 3).
+
+F2: accepted - `--release <sha>` now fetches origin/main and checks the current state as well as the parents (Step 3).
+(1) If a `v*` tag on origin points at `<sha>` or a commit containing it, it refuses with "already tagged as vX:
+AGENTS.md 'already merged' with vX" (use that release, or recover its build). (2) If origin/main's VERSION_CODE is
+above the candidate's, or the candidate's version isn't new against its parent, it refuses with "fix forward":
+release current main as the next `-fork.<n>` through "Updating Buddy on the phone", and check that commit with
+`--release` first. The fix-forward commit passes the same checks. AGENTS.md: once the sync PR is merged, the upstream
+merge is never redone. "Start over" applies only when GitHub refuses the unmerged PR. Exit 4's no-tag path goes to
+Tag, whose refusal names one of these ways out, so it can't loop back to the same SHA. New script cases: "released
+meanwhile" (tagged bump after the merge → refuses, naming the tag) and "main moved past" (untagged bump → refuses with
+fix forward; `--release` on the bump passes; rerunning the script gives exit 4, not a second merge). The old "main
+advanced" case now ends in start over before any merge (Test plan rows 1 and 2).
+
+F3: accepted - exit 5 now ignores `sync/upstream-*` branches that origin/main already contains, and prints whether
+origin/main contains a leftover worktree's branch. The success step removes the worktree, then runs `git branch -D`
+once `git merge-base --is-ancestor` confirms the branch is in origin/main. Exit-5 resume reads the PR with
+`gh pr list … --state all --json number,state`: OPEN → the PR step, MERGED → Tag, CLOSED → start over. A leftover
+worktree whose branch is in origin/main means that sync finished: clean up and rerun. New script case "consecutive
+syncs": 1.0.1 merged, worktree removed, branch kept → 1.0.2 exits 0 on `sync/upstream-1.0.2` (Test plan row 1).

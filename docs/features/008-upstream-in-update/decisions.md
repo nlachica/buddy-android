@@ -100,3 +100,26 @@
   the release/run state comes from two read-only `gh` calls in AGENTS.md, not from the script (it stays offline and
   testable). (Plan review F5.)
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Settings → Check for updates also checks official Buddy; the daily notification stays fork-only (supersedes "Daily notification and Settings sheet stay fork-only")
+- Options: both fork-only pending Nicholas (round 1); the sheet only; the sheet and an upstream-only notification.
+- Choice: the sheet only. The brief names "Buddy's update check", and Settings → Check for updates is the user's own
+  update action; it hands off to a chat (one English string, English-only like 001/003/005's, so no locale cost).
+  The daily notification fires only for a fork release and opens that sheet; an upstream-only notification would be
+  a background announcement, and the ask's trigger is "when updating". Nicholas may override. (Plan review round 2 F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - `--release` compares with origin's current state; a merged sync is fixed forward, never re-merged
+- Options: check only the candidate's parents (round 1); also refuse when a tag on origin contains the candidate or
+  origin/main's code is higher, with a way out per refusal.
+- Choice: the latter. "Already tagged as vX" → that tag's release state; "fix forward" → a normal fork release from
+  current main, checked by the same `--release`. Start over only while the PR is unmerged. A phone on a higher code
+  can't install the older candidate (`Updates.java` install gate). (Plan review round 2 F2.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Finished sync branches don't block the next sync
+- Options: exit 5 on any `sync/upstream-*` branch (round 1); ignore branches origin/main contains, and delete the
+  branch in the success step.
+- Choice: both halves: the script ignores finished branches (robust if cleanup was missed); the success step deletes
+  the branch after an ancestry check; resume reads the PR with `--state all`. (Plan review round 2 F3.)
+- By: Planner (claude-opus-5-5)
