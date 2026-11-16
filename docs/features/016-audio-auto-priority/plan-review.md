@@ -56,3 +56,11 @@ cover it. This drops the chip width change and the `audio_auto_now` string.
 F6: accepted - Setup shows the Audio device label and the Auto note whenever the voice page is shown. The segments
 still need two or more choices. Proof: code review plus CI's F-Droid build. There is no API 30 device or emulator here,
 and the test plan says so.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+F1 [major] Phone-side queued readings still keep a stale route - Round 1 F1 is only partly resolved. `plan.md:90-92` bypasses ReadQueue when a headset currently wins, and `plan.md:101-115` sends a new Auto reading to the phone immediately whenever the phone is busy. Example: Auto reads a through the buds in ChatGPT's voice; disconnect the buds while a is playing, with Watch reachable; submit b before a finishes. The proposed `phoneBusy` check sends b through `Out.here` and ends its ReadQueue item. `CodexSpeech.java:89-93` queues b with a null sink; `:242-251,303-312` later starts it on the phone without any route check. Thus b starts on Speaker even though Watch has priority, violating `brief.md:20` and the plan's own promise that the next reading switches (`plan.md:210-212`). The same happens if b was submitted while the buds were still connected and was queued directly in CodexSpeech. This is a whole-reading delay, not the small language-detection gap accepted in Risk 7. -> Keep an unstarted Auto/fallback reading eligible for routing until the previous phone reading finishes, then re-evaluate the order. A small phone-completion handoff to ReadQueue, or a route-selection hook at the phone queue's dequeue point, can preserve ChatGPT's voice and order without moving an already playing reading. Cover both cases (buds removed before b is submitted, and after b is queued), asserting that a finishes once and b starts on Watch. A fake `phoneBusy=true → here` test currently enshrines the wrong behavior; include the phone queue's eventual start in the test.
+
+Round 1 F2-F6 are addressed by the revised plan. Review was static; no implementation or device tests were run.
+
+VERDICT: REVISE
