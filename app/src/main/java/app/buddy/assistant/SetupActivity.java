@@ -649,12 +649,15 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                         ? R.string.setup_audio_device_info_watch : R.string.setup_audio_device_info);
         TextView note = text(this, autoBase, 13, MUTED);
         vc.addView(note, topGap(8));
-        autoNote = watch ? null : note;
+        if (autoNote != null) autoNote.removeCallbacks(autoTick); // one refresh chain: the old note's tick must not live on
+        autoSeq++;
+        boolean autoUsed = saved.isEmpty() || away; // a connected pick is used as picked; only Auto and a missing pick show "now"
+        autoNote = watch || !autoUsed ? null : note;
         if (watch) { // the unreachable state: no watch with the Buddy watch app answers
             WatchVoice.link().find(this, node -> {
                 if (node == null && note.isAttachedToWindow()) note.setText(R.string.setup_audio_device_watch_away);
             });
-        } else {
+        } else if (autoUsed) {
             note.post(autoTick);
         }
         vc.addView(fieldLabel(getString(R.string.setup_languages), Voice.languageName(Prefs.voiceLang(this))), topGap(16));

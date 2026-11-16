@@ -50,4 +50,13 @@ public class AudioRouteTest {
         assertEquals("watch", AudioRoute.pick("watch", true, true, true));
         assertEquals("", AudioRoute.pick("watch", false, false, false));  // stale "watch", build without the link
     }
+
+    @Test
+    public void settingsReadSurvivesAPickThatVanishedBetweenQueries() {
+        String[][] gone = {{"", "Auto"}};
+        String[][] here = {{"", "Auto"}, {"id:7:FreeCom", "FreeCom"}};
+        assertEquals("FreeCom", SettingsTool.audioNow("id:7:FreeCom", "id:7:FreeCom", here, "speaker"));
+        assertEquals("auto \u2192 speaker (FreeCom isn't connected)", SettingsTool.audioNow("id:7:FreeCom", "id:7:FreeCom", gone, "speaker"));
+        assertEquals("auto \u2192 speaker", SettingsTool.audioNow("", "", gone, "speaker"));
+    }
 }

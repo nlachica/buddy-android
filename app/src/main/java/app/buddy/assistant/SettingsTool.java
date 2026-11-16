@@ -357,14 +357,8 @@ final class SettingsTool {
 
             @Override
             String read() { // 016: what is used now (the watch step can't be asked synchronously, so it is stated)
-                String saved = Prefs.audioDevice(svc), t = AudioRoute.target(svc);
-                String[][] devices = AudioRoute.choices(svc);
-                boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
-                String now = !saved.isEmpty() && t.equals(saved) ? devices[AudioRoute.indexOf(devices, saved)][1]
-                        : t.equals(WatchVoice.KEY) ? "auto \u2192 watch, or " + AudioRoute.androidNow(svc) + " when no watch answers"
-                        : "auto \u2192 " + AudioRoute.androidNow(svc);
-                return super.read() + "\nnow: " + now
-                        + (away ? " (" + saved.substring(saved.indexOf(':') + 1) + " isn't connected)" : "");
+                String saved = Prefs.audioDevice(svc);
+                return super.read() + "\nnow: " + audioNow(saved, AudioRoute.target(svc), AudioRoute.choices(svc), AudioRoute.androidNow(svc));
             }
         });
         l.add(voiceLanguages(() -> {
@@ -394,6 +388,15 @@ final class SettingsTool {
                         + (Prefs.speakReplies(svc) ? "" : " It only acts while read_aloud is on.");
             }
         });
+    }
+
+    /** One snapshot of the devices: a pick that is no longer in it is described as away, never indexed. */
+    static String audioNow(String saved, String target, String[][] devices, String android) {
+        int i = saved.isEmpty() ? -1 : AudioRoute.indexOf(devices, saved);
+        String now = i >= 0 && target.equals(saved) ? devices[i][1]
+                : target.equals(WatchVoice.KEY) ? "auto \u2192 watch, or " + android + " when no watch answers"
+                : "auto \u2192 " + android;
+        return now + (!saved.isEmpty() && i < 0 ? " (" + saved.substring(saved.indexOf(':') + 1) + " isn't connected)" : "");
     }
 
     static Scalar voiceLanguages(Supplier<String> get, Consumer<String> set) {
