@@ -2085,6 +2085,7 @@
     <string name="hub_tool_delegate">Starting sub-agents: %1$s</string>
     <string name="hub_tool_helpers">Waiting for the sub-agents</string>
     <string name="helpers_title">Sub-agents</string>
+    <string name="helpers_close">Close sub-agents</string>
     <string name="helper_working">Working</string>
     <string name="helper_done">Done</string>
     <string name="helper_failed">Failed</string>
