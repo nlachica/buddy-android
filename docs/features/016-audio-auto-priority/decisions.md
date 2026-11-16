@@ -105,3 +105,14 @@
   when the voice starts is already the order. Cost: overlapping ChatGPT readings each open their own call (plan
   Risk 9). The dequeue check is the follow-up if that pause is noticeable.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Coder: small choices the plan left open
+- `headsetNow(Context)` returns the headset's label (or "Headset" when unnamed, or null for none) instead of the int
+  of `headsetIn`: its three callers only need "is there one" and the name. `headsetIn` stays the tested rule.
+- `TYPE_BLE_HEADSET`/`TYPE_BLE_SPEAKER` are written as 26/27 in `headset()` (API 31 constants; minSdk is 30, and the
+  test uses the same numbers) so no lint InlinedApi warning appears.
+- Setup's 5-s refresh: the note view posts its own `autoTick` and stops when it is no longer attached; `onPause`
+  removes it, `onResume`'s render starts a new one. A watch-picked page has no tick (012's note and its own find).
+- `buddy_settings` read of `audio_device` uses `AudioRoute.target` to tell a pick in effect, the watch step, and
+  Android's routing; `now:` is a second line after the usual one.
+- README: the Auto bullet sits in the Galaxy Watch section next to "Read aloud on the watch".

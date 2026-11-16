@@ -351,7 +351,20 @@ final class SettingsTool {
         }) {
             @Override
             String allowed() {
-                return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can";
+                return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can"
+                        + "; auto uses a connected headset (the latest), else the watch for read aloud, else the phone speaker";
+            }
+
+            @Override
+            String read() { // 016: what is used now (the watch step can't be asked synchronously, so it is stated)
+                String saved = Prefs.audioDevice(svc), t = AudioRoute.target(svc);
+                String[][] devices = AudioRoute.choices(svc);
+                boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
+                String now = !saved.isEmpty() && t.equals(saved) ? devices[AudioRoute.indexOf(devices, saved)][1]
+                        : t.equals(WatchVoice.KEY) ? "auto \u2192 watch, or " + AudioRoute.androidNow(svc) + " when no watch answers"
+                        : "auto \u2192 " + AudioRoute.androidNow(svc);
+                return super.read() + "\nnow: " + now
+                        + (away ? " (" + saved.substring(saved.indexOf(':') + 1) + " isn't connected)" : "");
             }
         });
         l.add(voiceLanguages(() -> {
