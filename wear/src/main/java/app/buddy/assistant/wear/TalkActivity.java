@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.speech.RecognizerIntent;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -62,13 +63,28 @@ public class TalkActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Look.BG);
+        // the chat's name, fixed at the top: tap it for the chat list
+        TextView pill = Look.text(this, title + "  \u203A", 14, Look.TEXT);
+        pill.setSingleLine();
+        pill.setEllipsize(TextUtils.TruncateAt.END);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(Look.dp(this, 14), Look.dp(this, 6), Look.dp(this, 14), Look.dp(this, 6));
+        pill.setBackground(Look.pill(this, Look.CARD, 16));
+        pill.setContentDescription(getString(R.string.talk_chats));
+        pill.setOnClickListener(v -> startActivity(new Intent(this, ChatsActivity.class).putExtra("list", true)));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-2, -2);
+        pp.gravity = Gravity.CENTER_HORIZONTAL;
+        pp.topMargin = Look.dp(this, round ? 22 : 6);
+        pp.setMarginStart(Look.sidePad(this));
+        pp.setMarginEnd(Look.sidePad(this));
+        root.addView(pill, pp);
         scroll = new ScrollView(this);
         scroll.setFocusableInTouchMode(true); // the Watch4's bezel scrolls what has focus
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         int side = Look.sidePad(this);
-        body.setPadding(side, Look.dp(this, round ? 28 : 12), side, Look.dp(this, 8));
+        body.setPadding(side, Look.dp(this, 4), side, Look.dp(this, 8));
         scroll.addView(body);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -103,11 +119,12 @@ public class TalkActivity extends Activity {
         root.addView(buttons, lp);
         setContentView(root);
 
-        // a fresh open means "I want to say something"; not when Talk has news for this chat, or Android is recreating us.
-        // Quick talk ("speak") listens even while a reply is awaited; an unseen reply is still shown first.
+        // only quick talk (the Home double-press, "speak") listens by itself: the app list and a pick leave the mic and
+        // call buttons to the user. Not when Talk has news for this chat, or Android is recreating us.
+        // Quick talk listens even while a reply is awaited; an unseen reply is still shown first.
         boolean speak = getIntent().getBooleanExtra("speak", false);
         boolean news = chat.equals(Talk.chat) && (Talk.waiting ? !speak : Talk.unseen);
-        if (b == null && !news) listen();
+        if (b == null && speak && !news) listen();
     }
 
     @Override
@@ -203,9 +220,6 @@ public class TalkActivity extends Activity {
         ImageView face = new ImageView(this);
         face.setImageResource(working ? R.drawable.bubble_face_thinking : R.drawable.bubble_face);
         body.addView(face);
-        TextView name = Look.text(this, title, 14, Look.MUTED);
-        name.setGravity(Gravity.CENTER);
-        body.addView(name);
         if (mine) {
             for (Talk.Line l : Talk.lines) {
                 TextView t = Look.text(this, l.kind == Talk.YOU ? getString(R.string.talk_you, l.text) : l.text, 15,
