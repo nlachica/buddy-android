@@ -54,3 +54,49 @@
 ## 2026-11-16 - Out of scope for the update flow
 - Merging main into open `feat/*` branches (playbook step 5): only listed in the report. Updating upstream's release notes into the fork release: generated notes name the sync PR. The script test runs in CI's `helper-tests` job (3 fork-only lines in build.yml).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - install=true checks upstream first; `skip_upstream` is the one way past it
+- Options: note only on install=false/up-to-date (round 0); block install=true with no way past; block it with a
+  `skip_upstream` flag; append the note after the installer opens (lost on restart).
+- Choice: the check runs before the branch; with upstream ahead, no card, recommend bringing it in first;
+  `install=true skip_upstream=true` installs the fork release as it is. Because the brief wants upstream in the fork
+  update, while a stopped sync must not lock out 004's self-update route. Texts in pure `Updates.report` so every
+  branch is unit-tested. (Plan review F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Daily notification and Settings sheet stay fork-only (default, pending Nicholas)
+- Options: add an upstream line to the sheet/notification; leave them fork-only.
+- Choice: fork-only unless Nicholas says otherwise (plan Open question Q1), because they can't run a merge, would only
+  point to a chat, and need new strings in 22 locales, a hot spot for every sync. (Plan review F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Codex reviews the whole merge every sync (supersedes the review half of "Stop rule and review")
+- Options: only hand-resolved code conflicts; the whole merge (playbook step 3).
+- Choice: the whole merge, `git diff <upstream tag> HEAD` plus notes, against the fork features' done-when, with the
+  script's list of auto-merged files both sides changed. Clean textual merges in shared Tools/ChatHub/Guard code are
+  where fork behaviour can silently break; one Codex run per sync is cheap. (Plan review F2.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Publish gate: `apk` needs `helper-tests`; reproducibility stays after publish
+- Options: leave CI as is; `needs: helper-tests`; also move the reproducibility step before publish; a final publish
+  job.
+- Choice: `needs: helper-tests` (one line) so the sync-script and helper tests gate the tag build. The reproducibility
+  step stays where upstream put it on purpose; it runs in the PR checks, which must be green before merge and tag.
+  Prefer upstream's mechanism and keep fork lines minimal. (Plan review F3.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Tag the PR's merge commit, checked by `upstream-sync.sh --release`
+- Options: tag `origin/main` after merge (round 0); tag the merge SHA by hand; a script check that prints the tag
+  command.
+- Choice: script check on the merge SHA (upstream tag inside, VERSION `<ver>-fork.<n>`, code above its first parent's
+  and upstream's, tag free); it never pushes. An intervening release conflicts on BuildInfo and is handled by
+  starting over. Version and tag handling are where agents slip, so they live in the tested script. (Plan review F4.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Recovery: stop path cleans up; exit 5 for an existing sync; exit 4 states facts only
+- Options: exit 1 on an existing worktree (round 0); resume/restart flags in the script; state report + AGENTS.md map.
+- Choice: the stop path removes the worktree and local branch (nothing pushed). An existing sync gives exit 5 with its
+  state and changes nothing; AGENTS.md maps each state to resume or start over. Exit 4 prints the fork tags on origin;
+  the release/run state comes from two read-only `gh` calls in AGENTS.md, not from the script (it stays offline and
+  testable). (Plan review F5.)
+- By: Planner (claude-opus-5-5)

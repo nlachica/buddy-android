@@ -1,5 +1,5 @@
 # Plan: 008-upstream-in-update
-<!-- Planner (claude-opus-5-5), 2026-11-16 -->
+<!-- Planner (claude-opus-5-5), 2026-11-16; revised after plan review round 1 -->
 
 ## Goal
 When Nicholas asks Buddy to update, `update_buddy` also checks official Buddy (`ghorbelhamdi/buddy-android`) for a
@@ -12,124 +12,197 @@ resolved and CI is green before publishing, unresolvable ones stop with a clear 
 (3) no upstream change → behaves as today; (4) the first real run brings 2.3.10 into the fork and it runs on the phone.
 
 Non-goals: changing the approval card or installer route; silent installs; a scheduled/unattended sync (GitHub Action);
-the daily "update available" notification and the Settings update sheet (they can't run a merge and keep showing fork
-releases only); merging main into open `feat/*` branches (listed in the report, not touched); editing the
-pipeline-playbook (its upstream/main-vs-release mismatch goes to retro).
+merging main into open `feat/*` branches (listed in the report, not touched); editing the pipeline-playbook (its
+upstream/main-vs-release mismatch goes to retro). The daily "update available" notification and Settings → Check for
+updates stay fork-only by default: see Open questions Q1 (Nicholas confirms).
 
 ## Design
 Three pieces, split by who can do what (research: the app has no git or token; conflicts need an AI; publishing needs
 a confirm):
 
-1. **Detect, in the app.** `update_buddy` (github flavor) also reads upstream's `releases/latest` and compares its
-   version with the fork's latest *release* (not the installed one) with `-fork.N` stripped, using the existing
-   `Updates.compare`. If upstream is ahead it appends one English note to the tool result: official Buddy X isn't in
-   the fork yet; a chat with Linux tools brings it in via "Bringing in official Buddy" in the repo's AGENTS.md; ask the
-   user whether to do that first. Not ahead, or the upstream call fails → the note is `""`, so every output is
-   byte-for-byte today's (done-when 3). The install=true path, card and installer are unchanged.
+1. **Detect, in the app, before any install.** `update_buddy` (github flavor) also reads upstream's `releases/latest`
+   and compares its version with the fork's latest *release* (not the installed one) with `-fork.N` stripped, using
+   the existing `Updates.compare`. The check runs before the tool picks a branch, so every call sees it:
+   - fork up to date, upstream ahead → "up to date" plus the note: official X isn't in the fork; bring it in (a chat
+     with Linux tools, "Bringing in official Buddy" in the repo's AGENTS.md), then `update_buddy install=true`.
+   - fork release Y available, upstream ahead, install=false or true → no card; the note says the sync's release will
+     contain Y too, so bring X in first; if the user wants Y now anyway (or the sync stopped), call
+     `update_buddy install=true skip_upstream=true`. One action is recommended, never both at once.
+   - upstream not ahead, upstream call failed, or `skip_upstream=true` → today's outputs and today's card + installer,
+     byte-for-byte (done-when 3).
+   The texts come from one pure `Updates.report(...)`, so every branch, install=true included, is unit-tested. The
+   handoff ends where 004's route starts: the agent that brought X in calls `update_buddy install=true`, which shows
+   the unchanged card and installer.
 2. **Merge, deterministically, in a script.** `tools/upstream-sync.sh [<tag>]` does the mechanical half and never
    pushes: finds upstream's latest release tag (`gh api`, or the argument), fetches only that tag into
    `refs/remotes/upstream/tags/<tag>` (fork and upstream tags share names like `v2.3.9`; a plain `fetch --tags` can
-   fail with "would clobber"), exits 4 if `origin/main` already contains it, else makes a worktree
-   `../buddy-fork-sync` on branch `sync/upstream-<ver>` from `origin/main`, merges the tag `--no-ff --no-commit`,
-   writes BuildInfo from upstream's file with `VERSION="<ver>-fork.1"` and `VERSION_CODE=max(ours,theirs)+1`, then
-   commits (exit 0) or lists the remaining conflicted files and leaves the merge in progress (exit 3). The worktree
-   keeps a checkout that is mid-feature (like this one) untouched.
+   fail with "would clobber"), exits 4 if `origin/main` already contains it, exits 5 if a sync worktree or branch
+   already exists, else makes a worktree `../buddy-fork-sync` on branch `sync/upstream-<ver>` from `origin/main`,
+   merges the tag `--no-ff --no-commit`, writes BuildInfo from upstream's file with `VERSION="<ver>-fork.1"` and
+   `VERSION_CODE=max(ours,theirs)+1`, then commits (exit 0) or lists the remaining conflicted files and leaves the
+   merge in progress (exit 3). It also lists files both sides changed that git auto-merged (review focus).
+   `tools/upstream-sync.sh --release <merge-sha>` checks the merged PR commit before tagging (upstream tag inside,
+   BuildInfo version/code new against its first parent and upstream, tag free on origin) and prints the tag command.
 3. **Resolve and publish, by the agent, from AGENTS.md.** A new section tells the agent: run the script; resolve
-   conflicts per the policy (prefer upstream's mechanism, keep fork features and their tests, keep the named fork
-   lines); stop with `git merge --abort` and a clear message if a conflict needs feature-sized work; Codex reviews
-   hand-resolved *code* conflicts; one `confirm` card (versions + each conflict and its resolution) authorizes push,
-   PR, and publish-if-green; PR CI green → merge → tag `v<ver>-fork.1` → tag build (which runs the unit tests before
-   it can publish) → `update_buddy install=true`. Same release route the fork already uses (AGENTS.md steps 3-4).
+   conflicts per the policy; Codex reviews the whole merge (playbook step 3), with the both-changed files called out;
+   one `confirm` card (versions, each conflict and its resolution, review result) authorizes push, PR, and
+   publish-if-green; all PR checks green → merge → `--release` on the PR's merge commit → tag that SHA → tag build
+   (`apk` now needs `helper-tests`, and runs the unit tests before it can publish) → `update_buddy install=true` →
+   smoke check. Stop and resume paths are spelled out (Steps 5).
 
 Alternatives (one line each):
 - GitHub Action on a schedule: no LLM secret to resolve conflicts, publishes unattended, and the brief's trigger is
   "when updating".
 - Merge inside the app: no git, no token, no AI. Rejected.
-- All prose, no script: the version arithmetic, tag fetch and "already merged" check are where agents slip; a script
-  makes them testable.
-- Script also does PR/CI/tag ("publish"): a second release mechanism beside AGENTS.md's; CI already gates (PR checks,
-  and the tag build's `testGithubDebugUnitTest` runs before the publish step). Not worth the code.
+- All prose, no script: the version arithmetic, tag fetch, "already merged" and tag checks are where agents slip; a
+  script makes them testable.
+- Script also pushes, opens the PR, tags: a second release mechanism beside AGENTS.md's. Not worth the code.
 - Merge `upstream/main` (playbook step 1): pulls unreleased upstream commits; the brief says "newer release".
-- Two confirms (before push, before publish): more taps for no added information; the one card comes after the
-  merge, so Nicholas sees the resolutions before anything leaves the phone.
+- Move the F-Droid reproducibility step before publish: changes upstream's deliberate order (`build.yml:107-108`);
+  the PR checks already run it on the same tree before anything is tagged.
+- A `gh` stub harness to test release-state reads: two read-only `gh` calls in prose are cheaper than a test rig.
 
 ## Steps
-1. **Upstream note (Java).** `app/src/main/java/app/buddy/assistant/Updates.java`: add
+1. **Upstream note and report (Java).** `app/src/main/java/app/buddy/assistant/Updates.java`: add
    `UPSTREAM_API = "https://api.github.com/repos/ghorbelhamdi/buddy-android/releases/latest"`; pure
    `static String upstreamNote(String upstream, String forkLatest)` → `""` if `upstream` is null/empty or
-   `compare(upstream, forkLatest.replaceFirst("-fork\\.\\d+$", "")) <= 0`, else the note text (mentions the upstream
-   version, "Bringing in official Buddy" in the buddy-fork repo's AGENTS.md at `/root/.buddy/work/buddy-fork` or
-   `gh repo clone nlachica/buddy-android`, needs Linux tools, the user confirms, CI publishes a new fork release, call
-   update_buddy again; tell the user and ask whether to do that first); network wrapper
-   `static String upstreamNote(String forkLatest)` that reads `tag_name` via `get(UPSTREAM_API)`, strips `v`, and
-   returns `""` on any exception. Update the class Javadoc (installs still only from the fork; upstream is only
-   read for its version). New test `app/src/test/java/app/buddy/assistant/UpstreamNoteTest.java` (cases in Test plan).
-2. **Wire it into update_buddy.** `app/src/main/java/app/buddy/assistant/Tools.java` `updateBuddy`: append
-   `Updates.upstreamNote(r.version)` to the "up to date" return, and in the install=false "update available" return
-   put it after the notes and before "Ask the user…". Nothing else in the method changes. Add one sentence to the
-   github-flavor `update_buddy` description (`Tools.java:305-310`): it also says when official Buddy has a release the fork
-   lacks; see "Bringing in official Buddy" in the same AGENTS.md. F-Droid branch untouched; no `strings.xml` change.
+   `compare(upstream, forkLatest.replaceFirst("-fork\\.\\d+$", "")) <= 0`, else one sentence: official Buddy X is out
+   and isn't in this fork yet; a chat with Linux tools brings it in by following "Bringing in official Buddy" in the
+   buddy-fork repo's AGENTS.md (`/root/.buddy/work/buddy-fork`, or `gh repo clone nlachica/buddy-android`); the user
+   confirms, and the fork's CI publishes a new fork release. Network wrapper `static String upstreamNote(String
+   forkLatest)` reads `tag_name` via `get(UPSTREAM_API)`, strips `v`, returns `""` on any exception. Pure
+   `static String report(String installed, Release r, String note, boolean install)`: returns the tool text, or
+   `null` when the install should go ahead (card + installer). With `note` empty it returns today's two strings
+   verbatim (moved from `Tools.updateBuddy`) and `null` for install=true with an update. With a note: up to date →
+   today's text + note + "ask whether to bring it in now; afterwards call update_buddy with install=true"; update Y
+   available (either install value) → head (+ " Not installed yet." when install=true) + "An update is available.
+   What's new" + notes + note + "that release will contain Y too, so recommend bringing X in first; if the user wants
+   Y now anyway, or bringing X in stopped, call update_buddy with install=true and skip_upstream=true". Class Javadoc:
+   installs still only from the fork; upstream is only read for its version. New test
+   `app/src/test/java/app/buddy/assistant/UpstreamNoteTest.java` (cases in Test plan).
+2. **Wire it into update_buddy.** `app/src/main/java/app/buddy/assistant/Tools.java`: `installs` passes
+   `a.optBoolean("skip_upstream", false)`; `updateBuddy(install, skipUpstream)`: after `latest()`,
+   `note = skipUpstream ? "" : Updates.upstreamNote(r.version)`, `text = Updates.report(BuildInfo.VERSION, r, note,
+   install)`, `if (text != null) return text;` then the card and installer code exactly as today. github-flavor schema
+   (`Tools.java:305-310`): add `skip_upstream` (boolean: "true: install this fork release without first bringing in a
+   newer official Buddy (the user chose that, or bringing it in stopped)") and one description sentence: it also says
+   when official Buddy has a release the fork lacks; see "Bringing in official Buddy" in the same AGENTS.md. F-Droid
+   branch untouched; no `strings.xml` change.
 3. **Sync script + its test.** New `tools/upstream-sync.sh` (bash, `set -eu`) per Design 2: upstream remote added if
    missing; `gh api repos/ghorbelhamdi/buddy-android/releases/latest --jq .tag_name` only when no tag argument;
    `git fetch origin main` and `git fetch --no-tags upstream "+refs/tags/$tag:refs/remotes/upstream/tags/$tag"`;
-   worktree dir overridable with `SYNC_DIR`; the caller's checkout may be dirty or on any branch (the worktree is
-   separate), but exit 1 with nothing changed if the worktree dir or the branch already exists; after setting BuildInfo, `grep`
-   both lines and treat BuildInfo as an unresolved conflict if either is missing (upstream restructured it). Always
-   print: upstream version, new fork version/code, worktree, branch, conflicted files, and the next AGENTS.md step.
-   Exit codes: 0 merged and committed, 3 conflicts left, 4 nothing to do (say whether a `v<ver>-fork.*` tag exists on
-   origin, i.e. "release it" vs "wait for the tag build"), 1 error. New `tools/upstream-sync-test.sh`: builds bare
-   `origin`/`upstream` repos in a temp dir and runs the cases in Test plan; no network, no `gh` (tag passed in), git
-   identity set via env.
-4. **CI.** `.github/workflows/build.yml`, `helper-tests` job: one step `bash tools/upstream-sync-test.sh` (a 3-line,
-   fork-only hunk; the job already has git).
+   worktree dir overridable with `SYNC_DIR`; the caller's checkout may be dirty or on any branch.
+   - Exit 4 (origin/main contains the tag): print the `v<ver>-fork.*` tags on origin (`git ls-remote --tags`), or
+     "none", and point to AGENTS.md's "already merged" step. No claim about the tag build.
+   - Exit 5 (after `git worktree prune`, the worktree dir or any `sync/upstream-*` branch exists): change nothing;
+     print the dir, branch, whether a merge is in progress (`MERGE_HEAD`), unmerged files, and whether the branch is
+     on origin; point to AGENTS.md's resume step.
+   - Otherwise merge as in Design 2. After setting BuildInfo, `grep` both lines and treat BuildInfo as an unresolved
+     conflict if either is missing (upstream restructured it). Print: upstream version, new fork version/code,
+     worktree, branch, conflicted files, auto-merged files both sides changed (`comm -12` of `git diff --name-only`
+     from the merge-base to each side, minus conflicts), and the next AGENTS.md step. Exit 0 committed, 3 conflicts
+     left, 1 error.
+   - `--release <sha>`: read VERSION/VERSION_CODE at `<sha>`; refuse (exit 1, reason, "start over: AGENTS.md") unless
+     VERSION is `<ver>-fork.<n>`, `refs/remotes/upstream/tags/v<ver>` (fetched if missing) is an ancestor of `<sha>`,
+     VERSION_CODE is above both `<sha>^1`'s and the upstream tag's, VERSION differs from `<sha>^1`'s, and `v<VERSION>`
+     isn't on origin; else print `git tag v<VERSION> <sha> && git push origin v<VERSION>` and exit 0. Never tags or
+     pushes itself.
+   New `tools/upstream-sync-test.sh`: builds bare `origin`/`upstream` repos in a temp dir and runs the cases in Test
+   plan; no network, no `gh` (tag passed in), git identity set via env; it plays GitHub's PR merge in a temp clone.
+4. **CI.** `.github/workflows/build.yml`: `helper-tests` gets a step `bash tools/upstream-sync-test.sh`; `apk` gets
+   `needs: helper-tests`, so a red helper or sync-script test means no APK and no release on a tag. Two small
+   fork-only hunks; the reproducibility step stays where upstream put it.
 5. **AGENTS.md.** New section "Bringing in official Buddy" after "Updating Buddy on the phone": when (update_buddy's
-   note), where (chat with Linux tools), then the steps: run the script and read its exit code; resolve (policy: prefer
-   upstream's mechanism where both fixed the same thing; keep features 001-007 and their tests; keep the fork lines:
-   `Updates` REPO/API on nlachica and `UPSTREAM_API`, `build.yml`'s test/watch/F-Droid-check lines, fork notes in
-   README/AGENTS/GUIDE; docs keep upstream's text plus the fork's sentence); commit with each conflict and its
-   resolution in the message, plus a line in an affected feature's `decisions.md`; Codex reviews hand-resolved code
-   (not docs, not BuildInfo) with `git diff refs/remotes/upstream/tags/<tag> HEAD`; stop rule (feature-sized conflict,
-   or CI still red after 2 fix attempts → `git merge --abort` / leave the PR open, tell the user which files and why,
-   no tag); one `confirm` card; push, `gh pr create -R nlachica/buddy-android --base main`, `gh pr checks --watch`;
-   `gh pr merge --merge`; `git fetch origin main && git tag v<ver>-fork.1 origin/main && git push origin
-   v<ver>-fork.1`; `gh run watch`; never a prerelease; `update_buddy install=true`; `git worktree remove`; report
-   `feat/*` branches behind main. In "Updating Buddy on the phone" step 2 add: `n` restarts at 1 on a new upstream
-   version (the sync script sets it).
+   note), where (a chat with Linux tools; if this chat has none, the user turns them on or opens one), then:
+   - Run the script; act on its exit code (0/3 continue, 4 already merged, 5 resume, 1 error → tell the user).
+   - Resolve: prefer upstream's mechanism where both fixed the same thing; keep features 001-007 and their tests;
+     keep the fork lines (`Updates` REPO/API on nlachica and `UPSTREAM_API`, `build.yml`'s test/watch/F-Droid-check
+     and `needs` lines, fork notes in README/AGENTS/GUIDE; docs keep upstream's text plus the fork's sentence); commit
+     with each conflict and its resolution in the message, plus a line in an affected feature's `decisions.md`.
+   - Review: Codex reviews the whole merge, `git diff refs/remotes/upstream/tags/<tag> HEAD` (the fork's lines on
+     upstream's base) plus the script's both-changed list and the merge message, against each fork feature's
+     done-when (`docs/features/00*/brief.md`); patch only real gaps, minimally, each recorded.
+   - Stop rule: a conflict needing feature-sized work (upstream removed or rewrote what a fork feature needs), or a
+     review gap that is feature-sized → `git merge --abort` if in progress, `git worktree remove --force <dir>`,
+     `git branch -D sync/upstream-<ver>` (nothing was pushed), tell the user which files and why; nothing published.
+     CI still red after 2 fix attempts → leave the PR open, no tag, tell the user.
+   - One `confirm` card: versions, conflicts and resolutions, review result. Then push,
+     `gh pr create -R nlachica/buddy-android --base main`, `gh pr checks --watch` (all checks must pass, the `apk`
+     job's reproducibility step included), `gh pr merge --merge`.
+   - Tag: `sha=$(gh pr view <n> -R nlachica/buddy-android --json mergeCommit -q .mergeCommit.oid)`, `git fetch
+     origin`, `tools/upstream-sync.sh --release "$sha"`, run the printed tag command, `gh run watch`; never a
+     prerelease. If `--release` refuses because main got a release meanwhile (GitHub also refuses the PR merge then:
+     both sides change BuildInfo's lines) → start over: with the user's confirm close the PR (`gh pr close -d`), clean
+     up as in the stop rule, rerun the script, reapply the resolutions from the old merge message.
+   - Install: `update_buddy install=true`; after the restart, smoke check: a chat answers, `buddy_settings` reads a
+     setting, Settings → Voice → Audio device plays the sample, and if the watch is at hand a watch talk and a watch
+     call. Then `git worktree remove`; report `feat/*` branches behind main.
+   - Exit 4, already merged: no fork tag → find the merged sync PR (`gh pr list -R … -H sync/upstream-<ver> --state
+     merged`), go to Tag. A tag → `gh release view <tag> -R … --json assets,isPrerelease`: `buddy.apk` there →
+     `update_buddy` (if its note still shows, the release isn't Latest: `gh release edit <tag> -R … --prerelease=false
+     --latest`); no APK → `gh run list -R … --branch <tag> -L 1`: running → `gh run watch`; failed → show the user the
+     failed step (`gh run view <id> --log-failed | tail -40`), `gh run rerun <id> --failed` once if it is
+     infrastructure, else fix forward as `<ver>-fork.2` via "Updating Buddy on the phone". Never move a tag.
+   - Exit 5, resume: merge in progress → keep resolving in that worktree (its resolutions are kept); committed but not
+     pushed → continue at Review; on origin → `gh pr list -R … -H <branch>` and continue at the PR; for an older
+     upstream version, or the user wants to start over → start over as above.
+   In "Updating Buddy on the phone" step 2 add: `n` restarts at 1 on a new upstream version (the sync script sets it).
 
-Rollout (orchestrator, after verify and the 008 PR merge; not Coder steps):
+Rollout (orchestrator, after the 008 PR merge; not Coder steps):
 - R1. Release 008 alone as `2.3.9-fork.5` (code 212) per AGENTS.md and install it, so the phone has the new check.
 - R2. First real run, on the phone in a chat with Linux tools: "update Buddy" → note about 2.3.10 → follow the new
-  section → `v2.3.10-fork.1` (code 213) → `update_buddy install=true` → Nicholas taps Update.
+  section → `v2.3.10-fork.1` (code 213) → `update_buddy install=true` → Nicholas taps Update → evidence table below.
+- Verify: done-when 2 and 3 are verified before the PR merge; rows 1 and 4 stay PENDING in `verify.md`, and the
+  verdict stays open, until R2's evidence is recorded.
 
 ## Test plan
 | Done-when | Proof |
 |---|---|
-| 1. fork release with upstream + 001-007, offered | `UpstreamNoteTest`: `("2.3.10","2.3.9-fork.4")` → note naming 2.3.10; `("2.4.0","2.3.10-fork.2")` → note. Script test "clean": exit 0, HEAD has 2 parents, files from both sides present, BuildInfo `1.0.1-fork.1` / max+1, no conflict markers. R2 evidence: `git merge-base --is-ancestor v2.3.10 v2.3.10-fork.1` and `… v2.3.9-fork.5 v2.3.10-fork.1` both true; PR and tag CI runs green (unit tests of 004/005/007 included); `gh release view v2.3.10-fork.1 -R nlachica/buddy-android` has `buddy.apk`, not prerelease, Latest; the phone's update_buddy (fork.5) output shows the 2.3.10 note before the sync and "Latest release: 2.3.10-fork.1 … available" after. |
-| 2. conflicts detected/resolved/green; unresolvable → stop, nothing published | Script test "conflict": exit 3, output lists the conflicting file and not BuildInfo, BuildInfo staged and resolved, merge in progress. Script test "BuildInfo restructured": exit 3 listing BuildInfo. All cases: `origin` refs and tags unchanged (script never pushes). Publishing gate: PR checks green before merge (R2 PR link) and `build.yml` runs `testGithubDebugUnitTest` in the step before "Publish GitHub release" (red → no release). Stop path: AGENTS.md section has the abort rule; Verifier reads it against the brief (an AI judgement can't be unit-tested). |
-| 3. no upstream change → as today | `UpstreamNoteTest`: `("2.3.10","2.3.10-fork.1")`, `("2.3.10","2.3.10-fork.3")`, `("2.3.9","2.3.9")`, `(null, …)`, `("", …)` → `""`, so `updateBuddy`'s strings equal today's. Script test "nothing": exit 4, no worktree or branch made. On the phone after R2: update_buddy shows no upstream note. |
-| 4. 2.3.10 in the fork, runs on the phone | R2: `update_buddy` after install reports Installed 2.3.10-fork.1; smoke check on the phone: a chat works, the new per-chat Approvals line (upstream 2.3.10) shows, `buddy_settings` reads a setting (004/005), and the watch talks to the phone if it is at hand (007; watch APK from the same release via adb). |
+| 1. fork release with upstream + 001-007, offered | `UpstreamNoteTest`: `upstreamNote("2.3.10","2.3.9-fork.4")` → note naming 2.3.10; `("2.4.0","2.3.10-fork.2")` → note. `report` with a note: update available + install=true → not `null` (no card), says "Not installed yet", has the note and `skip_upstream=true`; install=false → same advice, not today's "Ask the user if they want it now"; up to date → today's text + note + `install=true`. Script "clean": exit 0, HEAD has 2 parents, files from both sides present, BuildInfo `1.0.1-fork.1` / max+1, both-changed list printed, no conflict markers. Script "release": test merges the sync branch into origin main → `--release <sha>` exit 0, prints `git tag v1.0.1-fork.1 <sha>`, origin tags unchanged. R2: Codex whole-merge review in the PR or merge notes; `git merge-base --is-ancestor v2.3.10 v2.3.10-fork.1` and `… v2.3.9-fork.5 v2.3.10-fork.1`; tag = the PR's merge commit; PR and tag runs green; `gh release view v2.3.10-fork.1 -R nlachica/buddy-android` has `buddy.apk`, not prerelease, Latest; fork.5's update_buddy shows the 2.3.10 note before and "Latest release: 2.3.10-fork.1 … available" after; the feature table below. |
+| 2. conflicts detected/resolved/green; unresolvable → stop, nothing published | Script "conflict": exit 3, lists the conflicting file and not BuildInfo, BuildInfo staged and resolved, merge in progress. "BuildInfo restructured": exit 3 listing BuildInfo. "abort-then-retry": exit 3 → the AGENTS.md stop commands → rerun → exit 3 with a fresh worktree. "in-progress": exit 3 → write a resolution → rerun → exit 5, that file and `MERGE_HEAD` unchanged, state printed. "main advanced": after exit 0, origin main gets a release commit (code bumped) → merging the sync branch into it conflicts on BuildInfo (GitHub would refuse); a merge commit resolved to main's BuildInfo → `--release` exit 1; start over → code = new max+1, `--release` exit 0. `--release` with the tag already on origin → exit 1. All cases: origin refs and tags unchanged by the script. Gate (inspect): `build.yml` `apk` has `needs: helper-tests` (a failed needed job skips `apk`, so no publish step runs) and runs `testGithubDebugUnitTest` before "Publish GitHub release"; AGENTS.md requires all PR checks green, which include the reproducibility step, before merge and tag. Stop/resume prose: the Verifier reads AGENTS.md against the brief; exit-4 reads checked live against `v2.3.9-fork.4` (has `buddy.apk` → "released" branch). |
+| 3. no upstream change → as today | `UpstreamNoteTest`: `upstreamNote` → `""` for `("2.3.10","2.3.10-fork.1")`, `("2.3.10","2.3.10-fork.3")`, `("2.3.9","2.3.9")`, `(null, …)`, `("", …)`; `report` with `""`: up to date and update available (install=false) equal today's strings copied literally from `Tools.updateBuddy`; update available + install=true → `null` (today's card path). Script "nothing": exit 4, prints "none", no worktree or branch made; after a `v1.0.1-fork.1` tag in origin, prints it. Phone after R2: update_buddy shows no upstream note. |
+| 4. 2.3.10 in the fork, runs on the phone | R2: `update_buddy` after install reports Installed 2.3.10-fork.1, the per-chat Approvals line (upstream 2.3.10) shows, and the table below. |
 
-Other cases in `upstream-sync-test.sh`: upstream code higher than the fork's (30 vs 14 → 31); existing worktree or
-branch → exit 1 and nothing changed. Local checks: `bash tools/upstream-sync-test.sh`, `bash linux/test/run.sh`;
-Gradle/JUnit run in CI (`pipe code-loop --ci`), as the phone has no Android SDK.
+Feature evidence for R2 (a hardware check that can't be done is recorded as INCOMPLETE in `verify.md`, not passed):
+
+| Feature | Evidence |
+|---|---|
+| 001 audio device | Settings → Voice → Audio device: pick Speaker → the sample plays there; the voice bar's quick switch is present |
+| 002 runner hang | `linux/test/run.sh` green in the tag run's `helper-tests` (dead-agent regression test) |
+| 003/006 watch talk | watch APK from the same release via adb; pick a chat, speak → message in the phone chat; reply shown and spoken on the watch |
+| 004 self-update | the R2 install itself (card → installer → new version, chats kept); `ApprovalGateTest`, `ApkStagingTest` green |
+| 005 settings | `SettingsCoverageTest`, `SettingsFamiliesTest` green; one `buddy_settings` change approved on the card, one denied |
+| 007 watch call/voice | from the watch, start a call, speak, hear Buddy, end it; with ChatGPT voice on, a watch reply in that voice |
+
+Other script cases: upstream code higher than the fork's (30 vs 14 → 31). Local checks: `bash tools/upstream-sync-test.sh`,
+`bash linux/test/run.sh`; Gradle/JUnit run in CI (`pipe code-loop --ci`), as the phone has no Android SDK.
 
 ## Risks
 - **Clean textual merges can still break behavior** (2.3.10 touches `Tools`, `ChatHub`, `Guard`, `Sessions` beside
-  features 004/007). CI compiles and runs the unit tests; features without tests (001 audio, 007 watch audio) are only
-  covered by the R2 smoke check, then fixed forward.
-- **An AI resolution that compiles but is wrong.** Mitigated by the confirm card listing each resolution, Codex review
-  of hand-resolved code, and the merge commit message recording them. First run: only BuildInfo (script) and
-  `docs/GUIDE.md` (text: keep upstream's new lines and the fork's sentence) conflict.
+  features 004/007). CI compiles and runs the unit tests, Codex reviews the whole merge with the both-changed files
+  called out, and features without tests (001 audio, 003/007 watch) get the R2 smoke checks.
+- **An AI resolution that compiles but is wrong.** Mitigated by the whole-merge review, the confirm card listing each
+  resolution, and the merge commit message recording them. First run: only BuildInfo (script) and `docs/GUIDE.md`
+  (text: keep upstream's new lines and the fork's sentence) conflict.
 - **Upstream restructures BuildInfo** → the script's line check reports BuildInfo as a conflict instead of guessing.
-- **The note keeps showing while the release build runs** (fork's latest release is still old) → the script exits 4
-  and says "merged, wait for the tag build" or "merged but not released: tag it".
-- **`main` moves between PR CI and tagging** (unlikely, one user) → the tag build runs the tests again before publishing.
+- **The note keeps showing while the release build runs** (fork's latest release is still old) → exit 4 and
+  AGENTS.md's release-state reads say which: tag it, watch the build, fix a failed build, or fix the Latest flag.
+- **`main` moves between PR checks and merge without a release** (no BuildInfo conflict) → the merged tree differs
+  from the checked one; the tag run reruns helper and unit tests before publishing, the reproducibility step only
+  after (upstream's order; it concerns the F-Droid APK, which the fork doesn't ship). One user: unlikely.
+- **A release lands on main during a sync** → BuildInfo conflict blocks the PR and `--release` refuses; start over
+  costs redoing the resolutions (recorded in the old merge message).
 - **The release is public once tagged** (public repo) → covered by the confirm card before any push.
 - **Unauthenticated GitHub API (60/h)**: one extra call per update_buddy; a failure only drops the note.
 - **gh defaults to the parent repo** with an `upstream` remote (005 learning) → every `gh` call names `-R`.
-- The F-Droid reproducibility step runs after publish and can go red without holding the release back (existing).
+- **`skip_upstream` could be used to dodge the sync** → only after the user chose it; the card still names the version.
 
 ## Open questions
-None blocking. Defaults Nicholas may override (recorded in decisions.md): R1 ships 008 alone first (one extra
-Update tap) so the first real run is a true end-to-end test of the trigger; one confirm card per sync covers push,
-PR and publish-if-green.
+- **Q1 (Nicholas; not blocking the Coder, needed before Verify).** Should the daily "update available" notification
+  and Settings → Check for updates also mention official Buddy? Default (recommended): no. The ask is about "the
+  update thing I've set up on this fork" (004's `update_buddy` + AGENTS.md route); those two can't run a merge (no
+  agent, Linux tools or confirm), would only point to a chat, and need new UI strings, a hot spot in 22 locales for
+  every future sync. If yes: one more step (an English line on the sheet when upstream is ahead). The orchestrator
+  appends his answer to the brief's Clarifications.
+- Defaults Nicholas may override (decisions.md): R1 ships 008 alone first (one extra Update tap); one confirm card per
+  sync covers push, PR and publish-if-green.

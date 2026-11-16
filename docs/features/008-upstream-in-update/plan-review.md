@@ -14,3 +14,48 @@ F4 [major] Tagging the latest main can release a different commit or an unusable
 F5 [major] Failed syncs and failed tag builds have no usable recovery path - `plan.md:76` refuses an existing fixed worktree or sync branch, while the failure policy (`plan.md:91-95`) aborts a merge or leaves the PR open and only removes the worktree on success. `git merge --abort` leaves both worktree and branch, so another update attempt exits 1 rather than resuming the stopped sync. Separately, exit 4 treats any matching remote tag as "wait for the tag build" (`plan.md:79-80,124-125`), even if that build has failed and no APK will appear. These are normal outcomes of the specified conflict/CI stop paths. -> Document a bounded resume/retry procedure that identifies the existing sync branch/worktree and PR, preserves uncommitted resolutions, and distinguishes an aborted preparation from an active merge. For an already-merged upstream tag, inspect the matching release/build state and report or recover a failed build instead of waiting indefinitely; tag existence alone is insufficient. Add local tests for abort-then-retry and existing in-progress work, and a release-state check for a tag with a failed build and no APK.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted in part - install=true: the upstream check now runs before the tool picks a branch (Design 1, Steps 1-2).
+With upstream ahead and a fork update available, update_buddy never shows the card; it gives one recommendation
+(bring X in first, its release contains Y too) and names the single alternative (`install=true skip_upstream=true`,
+when the user wants Y now or the sync stopped). That alternative keeps 004's self-update route usable when a sync
+can't finish. The handoff ends at `update_buddy install=true`, where the card and installer are unchanged. All branch
+texts come from a pure `Updates.report(...)`, so install=true with an available fork release and upstream ahead is
+unit-tested (Test plan rows 1 and 3). Sheet/notification: rejected as a code change for now and raised as Open
+question Q1 for Nicholas. The ask names "the update thing I've set up on this fork" (004's update_buddy + AGENTS.md
+route); the sheet and notification can't run a merge and would only point to a chat, at the cost of new strings in 22
+locales (research: strings.xml is a sync hot spot). Default: fork-only. If he wants it, it adds one step.
+
+F2: accepted - Codex now reviews the whole merge every sync (playbook step 3), not just hand-resolved code:
+`git diff refs/remotes/upstream/tags/<tag> HEAD` plus the merge notes, checked against each fork feature's done-when.
+The script lists the auto-merged files both sides changed so the review looks there first (Steps 3, 5; superseding
+decision appended). Added a feature-to-evidence table for R2 covering 001 audio device, 002, 003/006 watch talk, 004,
+005 settings approve/deny, and 007 watch call + phone voice. A hardware check that can't be done is recorded as
+INCOMPLETE. Verify keeps done-when 1 and 4 PENDING, with the verdict open, until R2's evidence is recorded (Rollout).
+
+F3: accepted in part - `apk` gets `needs: helper-tests`, so a red helper or sync-script test means no APK and no
+publish on a tag (Step 4; inspectable gate in Test plan row 2). Moving the reproducibility step before publish is
+rejected. Upstream put it after publish on purpose (`build.yml:107-108`), the brief says prefer upstream's mechanism
+and keep fork lines minimal, and the step checks the F-Droid APK, which the fork doesn't ship. It is gated another way:
+it runs in every PR run, AGENTS.md requires all PR checks green before merge, and F4 tags that merged commit. Residual
+case (main moves without a conflict) is in Risks. No deliberate red-release experiment: it would cost a public
+release for a property GitHub's `needs` semantics already give.
+
+F4: accepted - tag the PR's merge commit (`gh pr view --json mergeCommit`), not `origin/main`. New
+`tools/upstream-sync.sh --release <sha>` refuses unless the upstream tag is an ancestor, VERSION is `<ver>-fork.<n>`,
+VERSION_CODE is above both the first parent's (main before the merge, which holds any release made in between) and
+upstream's, and the tag is free on origin. It prints the tag command and never pushes. An intervening release also
+conflicts on BuildInfo's lines, so GitHub refuses the PR merge. Recovery is a documented start over, which recomputes
+max+1 from the new main. Script cases "release" and "main advanced" exercise it (Test plan row 2).
+
+F5: accepted in part - the stop path now also removes the worktree and the local branch (nothing was pushed), so a
+retry starts clean (case "abort-then-retry"). An existing worktree/branch now gives exit 5: nothing is changed, and the
+script prints whether a merge is in progress, the unmerged files, and whether the branch is on origin. AGENTS.md maps
+each state to resume (keep resolving, continue at review, continue at the PR) or start over (case "in-progress":
+resolutions and MERGE_HEAD kept). Exit 4 no longer claims "wait for the tag build". It prints the fork tags on origin,
+and AGENTS.md's "already merged" step reads the release and run state: APK → install (or fix the Latest flag);
+running → watch; failed → show the failed step, rerun once if it's infrastructure, else fix forward as `-fork.2`.
+Rejected: a `gh` stub harness to unit-test those two read-only `gh` calls (YAGNI). The Verifier checks the "released"
+branch live on `v2.3.9-fork.4` and reads the rest against the brief.
