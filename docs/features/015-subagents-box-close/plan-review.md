@@ -19,3 +19,14 @@ F2: accepted - the tap now calls the full `refresh()` (as the speaker button alr
 `renderHelpers()`. `refresh()` runs `backgroundPanel.setShown(resumed)` and then `renderHelpers()`. Design 5 no longer
 says "no new code" and explains why the panel needs that call. The edge row now checks that the panel comes back right
 after × with the parent and sub-agents idle, without navigation or another chat event, plus a code walk.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+No new findings. Both Round 1 major findings are resolved in the revised plan:
+
+- F1: Design 4 now guards the in-place update with `helpersClose != null` (`plan.md:45-47`), and the verification row covers subsequent refreshes after closing, helper chats, and chats without helpers (`plan.md:98`). This handles the existing signature-cache fall-through in `app/src/main/java/app/buddy/assistant/ChatActivity.java:828-856`.
+- F2: The tap now calls full `refresh()` (`plan.md:49-57`), which restores the background panel before rendering the helpers (`app/src/main/java/app/buddy/assistant/ChatActivity.java:2016-2035`). The verification row explicitly checks immediate restoration with idle chats and no further event (`plan.md:97`).
+
+The plan covers every done-when item without changing the delegate or bubble behavior. Checked the round's stable slot ordering and replacement ids (`app/src/main/java/app/buddy/assistant/Helpers.java:38-44,89-95`), session save/load integration (`app/src/main/java/app/buddy/assistant/Sessions.java:289-291,360-412`), card cleanup (`app/src/main/java/app/buddy/assistant/ChatActivity.java:1018-1022`), and independent report access through the bubble and Search (`app/src/main/java/app/buddy/assistant/Bubble.java:3050-3078`; `app/src/main/java/app/buddy/assistant/SearchActivity.java:121-139`). No blocker or major finding remains open. This is a plan/code inspection; implementation tests, CI, and the specified device checks remain to be performed.
+
+VERDICT: APPROVE
