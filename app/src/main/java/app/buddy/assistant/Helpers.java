@@ -48,9 +48,21 @@ final class Helpers {
         return "Not for a sub-agent: " + what + ". Say in your report what the chat that started you should do.";
     }
 
-    private static boolean anyRunning(List<Sessions.Session> l) {
+    static boolean anyRunning(List<Sessions.Session> l) {
         for (Sessions.Session s : l) if (s.running) return true;
         return false;
+    }
+
+    /** Names a delegate round: its helpers' ids (a new round makes new sessions); "" for none. */
+    static String round(List<Sessions.Session> l) {
+        StringBuilder b = new StringBuilder();
+        for (Sessions.Session s : l) b.append(s.id).append('|');
+        return b.toString();
+    }
+
+    /** Whether the user closed this round's box (Session.helpersClosed) and all its sub-agents are done. */
+    static boolean boxClosed(String closed, List<Sessions.Session> l) {
+        return !l.isEmpty() && !anyRunning(l) && round(l).equals(closed);
     }
 
     /** The delegate tool: starts the helpers and waits for their reports. */
