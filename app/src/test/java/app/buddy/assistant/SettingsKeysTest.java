@@ -287,6 +287,50 @@ public class SettingsKeysTest {
         }
     }
 
+    // ---------------------------------------------------------------- a new MCP server with its key
+
+    private static final String URL = "https://connect.composio.dev/mcp";
+
+    @Test
+    public void aNewServerWithAKeyShowsItMaskedOnOneCardAndADenialChangesNothing() throws Exception {
+        for (String line : new String[]{KEY, "x-consumer-api-key: " + KEY}) {
+            File r = root();
+            write(r, "root/.config/composio/key", line + "\n");
+            SettingsTool.Setting set = SettingsTool.mcp(null, "composio", null, false, r, "~/.config/composio/key");
+            List<String> cards = new ArrayList<>();
+            String reply = SettingsTool.change(set, URL, CARD, card -> {
+                cards.add(card);
+                return "DENIED: no";
+            }, Runnable::run);
+            assertEquals("Not changed. DENIED: no", reply);
+            assertEquals(1, cards.size());
+            assertEquals("Change Buddy's setting mcp/composio\nNow: (none)\nNew: add the server at " + URL
+                    + " with the key …xyzA (40 characters), from ~/.config/composio/key", cards.get(0));
+            assertEquals(null, McpServers.find("composio"));
+        }
+        assertEquals("x-consumer-api-key", McpServers.header("x-consumer-api-key: " + KEY)[0]);
+        assertEquals(KEY, McpServers.header("x-consumer-api-key: " + KEY)[1]);
+        String[] nn = SettingsTool.mcp(null, "composio", null, false, null, null).card(null, URL);
+        assertEquals("add the server at " + URL + " (no key)", nn[1]);
+    }
+
+    @Test
+    public void aKeyFileIsRefusedBeforeItIsReadWhenTheServerExistsOrTheAddressIsBad() throws Exception {
+        McpServers.S s = new McpServers.S("notes");
+        try {
+            SettingsTool.mcp(null, "notes", s, true, new File("/nonexistent"), "~/k").check("on");
+            throw new AssertionError("accepted");
+        } catch (IllegalArgumentException e) {
+            assertEquals("mcp/notes exists: set its key with mcp/notes/key", e.getMessage());
+        }
+        try {
+            SettingsTool.mcp(null, "composio", null, false, new File("/nonexistent"), "~/k").check("ftp://x");
+            throw new AssertionError("accepted");
+        } catch (IllegalArgumentException e) {
+            assertTrue(e.getMessage(), e.getMessage().startsWith("the address must be https://"));
+        }
+    }
+
     // ---------------------------------------------------------------- linuxCaller
 
     @Test

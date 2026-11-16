@@ -224,7 +224,7 @@ public class SettingsFamiliesTest {
             McpServers.S s = new McpServers.S("notes");
             s.url = url;
             s.tools = new JSONArray().put(new JSONObject().put("name", "search"));
-            SettingsTool.Setting set = SettingsTool.mcp(null, "notes", s, true);
+            SettingsTool.Setting set = SettingsTool.mcp(null, "notes", s, true, null, null);
             String snapshot = new JSONObject().put("id", "notes").put("url", url).put("on", true).put("tools", s.tools).toString();
             String shown = SettingsTool.mcpLine(s, true) + "\n" + set.read() + "\n" + String.join("\n", set.card(snapshot, "off"))
                     + "\n" + String.join("\n", set.card(snapshot, "")) + "\n" + set.view(snapshot);
