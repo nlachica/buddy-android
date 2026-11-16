@@ -3236,7 +3236,7 @@ final class Bubble implements ChatHub.Listener {
         if (!user && !m.text.isEmpty()) showMessage(m.kind, m.text);
         for (String id : pictures) showPicture(id, user);
         if (user && !m.text.isEmpty()) showMessage(m.kind, m.text);
-        scrollToEnd();
+        if (user) scrollToEnd(); else followEnd();
     }
 
     private void showPicture(final String id, boolean user) {
@@ -3295,7 +3295,7 @@ final class Bubble implements ChatHub.Listener {
             }
             log.add(text);
             log.setLive(sessions.current.running);
-            scrollToEnd();
+            followEnd();
             return;
         }
         if (log != null) {
@@ -3380,7 +3380,7 @@ final class Bubble implements ChatHub.Listener {
         copyOnLongPress(v, text);
         messages.addView(v, p);
         while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0);
-        scrollToEnd();
+        if (kind == Kind.USER) scrollToEnd(); else followEnd();
     }
 
     /** A reply's text (or the text between its tables): Markdown, links tappable, a long press copies it. */
@@ -3557,6 +3557,12 @@ final class Bubble implements ChatHub.Listener {
             rows.setVisibility(o ? View.VISIBLE : View.GONE);
             chevron.setImageResource(o ? R.drawable.ms_expand_less : R.drawable.ms_expand_more);
         }
+    }
+
+    /** New agent output: follow it only if the user is already at the end (or near it), so scrolling back to read isn't yanked. Call before the layout pass. */
+    private void followEnd() {
+        View c = scroll.getChildAt(0);
+        if (c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(48)) scrollToEnd();
     }
 
     private void scrollToEnd() {
