@@ -29,8 +29,18 @@ showing the phone's later title for the chat on the watch, and changing the phon
 
    `draw()` clears `fresh` for good once `Talk.lines` has a YOU line for this chat. A YOU line comes only from
    `/buddy/heard`, so it means the phone took the words and the chat exists.
-   Everything else (`Talk`, the reply filter, status checks, the notification, `ReadAloud`, the call header) works
-   unchanged, because the watch has the real id from the start.
+
+   **The flag travels with the conversation.** `Talk.begin(c, chat, title, accent, fresh, send)` takes the screen's
+   `fresh` and keeps it in `static boolean Talk.fresh`, which `HEARD` sets back to false. `Talk.notification()` puts
+   `"new" = Talk.fresh` on its content intent. So a screen opened from the notification before the phone has heard
+   the words, for example while a failed first send's error is still being said, is fresh too: Call hidden, no
+   send-time `remember`, `new: true` on its SEND. A retry there after recovery creates the chat with the same id. The
+   other routes to a talk screen (the list, `last`) only hold ids the phone has confirmed. Recreation keeps the flag
+   through the intent. The notification isn't posted again at `HEARD`. A screen opened from it later still starts
+   fresh and clears the flag at its first `draw()`, since Talk's lines for that chat have the YOU line.
+
+   Everything else (the reply filter, status checks, `ReadAloud`, the call header) works unchanged, because the
+   watch has the real id from the start.
 3. **Default chat.** `Talk.onPhone` `HEARD` also calls `ChatsActivity.remember(chat, title, accent)`. For existing
    chats this repeats the write already done at send time (a HEARD only passes the filter for `Talk.chat`, which was
    just remembered), so 009 is unchanged. For a new chat it is the "words sent" event of 009, at the moment the chat
@@ -61,7 +71,9 @@ No ghost chats, by construction:
 - an unreachable phone: nothing reaches the phone, and `last` isn't written;
 - a recognizer cancelled before speaking: nothing is sent;
 - Buddy off: the chat is refused before it is created;
-- a send the phone refuses: the chat is deleted again.
+- a send the phone refuses: the chat is deleted again;
+- a talk screen reopened from the notification before the words were heard: still fresh, so no call and no `last`
+  write for a chat the phone may not have.
 
 Alternatives considered:
 - The phone makes the id and the watch adopts it from `/buddy/heard`: a pending state in `Talk`, `TalkActivity`, the
@@ -93,8 +105,10 @@ Alternatives considered:
    `wear/src/main/res/values/strings.xml`: `chats_new` = "New chat" (list row, pill, notification and `last` title).
 4. **Fresh talk screen.** `wear/src/main/java/app/buddy/assistant/wear/TalkActivity.java`: the `fresh` field from
    `"new"`; `call` becomes a field, `GONE` while fresh; `draw()` clears `fresh` on a YOU line when `mine`;
-   `onActivityResult` skips `remember` while fresh and puts `"new", true` in the SEND JSON (captured before
-   `Talk.begin`). `wear/src/main/java/app/buddy/assistant/wear/Talk.java`: `remember` in the `HEARD` case.
+   `onActivityResult` skips `remember` while fresh, passes `fresh` to `Talk.begin` and puts `"new", true` in the SEND
+   JSON (captured before `Talk.begin`). `wear/src/main/java/app/buddy/assistant/wear/Talk.java`: `static boolean
+   fresh` with a one-line doc; `begin(..., boolean fresh, Sender)` sets it (when it joins too); `notification()` adds
+   `.putExtra("new", fresh)` to the content intent; the `HEARD` case sets `fresh = false` and calls `remember`.
 5. **Docs.** `README.md` Galaxy Watch, "Opening the app" bullet: one sentence. "At the top of the list, **New chat**
    listens right away; what you say first starts a new chat on the phone, with your default agent and settings."
 6. **Ship and check** (orchestrator, after review and a green CI): merge, BuildInfo `-fork.<n>`, tag,
@@ -107,6 +121,7 @@ Alternatives considered:
 |---|---|---|
 | 1. New chat → phone chat, reply on the watch | Pill → list: "New chat" is the first row. Tap → recognizer opens at once. Say "what is two plus two": the pill says "New chat", "You: …", the reply is shown and spoken. On the phone, a new chat is at the top with that message and reply. Its agent is Settings' default and Linux tools follow the Settings default. The phone bubble's current chat is unchanged. Say a second phrase on the same screen: same phone chat, no second chat. The call button shows after the first words are heard, and a call works in that chat. App-list tap → that chat's talk screen (it's the default chat now). | device after ship (+ watch adb) |
 | 2. Unreachable → usual error, no ghost | List loaded, then phone Bluetooth off. New chat → speak → "Can't reach your phone. Check Bluetooth." shown and said. Bluetooth back: the phone's list and the watch list have no new chat; an app-list tap opens the previous default chat. New chat → cancel the recognizer → Back → no chat on the phone. Accessibility service off → New chat → speak → the `watch_buddy_off` sentence, no chat. `WatchLinkTest` (id check). Code walk (Code Reviewer): `hub.send` error on a just-made chat → `hub.delete`; a second `new` SEND with an existing id → ordinary send. | device after ship; unit; review |
+| 2. Reopened before the phone heard (review F1) | Phone Bluetooth off. New chat → speak → straight away Home, then tap Talk's notification while the error is still being said. On the reopened screen: no call button. App-list tap → the previous default chat. Bluetooth back on, Back to the reopened screen, speak there: exactly one new chat on the phone (and in the watch list) with that message, and its reply shows on that screen. Talk's filter drops other ids, so this proves the chat has the watch's id. If the notification is gone before it can be tapped (the error takes about 3 s to say), `verify.md` records that and the code walk covers the row. Code walk (Code Reviewer): the only routes to a talk screen are the list, `last`, the notification and the New chat row. Only the last two carry `new`. `Talk.fresh` is set in `begin` and cleared only at `HEARD`. | device after ship; review |
 | 3. 003-012 unchanged, CI green | CI: `testGithubDebugUnitTest` (new `WatchLinkTest`, existing tests), `assembleGithubRelease assembleFdroidRelease :wear:assembleRelease`, F-Droid reproducibility, `helper-tests`. Device smoke: pick an existing chat → talk screen, no auto-listen (009); app-list tap → default chat; quick talk listens; a reply to an existing chat is spoken once; a call from an existing chat works; Watch read aloud (012) plays a phone reply. Phone: the phone's own New chat sheet still makes a selected chat (step 1 refactor). | CI; device after ship |
 
 The wear module has no unit test setup (research), so the watch changes are proven by CI compile, review and the
@@ -123,6 +138,9 @@ device rows.
 - **Id collision** with an existing phone chat: 48 random bits, negligible. The words would go to that chat.
 - **Chat deleted on the phone before its first words were heard,** while the fresh watch screen is still open:
   speaking there makes a chat with the same id again. This is harmless.
+- **A new-chat screen restored after process death** keeps `new` from its intent while Talk's lines are gone. It
+  stays fresh until its next words are heard, so Call is hidden until then. A `new` SEND for a chat that exists is an
+  ordinary send. This is safe and rare, so the flag isn't kept in saved state.
 - **Default agent not signed in:** the chat gets the words and the agent's error, which the watch says. This is what
   the phone's own voice talk does.
 - **Upstream syncs:** `Sessions.create` gains a fork overload. It is a pure split, so a conflict is easy to resolve.

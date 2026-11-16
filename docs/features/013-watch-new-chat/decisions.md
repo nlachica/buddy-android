@@ -58,3 +58,15 @@
   (`ChatHub.java:112`) stops pruning Linux folders if any chat id is outside that format. Anything else gets the
   existing `watch_chat_gone` refusal.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - The new-chat flag travels with the conversation: `Talk.fresh` and the notification's intent (review F1)
+- Options: (a) `Talk` keeps the flag for its conversation (set by `begin`, cleared at `HEARD`) and puts `"new"` on
+  the notification's intent; (b) one process-wide "id made by New chat" static that every talk screen compares with;
+  (c) make the notification bring back the existing screen (launch mode or flags) instead of a new one; (d) keep
+  pending ids in prefs.
+- Choice: (a), because the notification is the only route to a talk screen besides the New chat row for an id the
+  phone may not have (the list and `last` hold confirmed ids). The intent also survives recreation and process death,
+  where a static (b) would be lost and the restored screen would send without `new` and write a never-made id to
+  `last`. (c) changes how every chat's notification opens (003-012). (d) is more state for the same result. Cost: one
+  field, one `begin` parameter, one extra on the notification's intent, one line at `HEARD`.
+- By: Planner (claude-opus-5-5)
