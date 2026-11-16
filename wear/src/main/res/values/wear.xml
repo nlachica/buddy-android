@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- How the phone finds this app for the audio device Watch (WatchVoiceLink in the phone's github build) -->
+    <string-array name="android_wear_capabilities" translatable="false">
+        <item>buddy_watch_read</item>
+    </string-array>
+</resources>

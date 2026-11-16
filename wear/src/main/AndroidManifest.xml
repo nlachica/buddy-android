@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_REMOTE_MESSAGING" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Readings: the phone's read aloud plays on the watch (ReadAloud) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <!-- Calls: the watch's microphone goes to the live voice on the phone -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -64,6 +66,21 @@
             android:name=".Call"
             android:exported="false"
             android:foregroundServiceType="microphone" />
+
+        <!-- Plays the phone's read aloud (the audio device Watch): the phone opens the channel /buddy/read/<id>; the capability
+             buddy_watch_read in res/values/wear.xml tells the phone this app can -->
+        <service
+            android:name=".ReadAloud"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.CHANNEL_EVENT" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:pathPrefix="/buddy/read" />
+            </intent-filter>
+        </service>
 
         <!-- Passes the user's words to Buddy on the phone and reads the answer out; no runtime permission needed -->
         <service
