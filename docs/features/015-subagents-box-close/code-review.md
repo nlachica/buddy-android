@@ -1,0 +1,13 @@
+# Code review: 015-subagents-box-close
+<!-- Rounds: "## Round N - Code Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Coder response (round N)" -->
+
+## Round 1 - Code Reviewer (gpt-6-astra)
+
+No findings. Reviewed `git diff main...HEAD`, the feature brief, approved plan, decisions and plan-review rounds, plus the touched code and its callers.
+
+- Correctness: the saved key uses helper ids in stable slot order; the next delegate round replaces those sessions. Closing changes the render signature, drops cards and browser watches, cancels the picture tick, and hides the box. Subsequent refreshes safely handle a null close button. The tap obtains a fresh helper list and checks running state on the main thread before saving (`ChatActivity.java:820-899`, `Helpers.java:38-67,97-127`). Both earlier plan-review fixes are implemented: the null guard and full `refresh()`, which restores the parent's background panel before rendering the box (`ChatActivity.java:851-856,880,2041-2060`; `BackgroundPanel.java:89-100`).
+- Done-when coverage: `HelpersBoxTest` implements all seven planned pure-function cases, covering empty/unclosed lists, matching completed rounds, running helpers, changed ids and round-key construction. The close control uses the existing icon and an accessibility description. Session JSON saves and restores the key with an empty default for older chats (`Sessions.java:374,416`). Closing deletes no sessions or reports; the bubble and Search still read the sessions independently (`Bubble.java:3050-3083`; `SearchActivity.java:121-139`). Helper chats retain their existing parent row. The approved behavior for rerunning a closed round follows from the running-state predicate.
+- Security, scope and fit: no new permissions, external inputs, dependencies or report-data changes. The implementation stays within the plan and uses existing UI, save and cleanup helpers. No material simplification or unused code found.
+- Validation: attempted `./gradlew --no-daemon testGithubDebugUnitTest --tests app.buddy.assistant.HelpersBoxTest`; the JVM exits before Gradle starts with `Failed to mark memory page as executable - check if grsecurity/PaX is enabled`. Thus no unit test or Android build result is available locally. `git diff --check main...HEAD` reports only trailing whitespace in the verification template's empty verdict; omitted as a pure style nit. CI and the plan's device checks (including persistence, TalkBack, layout and immediate parent-screen restoration) remain for the Verifier; this approval does not claim those passed.
+
+VERDICT: APPROVE

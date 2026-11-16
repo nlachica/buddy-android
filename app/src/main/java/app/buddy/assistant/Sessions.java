@@ -94,6 +94,8 @@ final class Sessions {
         String parent = "";
         /** A helper's place among its parent's (0, 1, 2), in the order they were started. */
         int slot;
+        /** The round of sub-agents (Helpers.round) whose box the user closed in this chat; the next round's box shows. */
+        String helpersClosed = "";
         /** The chat's scheduled task (see Schedules), or null. */
         Schedules.Plan schedule;
         /** Messages the agent scheduled for itself in this chat (schedule_message), soonest first. Main thread. */
@@ -369,6 +371,7 @@ final class Sessions {
                 .put("effort", s.effort).put("actual_model", s.actualModel).put("ctx_used", s.ctxUsed).put("ctx_window", s.ctxWindow)
                 .put("interrupted", s.interrupted).put("incognito", s.incognito).put("dev", s.dev).put("awake", s.awake).put("background", s.background).put("approvals", s.approvals)
                 .put("pinned", s.pinned).put("archived", s.archived).put("updated", s.updated).put("cut", s.cut).put("parent", s.parent).put("slot", s.slot).put("messages", msgs);
+        if (!s.helpersClosed.isEmpty()) o.put("helpers_closed", s.helpersClosed);
         synchronized (s.apps) {
             if (!s.apps.isEmpty()) o.put("apps", new JSONArray(s.apps));
         }
@@ -410,6 +413,7 @@ final class Sessions {
         s.archived = o.optBoolean("archived");
         s.parent = o.optString("parent");
         s.slot = o.optInt("slot");
+        s.helpersClosed = o.optString("helpers_closed");
         s.schedule = Schedules.Plan.of(o.optJSONObject("schedule"));
         JSONArray ok = s.schedule == null ? null : o.optJSONArray("allowed"); // kept for its scheduled runs
         if (ok != null) for (int j = 0; j < ok.length(); j++) s.allowed.add(ok.getString(j));

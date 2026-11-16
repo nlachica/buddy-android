@@ -747,6 +747,8 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
 
     private LinearLayout helpersBox;
     private String helpersShown = "";
+    /** The × on the box's title; null while the box is closed, absent or a helper chat's. */
+    private ImageButton helpersClose;
     /** A helper's card in the Helpers box: the live picture of its screen (or its browser tab), its name and state. */
     private final class HelperCard implements Browser.Frames {
         final String chat;
@@ -825,8 +827,11 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         boolean own = ownScreen && ownApp != null;
         StringBuilder ids = new StringBuilder(parent == null ? "" : "p" + parent.label()).append(own ? "own|" : "");
         for (Sessions.Session h : l) ids.append(h.id).append('|');
+        boolean closed = Helpers.boxClosed(ses.helpersClosed, l); // the user closed this round's box
+        if (closed) ids.append("closed|");
         if (!ids.toString().equals(helpersShown)) { // other sub-agents: the box from scratch
             helpersShown = ids.toString();
+            helpersClose = null;
             dropHelperCards();
             helpersBox.removeAllViews();
             helpersBox.setVisibility(l.isEmpty() && parent == null ? View.GONE : View.VISIBLE);
@@ -835,8 +840,27 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
                 return;
             }
             if (l.isEmpty()) return;
+            if (closed) {
+                helpersBox.setVisibility(View.GONE);
+                return;
+            }
             helperPictures.keySet().retainAll(idsOf(l, own));
-            helpersBox.addView(sectionLabel(this, getString(R.string.helpers_title)));
+            LinearLayout head = row(this);
+            head.addView(sectionLabel(this, getString(R.string.helpers_title)), weight1());
+            helpersClose = iconButton(this, R.drawable.ms_close, getString(R.string.helpers_close), MUTED);
+            helpersClose.setOnClickListener(v -> {
+                java.util.List<Sessions.Session> now = Helpers.of(hub, ses.id); // done now, not only when drawn
+                if (Helpers.anyRunning(now)) return;
+                ses.helpersClosed = Helpers.round(now);
+                hub.sessions.save(ses);
+                refresh();
+            });
+            // centred on the title's text; the bottom margin keeps the title line as high as the label
+            LinearLayout.LayoutParams xp = new LinearLayout.LayoutParams(dp(this, 40), dp(this, 40));
+            xp.topMargin = dp(this, 9);
+            xp.bottomMargin = -dp(this, 4);
+            head.addView(helpersClose, xp);
+            helpersBox.addView(head, full());
             // a card each from the start, side by side, three across, more scroll sideways: a sub-agent with nothing
             // to show yet has a placeholder, and its picture comes into the same card (nothing moves when it does)
             LinearLayout cards = row(this);
@@ -853,6 +877,7 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
             across.addView(cards);
             helpersBox.addView(across, full());
         }
+        if (helpersClose != null) helpersClose.setVisibility(Helpers.anyRunning(l) ? View.INVISIBLE : View.VISIBLE);
         for (Sessions.Session h : l) { // states change all the time: in place
             HelperCard c = helperCards.get(h.id);
             if (c == null) continue;
