@@ -19,7 +19,11 @@ jobs:
       - name: Test the helper on recorded agent output
         run: bash linux/test/run.sh
 
+      - name: Test the upstream sync script
+        run: bash tools/upstream-sync-test.sh
+
   apk:
+    needs: helper-tests # a red helper or sync-script test means no APK and no release on a tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
