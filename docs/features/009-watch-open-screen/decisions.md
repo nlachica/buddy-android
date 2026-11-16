@@ -83,3 +83,12 @@
   listener and fail the wait. (c) leaves a gap in which a `/buddy/say` for a reply still queued is lost. (d) reuses a
   live or pending registration and retries a dead one, in one condition.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Step 1 (merge of 006): conflict resolutions in Talk.java
+- Choice: as plan step 1. Imports `Task` and `ChannelClient`; class doc = 006's end conditions plus 007's voice sentences;
+  fields `channelCallback` (007) and `registration`/`queue`/`accepted`/`sends` (006), `noHeard` -> `settle(...)`; `begin`
+  does `Call.hangUp()` then 006's join-or-replace; `onStartCommand` registers the channel callback, then `register(); next()`;
+  `onPhone` keeps the `Phone.SAY` branch and drops the blanket `removeCallbacks(noHeard)`; `end()` takes 006's
+  `queue.clear(); accepted = false; run++` and no `removeListener`; `join(false)` calls `register()` only for a
+  complete-and-unsuccessful registration. Not compiled here (no Android SDK): CI-only.
+- By: Coder (claude-sonnet-5-5)
