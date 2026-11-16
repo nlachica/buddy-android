@@ -19,3 +19,9 @@ Coverage and validation: the priority, media-type filtering, fresh queue-start/p
 Application code was not modified.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+- F1: fixed in 684c497. The read's wording moved into `SettingsTool.audioNow(saved, target, devices, android)`, which takes one device list and only indexes it when the pick is in that list; a pick that vanished reads "auto → <android> (X isn't connected)". Regression test: `AudioRouteTest.settingsReadSurvivesAPickThatVanishedBetweenQueries`.
+- F2: fixed in 684c497. `render` removes the old note's `autoTick` and bumps `autoSeq` before the new note is set, so one chain exists per render. Not unit-testable (view lifecycle); the `onPause` removal is unchanged.
+- F3: fixed in 684c497. The note's refresh starts only when `saved.isEmpty() || away`; a connected explicit pick (Speaker, headset) keeps the ordinary description, and Watch keeps its own note and find.
+- Run: Gradle can't start on this host (same JVM "Failed to mark memory page as executable" the reviewer hit), so the new test and the build were NOT run. Left to the Verifier / CI.
