@@ -34,7 +34,8 @@ import static app.buddy.assistant.Ui.*;
 
 /**
  * Buddy's own updates, only ever from this fork's GitHub release, which the fork's CI builds and signs (Android also
- * refuses an APK that isn't signed like the installed one). Used by the update_buddy tool, the daily check behind the "update available"
+ * refuses an APK that isn't signed like the installed one). Official Buddy's releases are only read for their version,
+ * to say when the fork lacks one (see {@link #upstreamNote}); nothing is installed from there. Used by the update_buddy tool, the daily check behind the "update available"
  * notification (Settings → Update notices), and the sheet that notification opens.
  */
 public final class Updates extends BroadcastReceiver {
@@ -43,6 +44,7 @@ public final class Updates extends BroadcastReceiver {
     static final String MANUAL = "You can also get it at " + REPO + "/releases/latest (buddy.apk), or with Obtainium "
             + "for automatic updates (see " + REPO + "#updating).";
     private static final String API = "https://api.github.com/repos/nlachica/buddy-android/releases/latest";
+    private static final String UPSTREAM_API = "https://api.github.com/repos/ghorbelhamdi/buddy-android/releases/latest";
     private static final String CHANNEL = "updates", ACTION_MUTE = "app.buddy.assistant.MUTE_UPDATES";
     private static final int ID = 3;
     private static final long DAY = 24 * 3600_000L;
@@ -75,6 +77,49 @@ public final class Updates extends BroadcastReceiver {
         String notes = rel.optString("body").trim();
         if (notes.length() > 1200) notes = notes.substring(0, 1200) + "…";
         return new Release(rel.optString("tag_name").replaceFirst("^v", ""), notes, apk);
+    }
+
+    /** Official Buddy's latest release version, or null if GitHub can't be reached (network: off the main thread). */
+    static String upstreamVersion() {
+        try {
+            return new JSONObject(get(UPSTREAM_API)).optString("tag_name").replaceFirst("^v", "");
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /** Official Buddy has a release newer than the fork's latest (its "-fork.N" ignored). */
+    static boolean upstreamAhead(String upstream, String forkLatest) {
+        return upstream != null && !upstream.isEmpty()
+                && compare(upstream, forkLatest.replaceFirst("-fork\\.\\d+$", "")) > 0;
+    }
+
+    /** For the agent: what to do when official Buddy is ahead, or "". */
+    static String upstreamNote(String upstream, String forkLatest) {
+        if (!upstreamAhead(upstream, forkLatest)) return "";
+        return "Official Buddy " + upstream + " is out and isn't in this fork yet. A chat with Linux tools brings it in by "
+                + "following \"Bringing in official Buddy\" in the buddy-fork repo's AGENTS.md (/root/.buddy/work/buddy-fork, "
+                + "or gh repo clone nlachica/buddy-android); the user confirms, and the fork's CI publishes a new fork release.";
+    }
+
+    /** What update_buddy tells the agent, or null when the install should go ahead (card + installer). */
+    static String report(String installed, Release r, String note, boolean install) {
+        String head = "Installed: Buddy " + installed + ". Latest release: " + r.version + ".";
+        boolean newer = compare(r.version, installed) > 0;
+        if (note.isEmpty()) {
+            if (!newer) return head + " Buddy is up to date.";
+            if (install) return null;
+            return head + " An update is available. What's new:\n" + r.notes + "\n\nAsk the user if they want it now; "
+                    + "if yes, call update_buddy with install=true.";
+        }
+        if (!newer) {
+            return head + " Buddy is up to date. " + note + " Ask whether to bring it in now; afterwards call "
+                    + "update_buddy with install=true.";
+        }
+        return head + (install ? " Not installed yet." : "") + " An update is available. What's new:\n" + r.notes + "\n\n"
+                + note + " That release will contain " + r.version + " too, so recommend bringing it in first; if the user "
+                + "wants " + r.version + " now anyway, or bringing it in stopped, call update_buddy with install=true and "
+                + "skip_upstream=true.";
     }
 
     /** Result of {@link #install}: the installer is open, or Android's "allow installs" page is (then try again). */
@@ -208,23 +253,28 @@ public final class Updates extends BroadcastReceiver {
                 main.post(() -> Toast.makeText(a, R.string.update_check_failed, Toast.LENGTH_LONG).show());
                 return;
             }
+            String up = upstreamVersion();
+            boolean ahead = upstreamAhead(up, r.version);
             main.post(() -> {
                 checking.cancel();
                 if (a.isFinishing() || a.isDestroyed()) return;
                 if (!r.newer()) {
-                    Toast.makeText(a, a.getString(R.string.update_up_to_date, BuildInfo.VERSION), Toast.LENGTH_LONG).show();
+                    Toast.makeText(a, ahead ? a.getString(R.string.update_upstream_ahead, up)
+                            : a.getString(R.string.update_up_to_date, BuildInfo.VERSION), Toast.LENGTH_LONG).show();
                     cancel(a);
                     return;
                 }
-                sheet(a, r);
+                sheet(a, r, ahead ? up : null);
             });
         }).start();
     }
 
-    private static void sheet(Activity a, Release r) {
+    private static void sheet(Activity a, Release r, String upstreamAhead) {
         LinearLayout c = column(a);
         c.addView(title(a, a.getString(R.string.update_available_title, r.version), 18));
-        TextView sub = text(a, a.getString(R.string.update_sheet_text, BuildInfo.VERSION), 13, MUTED);
+        String subtitle = a.getString(R.string.update_sheet_text, BuildInfo.VERSION);
+        if (upstreamAhead != null) subtitle += "\n" + a.getString(R.string.update_upstream_ahead, upstreamAhead);
+        TextView sub = text(a, subtitle, 13, MUTED);
         sub.setPaddingRelative(0, dp(a, 4), 0, dp(a, 12));
         c.addView(sub);
         if (!r.notes.isEmpty()) {
