@@ -10,6 +10,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.speech.RecognizerIntent;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
@@ -44,12 +45,16 @@ public class TalkActivity extends Activity {
     /** Why listening can't start (no recognizer on the watch), shown under the conversation. */
     private String problem = "";
     private int accent;
+    /** ChatsActivity.relaunches when this screen was created: a change means a relaunch cleared it. */
+    private int opened;
+    private final Runnable redraw = this::changed;
     private ScrollView scroll;
     private LinearLayout body;
 
     @Override
     protected void onCreate(Bundle b) {
         super.onCreate(b);
+        opened = ChatsActivity.relaunches;
         chat = getIntent().getStringExtra("chat");
         title = getIntent().getStringExtra("title");
         accent = getIntent().getIntExtra("accent", Look.ACCENT);
@@ -58,13 +63,28 @@ public class TalkActivity extends Activity {
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
         root.setBackgroundColor(Look.BG);
+        // the chat's name, fixed at the top: tap it for the chat list
+        TextView pill = Look.text(this, title + "  \u203A", 14, Look.TEXT);
+        pill.setSingleLine();
+        pill.setEllipsize(TextUtils.TruncateAt.END);
+        pill.setGravity(Gravity.CENTER);
+        pill.setPadding(Look.dp(this, 14), Look.dp(this, 6), Look.dp(this, 14), Look.dp(this, 6));
+        pill.setBackground(Look.pill(this, Look.CARD, 16));
+        pill.setContentDescription(getString(R.string.talk_chats));
+        pill.setOnClickListener(v -> startActivity(new Intent(this, ChatsActivity.class).putExtra("list", true)));
+        LinearLayout.LayoutParams pp = new LinearLayout.LayoutParams(-2, -2);
+        pp.gravity = Gravity.CENTER_HORIZONTAL;
+        pp.topMargin = Look.dp(this, round ? 22 : 6);
+        pp.setMarginStart(Look.sidePad(this));
+        pp.setMarginEnd(Look.sidePad(this));
+        root.addView(pill, pp);
         scroll = new ScrollView(this);
         scroll.setFocusableInTouchMode(true); // the Watch4's bezel scrolls what has focus
         body = new LinearLayout(this);
         body.setOrientation(LinearLayout.VERTICAL);
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         int side = Look.sidePad(this);
-        body.setPadding(side, Look.dp(this, round ? 28 : 12), side, Look.dp(this, 8));
+        body.setPadding(side, Look.dp(this, 4), side, Look.dp(this, 8));
         scroll.addView(body);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -99,15 +119,18 @@ public class TalkActivity extends Activity {
         root.addView(buttons, lp);
         setContentView(root);
 
-        // a fresh open means "I want to say something"; not when Talk has news for this chat, or Android is recreating us
-        boolean news = chat.equals(Talk.chat) && (Talk.waiting || Talk.unseen);
-        if (b == null && !news) listen();
+        // only quick talk (the Home double-press, "speak") listens by itself: the app list and a pick leave the mic and
+        // call buttons to the user. Not when Talk has news for this chat, or Android is recreating us.
+        // Quick talk listens even while a reply is awaited; an unseen reply is still shown first.
+        boolean speak = getIntent().getBooleanExtra("speak", false);
+        boolean news = chat.equals(Talk.chat) && (Talk.waiting ? !speak : Talk.unseen);
+        if (b == null && speak && !news) listen();
     }
 
     @Override
     protected void onStart() {
         super.onStart();
-        Talk.onChange = this::changed;
+        Talk.onChange = redraw;
         changed();
         Talk.unseen = false;
     }
@@ -115,14 +138,12 @@ public class TalkActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
-        Talk.onChange = null;
+        if (Talk.onChange == redraw) Talk.onChange = null; // a newer screen may have taken it already
         main.removeCallbacks(dim);
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-        if (isFinishing() && chat.equals(Talk.chat)) Talk.left(); // swiped away: no more waiting for this
+        // Back or a swipe while showing: no more waiting. Not a relaunch from the launcher (it clears this screen too):
+        // a screen that is showing is stopped only after ChatsActivity got the new intent, and one that is out of sight
+        // is destroyed without a finishing onStop.
+        if (isFinishing() && opened == ChatsActivity.relaunches && chat.equals(Talk.chat)) Talk.left();
     }
 
     /** The call button: the microphone permission once, then Talk gives way to the call (the last started owns the speaker). */
@@ -134,6 +155,7 @@ public class TalkActivity extends Activity {
         problem = "";
         Talk.left();
         Talk.silence();
+        ChatsActivity.remember(this, chat, title, accent);
         Call.start(this, chat, title, accent);
         startActivity(new Intent(this, CallActivity.class));
     }
@@ -168,6 +190,7 @@ public class TalkActivity extends Activity {
         ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (request != LISTEN || result != RESULT_OK || heard == null || heard.isEmpty()) return; // cancelled: the mic button is there
         final String text = heard.get(0);
+        ChatsActivity.remember(this, chat, title, accent);
         Talk.begin(this, chat, title, accent, (valid, done) -> {
             try {
                 Phone.send(this, Phone.SEND, new JSONObject().put("chat", chat).put("text", text), valid, done);
@@ -197,9 +220,6 @@ public class TalkActivity extends Activity {
         ImageView face = new ImageView(this);
         face.setImageResource(working ? R.drawable.bubble_face_thinking : R.drawable.bubble_face);
         body.addView(face);
-        TextView name = Look.text(this, title, 14, Look.MUTED);
-        name.setGravity(Gravity.CENTER);
-        body.addView(name);
         if (mine) {
             for (Talk.Line l : Talk.lines) {
                 TextView t = Look.text(this, l.kind == Talk.YOU ? getString(R.string.talk_you, l.text) : l.text, 15,

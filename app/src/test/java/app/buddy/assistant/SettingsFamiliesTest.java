@@ -257,7 +257,7 @@ public class SettingsFamiliesTest {
             try {
                 assertEquals(null, main.submit(() -> McpServer.CALLER_CHAT.get()).get()); // the trap: null over there
                 StringBuilder out = new StringBuilder();
-                main.submit(() -> SettingsTool.chatLines(out, all, here)).get();
+                main.submit(() -> SettingsTool.chatLines(out, all, here, c -> true)).get();
                 assertTrue(out.toString(), out.toString().contains("chat/bbb \"New chat\" (this chat):"));
                 assertFalse(out.toString(), out.toString().contains("chat/aaa \"New chat\" (this chat)"));
             } finally {

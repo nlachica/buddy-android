@@ -2,6 +2,7 @@
 <!-- Every text of Buddy's watch app, in English. -->
 <resources>
     <string name="app_name" translatable="false">Buddy</string>
+    <string name="quick_talk">Talk to Buddy</string>
 
     <!-- The chat list -->
     <string name="chats_empty">No chats on your phone yet.</string>
@@ -16,6 +17,7 @@
     <string name="phone_send_failed">Couldn\'t send. Is your phone nearby?</string>
 
     <!-- Talking with Buddy: the ongoing notification while it works (%1$s = the chat) and while the answer is said -->
+    <string name="talk_chats">Pick a chat</string>
     <string name="talk_channel">Buddy\'s answers</string>
     <string name="talk_notif_waiting">Waiting for Buddy · %1$s</string>
     <string name="talk_notif_speaking">Buddy is speaking · %1$s</string>

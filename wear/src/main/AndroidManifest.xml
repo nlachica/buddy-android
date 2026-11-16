@@ -43,6 +43,13 @@
             </intent-filter>
         </activity>
 
+        <!-- The Home double-press is pointed here (adb): ChatsActivity reads the alias name to listen at once. Not in the app list. -->
+        <activity-alias
+            android:name=".QuickTalk"
+            android:targetActivity=".ChatsActivity"
+            android:label="@string/quick_talk"
+            android:exported="true" />
+
         <activity
             android:name=".TalkActivity"
             android:exported="false" />
