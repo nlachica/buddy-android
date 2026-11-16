@@ -189,7 +189,12 @@ final class Sessions {
 
     /** dev: Linux tools for this chat (a New chat sheet's switch). */
     Session create(String backend, boolean select, boolean dev) {
-        Session s = new Session(UUID.randomUUID().toString().replace("-", "").substring(0, 12), backend);
+        return create(UUID.randomUUID().toString().replace("-", "").substring(0, 12), backend, select, dev);
+    }
+
+    /** The id is given by the caller (the watch's New chat makes its own). */
+    Session create(String id, String backend, boolean select, boolean dev) {
+        Session s = new Session(id, backend);
         s.dev = dev;
         s.background = Prefs.backgroundPaired(app) && Prefs.backgroundDefault(app);
         all.add(0, s);
