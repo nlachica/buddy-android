@@ -2,6 +2,7 @@ package app.buddy.assistant;
 
 import android.annotation.TargetApi;
 import android.content.Context;
+import android.media.AudioAttributes;
 import android.media.AudioDeviceInfo;
 import android.media.AudioManager;
 import android.os.Build;
@@ -9,6 +10,8 @@ import android.os.Handler;
 import android.os.Looper;
 
 import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 /**
  * Which audio device Buddy's voice uses: Auto or one of the devices Android offers for calls (speaker, earpiece, a
@@ -84,6 +87,48 @@ final class AudioRoute {
         if (!saved.isEmpty() && savedHere) return saved; // a pick in effect (Watch: when this build has the link)
         if (headset || !watch) return "";                // a headset (Android picks the latest), or no watch link
         return WatchVoice.KEY;                           // the watch; the phone (speaker) when none answers
+    }
+
+    // 016: the label of the headset Android plays Buddy's voice on now ("Headset" when it can't be named), or null
+    private static String headsetNow(Context c) {
+        AudioManager am = c.getSystemService(AudioManager.class);
+        List<AudioDeviceInfo> r = null;
+        if (Build.VERSION.SDK_INT >= 33) {
+            r = am.getAudioDevicesForAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_ASSISTANT).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+        }
+        int i = headsetIn(types(r), types(java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))));
+        if (i >= 0) return label(c, r.get(i));
+        return i == UNNAMED ? c.getString(R.string.audio_headset) : null;
+    }
+
+    private static int[] types(List<AudioDeviceInfo> l) {
+        if (l == null) return null;
+        int[] t = new int[l.size()];
+        for (int i = 0; i < t.length; i++) t[i] = l.get(i).getType();
+        return t;
+    }
+
+    /** 016: where Buddy's voice goes now: the saved key, WatchVoice.KEY, or "" (Android's own routing). */
+    static String target(Context c) {
+        String saved = Prefs.audioDevice(c);
+        return pick(saved, indexOf(choices(c), saved) >= 0, headsetNow(c) != null, WatchVoice.link() != null);
+    }
+
+    /** 016: what Android's routing uses now, as a label. */
+    static String androidNow(Context c) {
+        String h = headsetNow(c);
+        return h != null ? h : c.getString(R.string.audio_speaker);
+    }
+
+    /** 016: what Auto uses right now, as a label: asks the watch when it is next in the order. */
+    static void autoNow(Context c, Consumer<String> label) {
+        WatchVoice.Link link = WatchVoice.link();
+        if (!pick("", false, headsetNow(c) != null, link != null).equals(WatchVoice.KEY)) {
+            label.accept(androidNow(c));
+            return;
+        }
+        link.find(c, node -> label.accept(node != null ? c.getString(R.string.audio_watch) : androidNow(c)));
     }
 
     /** Index of the key in choices(), or -1 when that device isn't there. */
