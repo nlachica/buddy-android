@@ -46,3 +46,9 @@
 - Choice: `refresh()`, because it already restores the panel (which `renderHelpers` set GONE while the "This chat" card
   existed) and then rebuilds the box. It is one call, and the speaker button already uses the same path (plan-review F2).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - × placement and unit tests unrun locally (coder)
+- Options: × as the label's own child; a title row (label weight 1 + 40dp ×).
+- Choice: title row, × `topMargin` 9dp / `bottomMargin` -4dp, so it sits on the title text's centre and the row stays as high as the old label (45dp). Steps 1 and 2 went in one commit (the test needs only step 1, but both are two small edits).
+- Not run: Java does not start on this device (JVM "Failed to mark memory page as executable") and there is no Android SDK, so `HelpersBoxTest` and the build are CI-only. Whether `Sessions.Session` loads on the JVM (plan Risks) is unchecked.
+- By: Coder (claude-sonnet-5-5)
