@@ -989,6 +989,83 @@ final class SettingsTool {
         return b.toString();
     }
 
+    // ------------------------------------------------------------ keys (read from a file, never shown)
+
+    private static final int KEY_MAX = 4096;
+
+    /**
+     * The key held in a file of Buddy's Linux (root = Linux.root; inside, "/" is root and "~" is /root). The file must be
+     * a regular file whose real path stays inside root, one line, no JSON. No message repeats the path or the content,
+     * in case the agent passed the key itself as the path.
+     */
+    static String keyFrom(File root, String path) {
+        String p = path.trim();
+        if (p.isEmpty() || p.length() > 1000 || CONTROL.matcher(p).find() || !(p.startsWith("/") || p.startsWith("~/"))) {
+            throw new IllegalArgumentException("key_file must be a path in Buddy's Linux starting with / or ~/");
+        }
+        String bad = "key_file: the file must hold just the key, one line (for a Bitwarden secret, its value)";
+        try {
+            java.nio.file.Path real = new File(root, p.startsWith("~") ? "/root" + p.substring(1) : p).toPath().toRealPath();
+            if (!real.startsWith(root.toPath().toRealPath())
+                    || !java.nio.file.Files.isRegularFile(real, java.nio.file.LinkOption.NOFOLLOW_LINKS)
+                    || java.nio.file.Files.size(real) > KEY_MAX) {
+                throw new IllegalArgumentException(bad);
+            }
+            java.nio.ByteBuffer b = java.nio.ByteBuffer.allocate(KEY_MAX);
+            try (java.nio.channels.SeekableByteChannel ch = java.nio.file.Files.newByteChannel(real,
+                    java.nio.file.StandardOpenOption.READ, java.nio.file.LinkOption.NOFOLLOW_LINKS)) {
+                while (b.hasRemaining() && ch.read(b) > 0) { // read to the end (a short read is not the end)
+                }
+            }
+            String key = new String(b.array(), 0, b.position(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            if (key.isEmpty() || CONTROL.matcher(key).find() || key.startsWith("{") || key.startsWith("[")) {
+                throw new IllegalArgumentException(bad);
+            }
+            return key;
+        } catch (java.io.IOException e) {
+            throw new IllegalArgumentException(bad);
+        }
+    }
+
+    /** The secret part of a key: what a header line "Name: value" or "Bearer value" carries (the relay's own grammar). */
+    static String credential(String key) {
+        String c = McpServers.header(key)[1];
+        return c.regionMatches(true, 0, "Bearer ", 0, 7) ? c.substring(7) : c;
+    }
+
+    /** At most the credential's last 4 characters (only when it has 16 or more) and its length: "…ab12 (40 characters)". */
+    static String mask(String key) {
+        String c = credential(key);
+        return (c.length() >= 16 ? "…" + c.substring(c.length() - 4) + " " : "") + "(" + c.length() + " characters)";
+    }
+
+    /** The text without the key: the whole key, its header value and its credential, longest first. */
+    static String redact(String text, String key) {
+        String[] parts = {key.trim(), McpServers.header(key)[1], credential(key)};
+        Arrays.sort(parts, (x, y) -> y.length() - x.length());
+        for (String s : parts) text = text.replace(s, "…");
+        return text;
+    }
+
+    /** SHA-256 in hex, "" for no key: a snapshot compares keys without holding one. */
+    static String digest(String key) {
+        if (key == null || key.isEmpty()) return "";
+        try {
+            StringBuilder b = new StringBuilder();
+            for (byte x : java.security.MessageDigest.getInstance("SHA-256").digest(key.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+                b.append(String.format("%02x", x));
+            }
+            return b.toString();
+        } catch (java.security.NoSuchAlgorithmException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    /** May this caller read Buddy's Linux? No chat (a terminal or Remote Control session there), or a chat with Linux tools on. */
+    static boolean linuxCaller(String here, Sessions.Session c) {
+        return here == null || c != null && c.dev;
+    }
+
     // ------------------------------------------------------------ MCP servers
 
     /** "mcp/notes = on  (key: set, 3 tools)": never the server's address. */
