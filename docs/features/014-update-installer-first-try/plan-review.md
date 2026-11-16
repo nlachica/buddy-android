@@ -39,3 +39,13 @@ Phone commands, it says "cause unresolved". `OPENED_RETRY` alone never counts as
 installer architecture added.
 
 F4: accepted - Test plan names `testGithubDebugUnitTest` (`build.yml:63`). DW3 records its result in `verify.md`.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+F1 [minor] Capture an effectively final staged file in the new lambdas - `plan.md:101` passes `out` into both the launch and notification lambdas, but the existing method initializes `out` to null and assigns it again during download (`app/src/main/java/app/buddy/assistant/Updates.java:139-141`). That variable is not effectively final, so copying the planned expression literally will not compile. -> After download and validation, bind `final File apk = out` and capture `apk` in both lambdas. This is a local implementation correction, not a design change.
+
+Round 1 F1-F4 are addressed by the revised plan: the narrower installer predicate and its negative tests, explicit first/retry exception handling, required cause capture with unresolved results recorded honestly, and the correct CI task. No blocker or major finding remains open. The default-display observation and direct notification activity handoff are consistent with the Android references for [AccessibilityService.getWindows](https://developer.android.com/reference/android/accessibilityservice/AccessibilityService#getWindows()) and [background activity launch exceptions](https://developer.android.com/guide/components/activities/secure-bal).
+
+Review scope: inspected the plan, prior decisions/review, affected code and CI configuration; no implementation or device tests were run. Approval is for implementation. The cause remains unconfirmed, and DW1 remains open until the fixed build passes the planned device check; notification recovery alone does not satisfy it.
+
+VERDICT: APPROVE
