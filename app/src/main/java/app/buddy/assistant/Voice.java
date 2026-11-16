@@ -10,7 +10,9 @@ import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
 import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 
+import java.io.File;
 import java.util.ArrayList;
 
 /** Speech in (Android's recognizer) and speech out (text-to-speech) for chats. Main thread only. */
@@ -234,7 +236,17 @@ final class Voice {
         if (clean.isEmpty()) return;
         SpeechPause.begin(c);
         AudioRoute.use(c);
-        if ("chatgpt".equals(Prefs.speechEngine(c)) && SetupState.planSignedIn(c, "codex")) {
+        here(c, clean);
+    }
+
+    /** Whether replies are read in ChatGPT's voice (the user's plan) rather than the phone's. */
+    static boolean chatgptVoice(Context c) {
+        return "chatgpt".equals(Prefs.speechEngine(c)) && SetupState.planSignedIn(c, "codex");
+    }
+
+    /** Read on the phone: ChatGPT's voice with the phone's as its fallback, or the phone's. */
+    private static void here(Context c, String clean) {
+        if (chatgptVoice(c)) {
             final Context app = c.getApplicationContext();
             CodexSpeech.speak(app, clean, t -> { // the phone's voice if ChatGPT's fails
                 SpeechPause.begin(app); // what was paused stays so while that voice gets ready
@@ -249,16 +261,7 @@ final class Voice {
         appCtx = c.getApplicationContext();
         if (tts == null) {
             pending = clean;
-            tts = new TextToSpeech(c.getApplicationContext(), status -> {
-                ttsReady = status == TextToSpeech.SUCCESS;
-                if (ttsReady) {
-                    tts.setAudioAttributes(new AudioAttributes.Builder()
-                            .setUsage(AudioAttributes.USAGE_ASSISTANT)
-                            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
-                    if (pending != null) say(pending);
-                }
-                pending = null;
-            });
+            startEngine(c);
         } else if (ttsReady) {
             say(clean);
         } else {
@@ -266,14 +269,41 @@ final class Voice {
         }
     }
 
+    private static void startEngine(Context c) {
+        tts = new TextToSpeech(c.getApplicationContext(), status -> {
+            ttsReady = status == TextToSpeech.SUCCESS;
+            ttsFailed = !ttsReady;
+            Req r = routedPending;
+            routedPending = null;
+            if (ttsReady) {
+                tts.setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_ASSISTANT)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build());
+                tts.setOnUtteranceProgressListener(TAPS);
+                if (pending != null) say(pending);
+                if (r != null) submitRouted(r);
+            } else if (r != null) {
+                post(r.done);
+            }
+            pending = null;
+        });
+    }
+
     /** Speak in the reply's own language: detect it (on a worker thread), then pick a matching voice. */
     private static void say(String text) {
+        withVoice(text, () -> {
+            AudioRoute.use(appCtx); // the phone voice can start well after speak(): a cold engine, language detection, a fallback
+            tts.speak(text, TextToSpeech.QUEUE_ADD, new Bundle(), "buddy-" + System.nanoTime());
+        });
+    }
+
+    /** Detects the text's language off the main thread, then on main picks a matching voice and runs submit (if the engine is up). */
+    private static void withVoice(String text, Runnable submit) {
         final Context c = appCtx;
         new Thread(() -> {
             java.util.Locale loc = c == null ? null : detectLanguage(c, text);
-            new android.os.Handler(android.os.Looper.getMainLooper()).post(() -> {
+            post(() -> {
                 if (tts == null || !ttsReady) return;
-                AudioRoute.use(c); // the phone voice can start well after speak(): a cold engine, language detection, a fallback
                 if (loc != null && tts.isLanguageAvailable(loc) >= TextToSpeech.LANG_AVAILABLE) {
                     tts.setLanguage(loc);
                     android.speech.tts.Voice best = null;
@@ -285,9 +315,139 @@ final class Voice {
                     }
                     if (best != null) tts.setVoice(best);
                 }
-                tts.speak(text, TextToSpeech.QUEUE_ADD, new Bundle(), "buddy-" + System.nanoTime());
+                submit.run();
             });
         }, "tts-language").start();
+    }
+
+    // ------------------------------------------------- the phone's voice for the Watch route (WatchVoice)
+
+    private static android.os.Handler mainHandler;
+
+    private static void post(Runnable r) { // not a static initializer: JVM tests load Voice
+        if (mainHandler == null) mainHandler = new android.os.Handler(android.os.Looper.getMainLooper());
+        mainHandler.post(r);
+    }
+
+    /** One routed request. */
+    private static final class Req {
+        final String text;
+        final CodexSpeech.Sink sink;
+        final Runnable done;
+        final int gen;
+
+        Req(String text, CodexSpeech.Sink sink, Runnable done, int gen) {
+            this.text = text;
+            this.sink = sink;
+            this.done = done;
+            this.gen = gen;
+        }
+    }
+
+    /** An utterance of a routed request, by id: its sink (null: spoken on the phone), converter and done. */
+    private static final class Tap {
+        final CodexSpeech.Sink sink;
+        final Runnable done;
+        volatile Pcm16k conv;
+
+        Tap(CodexSpeech.Sink sink, Runnable done) {
+            this.sink = sink;
+            this.done = done;
+        }
+    }
+
+    private static final java.util.Map<String, Tap> taps = new java.util.concurrent.ConcurrentHashMap<>(); // callbacks come on binder threads
+    private static Req routedPending;
+    private static int routedGen;
+    private static boolean ttsFailed;
+    private static long routedSeq;
+
+    private static File readFile() {
+        return new File(appCtx.getCacheDir(), "read.wav");
+    }
+
+    /** The utterance with this id is over (done, failed or stopped): its done runs once, on main. */
+    private static void end(String id) {
+        Tap t = taps.remove(id);
+        if (t == null) return;
+        if (t.sink != null) readFile().delete();
+        post(t.done);
+    }
+
+    private static final UtteranceProgressListener TAPS = new UtteranceProgressListener() {
+        @Override public void onStart(String id) {}
+        @Override public void onDone(String id) { end(id); }
+        @Override public void onError(String id) { end(id); }
+        @Override public void onError(String id, int code) { end(id); }
+        @Override public void onStop(String id, boolean interrupted) { end(id); }
+
+        @Override
+        public void onBeginSynthesis(String id, int rate, int format, int channels) {
+            Tap t = taps.get(id);
+            if (t == null || t.sink == null) return;
+            try {
+                t.conv = new Pcm16k(rate, format, channels);
+            } catch (IllegalArgumentException e) {
+                t.conv = null; // no audio reaches the sink: the reading is refused and the phone reads it
+            }
+        }
+
+        @Override
+        public void onAudioAvailable(String id, byte[] audio) {
+            Tap t = taps.get(id);
+            Pcm16k conv = t == null ? null : t.conv;
+            if (conv == null) return;
+            byte[] out = conv.feed(audio, 0, audio.length);
+            if (out.length > 0) t.sink.pcm(out);
+        }
+    };
+
+    /**
+     * The phone's voice for a reading on the Watch route (main thread; one request at a time, WatchVoice's queue
+     * sees to that). sink: the audio goes to it as PCM 16-bit mono 16 kHz and the phone stays silent; null: spoken on
+     * the phone. done runs exactly once, on main, when the text has been spoken or the attempt failed (unless
+     * {@link #dropRouted} came first). The sink is not closed here.
+     */
+    static void routed(Context c, String text, CodexSpeech.Sink sink, Runnable done) {
+        appCtx = c.getApplicationContext();
+        Req r = new Req(text, sink, done, routedGen);
+        if (tts == null) {
+            routedPending = r;
+            startEngine(c);
+        } else if (ttsFailed) {
+            post(done);
+        } else if (!ttsReady) {
+            routedPending = r;
+        } else {
+            submitRouted(r);
+        }
+    }
+
+    private static void submitRouted(Req r) {
+        if (r.gen != routedGen) return;
+        withVoice(r.text, () -> {
+            if (r.gen != routedGen) return; // dropped while the language was detected
+            String id = "read-" + ++routedSeq;
+            taps.put(id, new Tap(r.sink, r.done));
+            int status;
+            if (r.sink != null) {
+                status = tts.synthesizeToFile(r.text, new Bundle(), readFile(), id);
+            } else {
+                AudioRoute.use(appCtx);
+                status = tts.speak(r.text, TextToSpeech.QUEUE_ADD, new Bundle(), id);
+            }
+            if (status != TextToSpeech.SUCCESS) end(id);
+        });
+    }
+
+    /** Forget every routed request and stop what the engine is doing for them (main thread). Their done never runs. */
+    static void dropRouted() {
+        routedGen++;
+        routedPending = null;
+        boolean tapped = !taps.isEmpty();
+        taps.clear();
+        if (appCtx != null) readFile().delete();
+        if (tapped && tts != null && ttsReady) tts.stop();
     }
 
     private static Context appCtx;
