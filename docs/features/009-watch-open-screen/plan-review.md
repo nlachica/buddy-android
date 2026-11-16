@@ -12,3 +12,43 @@ F3 [major] The merge's unconditional registration reuse breaks retry after regis
 Review coverage: read the brief, research, plan and decisions, checked the current activities/service, phone relay and CI configuration, and inspected the actual 006 merge hunks with `git merge-tree`. The seven-conflict description and clean activity merges match the repository. No code was changed or executed; Watch4 alias launch/remapping and lifecycle behavior still require the planned device verification.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - A pick no longer writes the default. `open()` drops its prefs write and only passes the chat in the talk
+intent (done-when 3). `ChatsActivity.remember(...)` is called only on words sent, a call started and a reply the watch
+takes (Design 5, step 3). No record (fresh install): the list, as today. An install updated from 003 starts from the
+record 003's last pick wrote. Test plan case 2 adds: talk to B, its answer comes, pill → pick A without words or call,
+Back out, app-list tap → B. Decision appended.
+
+F2: accepted for the text and the test, rejected for counting replies Talk drops. The plan's claim was wrong. The
+phone relays every chat the watch sent to until its run ends (`WatchLink.java:127-128`, `:143-156`, `:230-236`), and
+`Talk.java:242` drops the other chats' messages. Design 5 now says so and defines "reached the watch" as a reply Talk
+takes (shown and said). Case 2 adds the A-send / B-send / A-reply check, with B expected. Recording a dropped reply is
+rejected:
+(1) Talk only hears it while B is live: B's wait or speech. After B's end only `/buddy/say` gets through
+(`Talk.java:235`), and once Talk stops nothing listens. In that window he is waiting for or hearing B, so opening A
+would put A's empty screen (its reply was never shown) over B's conversation. The same reply a minute later wouldn't
+count: a timing lottery, not a rule.
+(2) It isn't the ask's "the chat that I'm working on that just responded to me" (B), nor the goal's "a chat that has
+just replied to him" (A's reply never reached him).
+(3) It needs a stored title per chat, since the reply carries only id and text. A dependable version needs an
+always-on watch listener, or phone changes (non-goal).
+With (a), the default is in practice the last chat talked to. The REPLY write stays as one line that keeps the brief's
+rule true locally. Recorded as a decision and as Q3 for the orchestrator to confirm with Nicholas. Not blocking: the
+plan goes ahead with (a).
+
+F3: accepted - Step 1's rule is now: `join(false)` calls `register()` again only when the kept registration failed or
+was cancelled (`registration.isComplete() && !registration.isSuccessful()`), then `next()`. A successful registration
+is reused, because adding the same listener twice may be refused as a duplicate and fail the wait. A pending one is
+waited on, and its failure handler fails the joined wait as on a fresh start. The test plan adds a merge trace for the
+Code Reviewer (failure → `fail` spoken → quick talk joins → re-register → send; plus the succeeded and pending cases;
+a registration failure can't be forced on the watch). Device case 4 adds a join while the last answer is still being
+said. R4 updated, decision appended.
+
+Orchestrator's question (app list vs Home double-press): unchanged, Design 1. The double-press is pointed (adb,
+`setting_home_key_double_press`) at an exported `<activity-alias>` `.QuickTalk` with no intent filter, so it is not in
+the app list. The start intent's component names the alias, both in `onCreate` and in `onNewIntent` (singleTask reuses
+the live `ChatsActivity`). That tells the two starts apart without guessing from flags or the referrer, and an unmapped
+key only costs one tap. Q2 now notes that the stored value can be read before coding: `package/class` means a
+component start works; a bare package means R1's fallback (a second app-list entry, Nicholas's OK).

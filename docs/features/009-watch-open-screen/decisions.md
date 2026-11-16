@@ -58,3 +58,28 @@
   state in `TalkActivity`. (b) exits the app when the talk screen is a task root. (c) makes done-when 2's "a reply
   reached the watch" case unreachable: no reply can arrive once the wait has ended.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - A list pick doesn't change the default chat; only words sent, a call and a reply the watch takes do
+- Options: (a) write `last` on pick too (round 1 plan, 003's behaviour); (b) write only on the brief's two events.
+- Choice: (b) (plan review F1). The brief names two events and picking is neither; the pick still sets the talk
+  screen's chat through the intent (done-when 3). `open()` drops its write. No record: the list, as today. Supersedes the
+  "written on pick" part of the earlier default-chat entry.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - "A reply reached the watch" = a reply Talk takes (shown and said); another chat's dropped reply doesn't count
+- Options: (a) count replies Talk takes; (b) also record a reply Talk drops for another chat (the phone still relays
+  every chat the watch sent to until its run ends); (c) any reply whenever it lands (always-on watch listener).
+- Choice: (a) (plan review F2, in part). (b) is only seen while the other chat's conversation is live, so it would
+  open an empty screen (the reply was never shown) over the chat he is waiting for or hearing. A minute later it
+  wouldn't count, so it's a timing lottery. It also needs a stored title per chat. (c) is a new watch service, a
+  feature of its own. The ask's "the chat that I'm working on that just responded to me" is the live one. The plan's
+  false claim ("a reply can only come for Talk.chat") is corrected. Nicholas can still choose (b)/(c) (plan Q3).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - In the 006/007 merge, `join(false)` re-registers the listener only after a failed or cancelled registration
+- Options: (a) never re-register (round 1); (b) always `register()` again; (c) remove then add, as `onStartCommand`
+  does; (d) `register()` only when `registration.isComplete() && !registration.isSuccessful()`.
+- Choice: (d) (plan review F3). (a) never sends after a failed registration. (b) may be refused as a duplicate
+  listener and fail the wait. (c) leaves a gap in which a `/buddy/say` for a reply still queued is lost. (d) reuses a
+  live or pending registration and retries a dead one, in one condition.
+- By: Planner (claude-opus-5-5)
