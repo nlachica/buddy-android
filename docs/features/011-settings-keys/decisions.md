@@ -75,3 +75,39 @@
   The redaction gap predates this feature and sits in upstream code, while this feature's own replies are redacted.
   Both can follow on their own.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - The key goes only to the address captured for the card; the card names the record, not its address
+- Options: `verify` looks the address up again (round-1 plan); a stale check before the network call; `card()` keeps
+  the snapshot's target and `verify` gets only that; show the host on the card.
+- Choice: `KeySetting.card(old, v)` keeps `old`'s target. `prepare` calls `verify(target, key)` with it, and the
+  compare-and-save under `lock()` stays as the final guard. The gate is unchanged. An address edited while the card
+  is open, or during `verify`, can no longer receive the key, and the save is refused as stale. No host on the card:
+  004 decided no part of a stored address in any output (a host can carry a token), and card strings come back in the
+  `Changed` reply. The setting's name identifies the record. An extra pre-network stale check is not needed, because
+  the request can only go to the card's address. (Plan review round 1, F2.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Mask and redact the credential, using `McpServers.header`'s grammar
+- Options: mask the whole file value (round-1 plan); a fixed mask for prefixed values; mask the credential.
+- Choice: `credential(key)` = `McpServers.header(key)[1]` minus a leading `Bearer `, and both the 16-character rule
+  and the length apply to it. `redact` removes the whole key, the header value and the credential. Masking the whole
+  value showed all of `x-consumer-api-key: abc`. A fixed mask hides the length Nicholas needs to spot a wrong file.
+  Reusing the relay's grammar means no second header syntax. Supersedes the masking rule's basis in the earlier
+  "Masking" entry, not its display form. (Plan review round 1, F3.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Composio: the key file holds `x-consumer-api-key: ck_…`, no new code
+- Options: a bare key sent as Bearer (round-1 recipe); a new header argument; the existing `Name: value` key form.
+- Choice: the existing form. Composio's docs (docs.composio.dev/docs/composio-connect, "Generic MCP URL"; the
+  consumer-boundaries page; checked 2026-11-16) say a client without OAuth sends the Connect consumer key (`ck_*`, not
+  a project `ak_*` key) raw in `x-consumer-api-key`. `McpServers.header` already sends `Name: value` as that header.
+  The phone check remains the completion proof. If it fails, done-when 4 stays open in this feature. (Plan review
+  round 1, F1.)
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - A key file whose content starts with `{` or `[` is refused
+- Options: no check (round-1 plan, which promised one anyway); parse bws JSON and take `.value`; refuse JSON.
+- Choice: refuse it, with one condition and the same non-echoing message. Compact bws JSON otherwise passed the
+  one-line check and would have gone out as the key. Parsing it would be Bitwarden handling in the app. (Plan review
+  round 1, F5.)
+- By: Planner (claude-opus-5-5)
