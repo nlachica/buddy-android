@@ -1,6 +1,6 @@
 # Plan: 012-watch-audio-device
 <!-- Planner (claude-opus-5-5), 2026-11-16. Sources: brief.md, research.md, code read at 256c952 and b12c5aa.
-     Revised for plan-review round 1 (F1-F7). -->
+     Revised for plan-review round 1 (F1-F7) and round 3 (F4). -->
 
 ## Goal
 Add **Watch** to Buddy's audio-device choice (Auto / Speaker / Phone…, feature 001's `AudioRoute.choices`). With Watch
@@ -144,25 +144,34 @@ Google side:
   `speakOnWatch` (→ `attached(out, closer)`); if it isn't open within 10 s → `openTimedOut()`. PcmOut's `onBroken` posts
   `graceExpired()` 3 s later (`CLOSE_GRACE_MS`).
 - Its own `ChannelClient.ChannelCallback`, registered once, passes the close of a `/buddy/read/` channel to its stream as
-  `closed(appSpecificErrorCode)` on main. `WatchLink` is not touched.
+  `closed(local, appSpecificErrorCode)` on main, with `local = closeReason == CLOSE_REASON_LOCAL_CLOSE`. `WatchLink` is
+  not touched.
 - A partial wake lock (`buddy:watch-read`, 11-min timeout) is held while a stream is unsettled. With the screen off,
   nothing else keeps the phone's CPU up while the watch pulls a long reading.
 
 `ReadStream` (no Google types, so it is unit-tested in `testGithub` like `PcmOutTest`) implements `ReadQueue.Stream` and
-owns the outcome (round 1 F3/F4):
+owns the outcome (round 1 F3/F4, round 3 F4):
+- `attached(o, closer)` → `out.attach(o, hold)`. `hold` is the closer PcmOut gets: once the stream has settled or been
+  cancelled it closes the channel at once; before that it keeps the close for later (below).
 - `pcm` counts bytes and calls `out.write`.
 - `close()`: if nothing was written → `refused` + `out.cancel()`; otherwise → `out.finish()`. Finishing says nothing
   about playback.
-- `closed(code)`: 2 (PLAYED) → `played`; 1 (NOT_PLAYED) → `refused`; anything else → `broken`. Anything else includes
-  a disconnect (code 0), a hush, a break after sound and our own local close. Then `out.cancel()` frees the writer.
+- `closed(local, code)`: a local close is ignored, because it is our own close and never the watch's answer. Otherwise
+  2 (PLAYED) → `played`; 1 (NOT_PLAYED) → `refused`; anything else (a disconnect's code 0, a hush, a break after sound)
+  → `broken`. Then `out.cancel()` frees the writer.
 - `openTimedOut()` while not yet attached → `refused` + `out.cancel()`.
-- PcmOut's `onBroken` (a write failed, or overflow) settles nothing by itself. `graceExpired()` → `broken` only if no
-  code came, so a NOT_PLAYED that arrives just after a failed write still means `refused`.
-- `cancel()` settles silently and calls `out.cancel()`.
+- **PcmOut's own failures (round 3 F4).** On a failed write or an overflow, PcmOut calls its closer and then `onBroken`.
+  Neither one settles anything. `hold` keeps the channel open, so the watch can still send its code, and `onBroken`
+  starts the 3-s grace. A code that arrives in that window settles the stream as above, so a NOT_PLAYED still means
+  `refused` and the phone reads the reply once. `graceExpired()` with no code → `broken`. (PcmOut's abandon timer also
+  goes through `hold`. It runs 11 min after `finish()`, and by then ReadQueue's cap, 11 min from the start, has already
+  cancelled the stream.)
+- Settling or `cancel()` runs a held close at once. `cancel()` settles silently and calls `out.cancel()`, and since
+  the stream is settled by then, the channel closes at once.
 - One outcome per stream. It is handed to an `Executor` (the main Handler in the link, inline in tests) and dropped at
-  delivery if `cancel()` came first.
+  delivery if `cancel()` came first. `hold` runs on PcmOut's threads, so this state sits behind one lock.
 
-`PcmOut` itself is unchanged.
+`PcmOut` itself is unchanged, so 007 behaves as before. The deferral lives only in `hold`.
 
 ### Watch side: `ReadAloud` (wear) + two small hooks
 - `ReadAloud extends WearableListenerService`, `exported="true"`, with a `CHANNEL_EVENT` filter on `wear://*/buddy/read`
@@ -259,11 +268,16 @@ Unit tests:
 - `ReadStreamTest`:
   - Not open within the timeout → `refused` once; a later attach closes the channel.
   - `close()` with nothing written → `refused`. `close()` after audio → nothing yet; then code 2 → `played`.
-  - Code 1 → `refused`, before and after `close()`. Code 0 after `close()` (disconnect, hush) → `broken`. Code 0 before
-    → `broken`.
-  - Write failure then code 1 → `refused`; code 1 then write failure → `refused`. Write failure then `graceExpired` →
-    `broken`. Overflow then `graceExpired` → `broken`.
-  - Nothing after `cancel()`, including an outcome already handed to the executor; never two events.
+  - Code 1 → `refused`, before and after `close()`. A remote code 0 after `close()` (disconnect, hush) → `broken`.
+    A remote code 0 before it → `broken`. A local close alone → nothing.
+  - PcmOut failures (round 3 F4), with the real `PcmOut`, an `OutputStream` that throws and a fake closer:
+    - Write failure → the closer is not called and nothing settles. Then a local close notification (code 0) and then
+      code 1 → `refused` once, and the held close runs.
+    - Code 1 first, then the write failure → `refused` once.
+    - Write failure with no code → nothing until `graceExpired`, then `broken` once and the held close runs.
+    - Overflow then `graceExpired` → `broken`.
+  - `cancel()` → the closer runs at once. Nothing comes after `cancel()`: not a later code 1, not `graceExpired`, and
+    not an outcome already handed to the executor. Never two events.
 - `WatchVoiceTest`: as in row 1.
 - Not unit-tested: Voice's TTS exits (TextToSpeech doesn't run in JVM tests; review checks that each exit calls `done`
   once and cleans up) and the watch's code mapping and busy predicate (the wear module has no test setup). These are

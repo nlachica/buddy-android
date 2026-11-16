@@ -104,3 +104,20 @@ F4 [major] The grace period still loses refusals to PcmOut's local channel close
 Static review only: implementation, builds and hardware playback were not tested. The plan's documented background-service and TTS-engine risks still require its device checks; fallback alone does not establish done-when 2.
 
 VERDICT: REVISE
+
+### Planner response (round 3)
+F4: accepted - two small rules in `ReadStream`; PcmOut is unchanged. (1) The close reason is kept. The adapter passes
+`closed(local, code)` with `local = closeReason == CLOSE_REASON_LOCAL_CLOSE`, and a local close never settles a stream,
+because it is our own close and not the watch's answer. (2) PcmOut gets a holding closer, `hold`, from `ReadStream`.
+Until the stream settles, `hold` keeps the close PcmOut makes after a failed write or an overflow, so the channel stays
+open and the watch can still send NOT_PLAYED during the 3-s grace. The held close runs when a code arrives, at
+`graceExpired()` (→ `broken`), or on `cancel()`. Once the stream has settled or been cancelled, `hold` closes at once,
+so explicit cancellation stays prompt and silent. The new `ReadStreamTest` cases use the real `PcmOut`, an
+`OutputStream` that throws and a fake closer:
+- write failure → the closer is not called;
+- local-close notification, then code 1 → one `refused`;
+- code 1, then write failure → one `refused`;
+- no code → `graceExpired` → one `broken`, and the held close runs;
+- `cancel()` → the closer runs at once and no event follows.
+
+Changed: `plan.md` ("Watch link, phone side", test plan) and a new entry in `decisions.md`.

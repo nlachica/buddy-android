@@ -103,3 +103,15 @@
   reading at 11 min from its start, independent of the producer, so a hung engine or page can't hold the queue. One
   fixed `cache/read.wav` (one reading in flight) is deleted on every exit.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Our own channel closes never settle a reading; PcmOut's failure close waits for the watch (round 3 F4)
+- Options: settle on any close (the earlier plan: a failed write made PcmOut close the channel locally, and that code-0
+  callback settled `broken` before the watch's NOT_PLAYED); ignore local closes only (this still depends on the
+  watch's code reaching the phone after our close, which Google doesn't document); ignore local closes and hold
+  PcmOut's failure-path close until a code arrives or the grace runs out; change PcmOut.
+- Choice: ignore and hold. The adapter passes `closeReason == CLOSE_REASON_LOCAL_CLOSE` and `ReadStream` drops local
+  closes. PcmOut gets `ReadStream`'s closer `hold`, which closes at once only after the stream has settled or been
+  cancelled. Otherwise the close waits for the watch's code or the 3-s grace. This way a refusal reaches the phone
+  inside the grace window whatever order the Data Layer uses, cancellation still closes promptly and silently, and
+  PcmOut (007) stays unchanged.
+- By: Planner (claude-opus-5-5)
