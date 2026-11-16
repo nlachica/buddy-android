@@ -102,3 +102,9 @@ once `git merge-base --is-ancestor` confirms the branch is in origin/main. Exit-
 `gh pr list … --state all --json number,state`: OPEN → the PR step, MERGED → Tag, CLOSED → start over. A leftover
 worktree whose branch is in origin/main means that sync finished: clean up and rerun. New script case "consecutive
 syncs": 1.0.1 merged, worktree removed, branch kept → 1.0.2 exits 0 on `sync/upstream-1.0.2` (Test plan row 1).
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No blocker or major findings remain. The revised plan covers Settings and tool update checks, checks the release candidate against current origin state, provides fix-forward recovery after a merged sync, and handles completed sync branches. Cross-checked the proposed wiring and install gates against Updates.java and Tools.java, the publication dependencies against build.yml, and the verification coverage against the feature briefs. The earlier reproducibility-order decision is not reopened: the plan requires green PR checks and records the remaining limitation. Approval is of the plan; the first real release, phone installation, and required hardware evidence remain pending through R2 as specified.
+
+VERDICT: APPROVE
