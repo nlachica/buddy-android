@@ -16,6 +16,7 @@ import java.util.ArrayList;
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
  * and puts everything back, so no end of voice needs a hook. Android 12+ (setCommunicationDevice); below, only Auto.
+ * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice).
  * All state lives on the main thread.
  */
 final class AudioRoute {
@@ -30,7 +31,7 @@ final class AudioRoute {
     private AudioRoute() {
     }
 
-    /** {key, label} pairs: Auto first (key ""), then the devices Android offers for calls now. */
+    /** {key, label} pairs: Auto first (key ""), then the devices Android offers for calls now, then Watch if this build has it. */
     static String[][] choices(Context c) {
         ArrayList<String[]> l = new ArrayList<>();
         l.add(new String[]{"", c.getString(R.string.audio_auto)});
@@ -39,6 +40,7 @@ final class AudioRoute {
                 l.add(new String[]{key(d), label(c, d)});
             }
         }
+        if (WatchVoice.link() != null) l.add(new String[]{WatchVoice.KEY, c.getString(R.string.audio_watch)});
         return l.toArray(new String[0][]);
     }
 
@@ -87,7 +89,7 @@ final class AudioRoute {
             heard = false;
             quietSince = 0;
             // a device choice is forced to apply again; Auto keeps `applied` so reconcile's drop() releases it
-            if (!Prefs.audioDevice(a).isEmpty()) applied = null;
+            if (!want(a).isEmpty()) applied = null;
             refused = null;
             try {
                 reconcile();
@@ -96,6 +98,12 @@ final class AudioRoute {
             main.removeCallbacks(poll);
             main.postDelayed(poll, POLL_MS);
         });
+    }
+
+    /** The chosen device as Android routing sees it: Watch is Auto. */
+    private static String want(Context c) {
+        String w = Prefs.audioDevice(c);
+        return WatchVoice.KEY.equals(w) ? "" : w;
     }
 
     /** Buddy itself holds communication mode (AutoPause doesn't count that as a call). */
@@ -110,7 +118,7 @@ final class AudioRoute {
         boolean live = CodexLive.on();
         afterLive(mode);
         sawLive |= live;
-        String want = Prefs.audioDevice(app);
+        String want = want(app);
         if (want.isEmpty()) {
             drop(am);
             return;

@@ -187,6 +187,11 @@ public class Talk extends Service {
         if (waiting && instance != null) instance.end();
     }
 
+    /** A conversation is live: waiting, or its replies are still being said (ReadAloud leaves the speaker to it). */
+    static boolean busy() {
+        return waiting || instance != null;
+    }
+
     /** The mic button: silence what is being said. */
     static void silence() {
         if (instance != null) instance.hush();

@@ -612,7 +612,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
             vc.addView(voices, topGap(8));
         }
         String[][] devices = AudioRoute.choices(this);
-        if (devices.length > 1) { // Android 12+
+        if (devices.length > 1) { // Android 12+ lists the devices; Watch (github build) is listed on any version
             String saved = Prefs.audioDevice(this);
             vc.addView(fieldLabel(getString(R.string.setup_audio_device), null), topGap(16));
             // a saved device that is away matches no segment, so Auto can be tapped to clear it
@@ -623,8 +623,15 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                 Voice.speak(this, getString(R.string.setup_voice_sample));
             }), topGap(8));
             boolean away = !saved.isEmpty() && AudioRoute.indexOf(devices, saved) < 0;
-            vc.addView(text(this, away ? getString(R.string.setup_audio_device_missing, saved.substring(saved.indexOf(':') + 1))
-                    : getString(R.string.setup_audio_device_info), 13, MUTED), topGap(8));
+            boolean watch = WatchVoice.KEY.equals(saved) && !away;
+            TextView note = text(this, away ? getString(R.string.setup_audio_device_missing, saved.substring(saved.indexOf(':') + 1))
+                    : getString(watch ? R.string.setup_audio_device_watch : R.string.setup_audio_device_info), 13, MUTED);
+            vc.addView(note, topGap(8));
+            if (watch) { // the unreachable state: no watch with the Buddy watch app answers
+                WatchVoice.link().find(this, node -> {
+                    if (node == null && note.isAttachedToWindow()) note.setText(R.string.setup_audio_device_watch_away);
+                });
+            }
         }
         vc.addView(fieldLabel(getString(R.string.setup_languages), Voice.languageName(Prefs.voiceLang(this))), topGap(16));
         TextView lh = text(this, getString(R.string.setup_languages_hint), 13, MUTED);

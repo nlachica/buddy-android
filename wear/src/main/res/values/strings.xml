@@ -21,6 +21,9 @@
     <string name="talk_channel">Buddy\'s answers</string>
     <string name="talk_notif_waiting">Waiting for Buddy · %1$s</string>
     <string name="talk_notif_speaking">Buddy is speaking · %1$s</string>
+    <!-- Reading the phone's reply aloud (the phone's audio device is Watch): notification channel name and text -->
+    <string name="read_channel">Buddy reading aloud</string>
+    <string name="read_notif">Reading Buddy\'s reply</string>
     <!-- Said and shown when the conversation ends without an answer -->
     <string name="talk_no_answer">Buddy on your phone didn\'t answer.</string>
     <string name="talk_stopped_working">Buddy on your phone stopped working on this, but the answer didn\'t reach the watch. It\'s in the chat on your phone.</string>

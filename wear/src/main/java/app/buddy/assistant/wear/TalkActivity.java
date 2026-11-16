@@ -9,6 +9,7 @@ import android.graphics.Color;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.speech.RecognizerIntent;
 import android.text.TextUtils;
 import android.view.Gravity;
@@ -33,6 +34,14 @@ public class TalkActivity extends Activity {
     private static final int LISTEN = 1, CALL = 2;
     /** With nothing from the phone for this long, the screen may go to sleep; Talk carries on without it. */
     private static final long SCREEN_ON_MS = 120_000;
+
+    /** When the watch's recognizer was opened, or 0: ReadAloud keeps off the speaker meanwhile (a recognizer left with Home counts for a minute). */
+    private static long listenedAt;
+    private static final long LISTEN_MS = 60_000;
+
+    static boolean dictating() {
+        return listenedAt != 0 && SystemClock.elapsedRealtime() - listenedAt < LISTEN_MS;
+    }
 
     private final Handler main = new Handler(Looper.getMainLooper());
     private final Runnable dim = () -> {
@@ -153,6 +162,7 @@ public class TalkActivity extends Activity {
             return;
         }
         problem = "";
+        ReadAloud.silence();
         Talk.left();
         Talk.silence();
         ChatsActivity.remember(this, chat, title, accent);
@@ -173,12 +183,15 @@ public class TalkActivity extends Activity {
 
     private void listen() {
         problem = "";
+        ReadAloud.silence(); // the microphone must not hear a reading
+        listenedAt = SystemClock.elapsedRealtime();
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_PROMPT, getString(R.string.talk_prompt));
         try {
             startActivityForResult(i, LISTEN);
         } catch (ActivityNotFoundException e) {
+            listenedAt = 0;
             problem = getString(R.string.talk_no_recognizer);
             draw();
         }
@@ -187,6 +200,7 @@ public class TalkActivity extends Activity {
     @Override
     protected void onActivityResult(int request, int result, Intent data) {
         super.onActivityResult(request, result, data);
+        if (request == LISTEN) listenedAt = 0;
         ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (request != LISTEN || result != RESULT_OK || heard == null || heard.isEmpty()) return; // cancelled: the mic button is there
         final String text = heard.get(0);
