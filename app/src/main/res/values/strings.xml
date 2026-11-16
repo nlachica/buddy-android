@@ -1350,6 +1350,9 @@
     <string name="audio_speaker">Speaker</string>
     <string name="audio_phone">Phone</string>
     <string name="audio_headset">Headset</string>
+    <string name="audio_watch">Watch</string>
+    <!-- Spoken on the phone before a reply read there because the watch could not play it. -->
+    <string name="voice_watch_unavailable">Your watch isn\'t available, so I\'m reading this on the phone.</string>
     <!-- Content description of the voice bar's audio device button. %1$s = the device shown. -->
     <string name="voice_audio_device">Audio device: %1$s</string>
     <string name="setup_languages">Languages</string>

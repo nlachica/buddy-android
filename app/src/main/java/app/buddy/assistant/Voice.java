@@ -236,7 +236,8 @@ final class Voice {
         if (clean.isEmpty()) return;
         SpeechPause.begin(c);
         AudioRoute.use(c);
-        here(c, clean);
+        if (WatchVoice.chosen(c)) WatchVoice.speak(c, clean);
+        else here(c, clean);
     }
 
     /** Whether replies are read in ChatGPT's voice (the user's plan) rather than the phone's. */
@@ -466,12 +467,14 @@ final class Voice {
         return null;
     }
 
-    /** Buddy is reading something aloud (phone voice or ChatGPT's). */
+    /** Buddy is reading something aloud (phone voice, ChatGPT's, or on the watch). */
     static boolean isSpeaking() {
-        return CodexSpeech.active() || (tts != null && ttsReady && tts.isSpeaking());
+        return CodexSpeech.active() || (tts != null && ttsReady && tts.isSpeaking()) || WatchVoice.active();
     }
 
     static void stopSpeaking() {
+        WatchVoice.stop(); // first: its streams are cancelled before CodexSpeech.stop() closes them
+        dropRouted();
         CodexSpeech.stop();
         if (tts != null && ttsReady) tts.stop();
     }

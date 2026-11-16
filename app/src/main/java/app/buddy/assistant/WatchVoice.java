@@ -1,0 +1,115 @@
+package app.buddy.assistant;
+
+import android.content.Context;
+import android.os.Handler;
+import android.os.Looper;
+
+import java.util.function.Consumer;
+
+/**
+ * The Watch entry of the audio device list (docs/features/012-watch-audio-device/plan.md): read aloud on the Galaxy
+ * Watch. The rules are ReadQueue's; this is the Android side: the watch link (github build only, loaded by reflection
+ * because src/main can't see src/watchlink, and F-Droid and build.sh don't have it), the voices and the clock.
+ * Main thread only.
+ */
+final class WatchVoice {
+    /** The audio device key of Watch. Device keys are type:name and always hold a ':', so there is no clash. */
+    static final String KEY = "watch";
+
+    /** The github build's end of the watch link (WatchVoiceLink). */
+    interface Link {
+        /** The node id of a reachable watch whose app can play readings, or null (main thread, within a few seconds). */
+        void find(Context c, Consumer<String> node);
+
+        /** One reading's audio stream to that watch. */
+        ReadQueue.Stream open(Context c, String node, ReadQueue.Events e);
+    }
+
+    private static Link link;
+    private static boolean loaded;
+    private static ReadQueue queue;
+
+    private WatchVoice() {
+    }
+
+    /** The link, or null when this build has none. */
+    static synchronized Link link() {
+        if (!loaded) {
+            loaded = true;
+            link = load("app.buddy.assistant.WatchVoiceLink");
+        }
+        return link;
+    }
+
+    static Link load(String className) {
+        try {
+            return (Link) Class.forName(className).getDeclaredConstructor().newInstance();
+        } catch (ReflectiveOperationException | LinkageError e) {
+            return null;
+        }
+    }
+
+    /** Whether read aloud goes to the watch now. */
+    static boolean chosen(Context c) {
+        return KEY.equals(Prefs.audioDevice(c)) && link() != null;
+    }
+
+    static void speak(Context c, String clean) {
+        if (queue == null) queue = new ReadQueue(new Phone(c.getApplicationContext()));
+        queue.speak(clean, Voice.chatgptVoice(c));
+    }
+
+    static boolean active() {
+        return queue != null && queue.active();
+    }
+
+    static void stop() {
+        if (queue != null) queue.stop();
+    }
+
+    private static final class Phone implements ReadQueue.Out {
+        private final Context app;
+        private final Handler main = new Handler(Looper.getMainLooper());
+
+        Phone(Context app) {
+            this.app = app;
+        }
+
+        @Override
+        public void find(Consumer<String> node) {
+            link().find(app, node);
+        }
+
+        @Override
+        public ReadQueue.Stream open(String node, ReadQueue.Events e) {
+            return link().open(app, node, e);
+        }
+
+        @Override
+        public void chatgpt(String text, ReadQueue.Stream s, Runnable failed) {
+            CodexSpeech.speak(app, text, t -> failed.run(), s);
+        }
+
+        @Override
+        public void tts(String text, ReadQueue.Stream s, Runnable done) {
+            if (s == null) SpeechPause.begin(app);
+            Voice.routed(app, text, s, done);
+        }
+
+        @Override
+        public void stopProducers(ReadQueue.Stream s) {
+            CodexSpeech.cancel(s);
+            Voice.dropRouted();
+        }
+
+        @Override
+        public void after(long ms, Runnable r) {
+            main.postDelayed(r, ms);
+        }
+
+        @Override
+        public String notice() {
+            return app.getString(R.string.voice_watch_unavailable);
+        }
+    }
+}
