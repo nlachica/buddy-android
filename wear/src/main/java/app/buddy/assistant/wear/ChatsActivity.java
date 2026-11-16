@@ -2,6 +2,7 @@ package app.buddy.assistant.wear;
 
 import android.app.Activity;
 import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.os.Bundle;
@@ -86,6 +87,12 @@ public class ChatsActivity extends Activity {
                     last.getInt("accent", Look.ACCENT));
             startActivity(speak ? talk.putExtra("speak", true) : talk);
         }
+    }
+
+    /** The default chat is the latest write here: words sent, a call, or a reply the watch took. */
+    static void remember(Context c, String chat, String title, int accent) {
+        c.getSharedPreferences("last", MODE_PRIVATE).edit()
+                .putString("chat", chat).putString("title", title).putInt("accent", accent).apply();
     }
 
     @Override
@@ -175,8 +182,6 @@ public class ChatsActivity extends Activity {
     }
 
     private void open(String id, String title, int accent) {
-        getSharedPreferences("last", MODE_PRIVATE).edit()
-                .putString("chat", id).putString("title", title).putInt("accent", accent).apply();
         startActivity(Talk.intent(this, id, title, accent));
     }
 

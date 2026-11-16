@@ -330,6 +330,7 @@ public class Talk extends Service {
                 break;
             case Phone.REPLY:
                 status = "";
+                ChatsActivity.remember(this, chat, title, accent); // the default chat: the one that last answered
                 say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1));
                 break;
             case Phone.DONE:
