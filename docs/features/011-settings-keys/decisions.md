@@ -111,3 +111,14 @@
   one-line check and would have gone out as the key. Parsing it would be Bitwarden handling in the app. (Plan review
   round 1, F5.)
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Coder: small calls the plan left open
+- `KeySetting` takes a fourth constructor argument, `gone` (the refusal text for a missing record: "no MCP server x" / "no
+  such service x"), instead of a second abstract hook.
+- Removal ("there is no key to remove") tests `digest(saved()).isEmpty()`, not `saved() == null`: an API service whose key
+  was removed is stored as `""` (the screen's own state), and `Secrets.get` returns that `""`.
+- A new MCP server's `It lists N tools.` note is returned only when it was added with a key, so 004's keyless add keeps its
+  reply. A set on an existing service key says `It lists N models.` (the service's check keeps models, not tools).
+- `key_file` with a blank value after trimming isn't treated as absent: `""` reaches `keyFrom`, which refuses it without echo.
+- No Gradle here (no Android SDK; JDK 21 can't start under PaX). Tests ran with the no-Gradle script from feature 005
+  (copied to `/tmp/buddy-build-011/check.sh`, pointed at this worktree; JDK 17, real `org.json`, stub `android.jar`).
