@@ -40,3 +40,9 @@
 - Options: `values/strings.xml` only; add every locale.
 - Choice: English only, as fork features 012 and 013 did (Android falls back to English, and lintVital doesn't fail on missing translations).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - The × tap runs the full refresh()
+- Options: `renderHelpers()` only, plus a separate `backgroundPanel.setShown(resumed)` on close; the full `refresh()`.
+- Choice: `refresh()`, because it already restores the panel (which `renderHelpers` set GONE while the "This chat" card
+  existed) and then rebuilds the box. It is one call, and the speaker button already uses the same path (plan-review F2).
+- By: Planner (claude-opus-5-5)

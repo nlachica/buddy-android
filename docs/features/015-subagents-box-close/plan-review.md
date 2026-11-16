@@ -8,3 +8,14 @@ F1 [major] Guard the in-place close-button update when no button exists - Design
 F2 [major] Closing does not restore the parent's screen panel immediately - Design 5 claims the usual background panel reappears with "No new code", but the tap only saves and calls `renderHelpers()` (`docs/features/015-subagents-box-close/plan.md:47-52`). The panel was explicitly set GONE while the own card existed (`app/src/main/java/app/buddy/assistant/ChatActivity.java:870`); dropping that card does not undo its visibility. Restoration happens in the full `refresh()` through `backgroundPanel.setShown(resumed)` (`ChatActivity.java:2016-2017`, `app/src/main/java/app/buddy/assistant/BackgroundPanel.java:89-100`). `Sessions.save(ses)` only writes storage (`app/src/main/java/app/buddy/assistant/Sessions.java:289-291`), and the panel's picture tick exits while GONE (`BackgroundPanel.java:103-105`). With an idle parent, closing can therefore leave both its card and its normal screen controls inaccessible until another event refreshes the chat. -> Call the existing full `refresh()` after saving the close state instead of only `renderHelpers()`, or explicitly refresh the background panel on the close transition. Verify the parent screen and "Show on my screen" return immediately after closing with the parent and helpers idle, without navigation or another chat event.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+F1: accepted - Design 4's in-place line is now `if (helpersClose != null) helpersClose.setVisibility(...)`, and it
+says this covers a closed box, a helper chat and a chat without sub-agents. New test-plan row "no button, no crash":
+a code walk (the only use outside the rebuild is guarded) plus device checks of refreshes after ×, a working
+sub-agent's chat, and a chat that never had sub-agents. No new unit test: the null guard is view code, and
+`ChatActivity` doesn't run on the JVM here.
+F2: accepted - the tap now calls the full `refresh()` (as the speaker button already does) instead of
+`renderHelpers()`. `refresh()` runs `backgroundPanel.setShown(resumed)` and then `renderHelpers()`. Design 5 no longer
+says "no new code" and explains why the panel needs that call. The edge row now checks that the panel comes back right
+after × with the parent and sub-agents idle, without navigation or another chat event, plus a code walk.

@@ -42,14 +42,19 @@ Also out: a collapse state, a way to reopen a closed box before the next round, 
      scheduled message (`ChatActivity.java:2007`, 40dp). The title line keeps its height, and the × is centred on the
      title's text, not on the label's padded box. The button goes in a new field `helpersClose`, which is set to null
      on every rebuild.
-   - In-place block (runs on every refresh): `helpersClose.setVisibility(Helpers.anyRunning(l) ? INVISIBLE : VISIBLE)`.
-     `INVISIBLE`, so nothing moves when it appears. The last card turns Done and the × appears in the same refresh.
+   - In-place block (runs on every refresh, also for a closed box, a helper chat and a chat without sub-agents, where
+     there is no button): `if (helpersClose != null) helpersClose.setVisibility(Helpers.anyRunning(l) ? INVISIBLE :
+     VISIBLE)`. `INVISIBLE`, so nothing moves when it appears. The last card turns Done and the × appears in the same
+     refresh.
    - Tap: read `l = Helpers.of(hub, ses.id)` again. If `anyRunning(l)`, do nothing. Otherwise
-     `ses.helpersClosed = Helpers.round(l)`, `hub.sessions.save(ses)`, `renderHelpers()`.
+     `ses.helpersClosed = Helpers.round(l)`, `hub.sessions.save(ses)`, `refresh()` (the full one, as the speaker
+     button does, so the background panel comes back at once: see 5).
    - The helper-chat case (`parent != null`) is unchanged.
-5. **The chat's own screen.** The "This chat" card is in the box, so it goes with it. The existing line that hides
-   `backgroundPanel` only applies while that card exists (`ChatActivity.java:870`). Once the box is closed, the chat's
-   own hidden screen (if any) shows in its usual panel, as in a chat without sub-agents. No new code.
+5. **The chat's own screen.** The "This chat" card is in the box, so it goes with it. While that card exists,
+   `renderHelpers` sets `backgroundPanel` GONE (`ChatActivity.java:870`), and dropping the card does not undo that.
+   Only `refresh()` brings the panel back, through `backgroundPanel.setShown(resumed)` (`ChatActivity.java:2017`,
+   `BackgroundPanel.java:89-100`). So the tap calls `refresh()`, not just `renderHelpers()`. Then the chat's own hidden
+   screen (if any) shows in its usual panel at once, as in a chat without sub-agents.
 6. **Reports stay where they are.** Closing deletes nothing. The sub-agent chats live until the next round, as today.
    The bubble panel's rows still open them (`Bubble.renderHelpers` reads `Helpers.of`, not the box). Search lists
    them (`SearchActivity.java:122` skips only empty or incognito chats). The parent's own reply and steps are
@@ -89,7 +94,8 @@ Alternatives considered:
 | 1. All done → ×, tap hides, reports reachable | `HelpersBoxTest`: `boxClosed` is true when the key matches and none runs. Device: ask a chat for two web-only sub-agents. When both cards say Done, × shows at the end of the "Sub-agents" title. Tap → the box is gone, and the messages move up. The parent's reply is unchanged. The bubble panel on that chat lists both, and a tap opens a sub-agent's chat with its report. Search for a word from a report → that sub-agent's chat. Leave and reopen the chat: still closed. Force-stop Buddy and reopen it: still closed (saved). TalkBack reads the × as "Close sub-agents". | unit; device after ship |
 | 2. Running → no × | `HelpersBoxTest`: `boxClosed` is false while any runs, even with a matching key. Device: during the round, the title shows no × and the title line doesn't move when it appears. A sub-agent's own chat shows only "Sub-agent of …", with no ×. Code walk (Code Reviewer): the tap re-checks `anyRunning` on a fresh `Helpers.of`. | unit; device after ship; review |
 | 3. Next round → box again; CI green | `HelpersBoxTest`: a new round (other ids) with the old key → `boxClosed` false, and `round` differs. Device: in the same chat, ask for another round → a fresh box with the new cards, no × while they run, and × when they are done. CI on the PR: `testGithubDebugUnitTest` (new test plus existing), `assembleGithubRelease assembleFdroidRelease :wear:assembleRelease`, F-Droid reproducibility, `helper-tests`. | unit; device after ship; CI |
-| Edge: chat's own screen | Device, chat in background mode with its own screen in use: after ×, that screen shows in its usual panel (Show on my screen works). | device after ship (if background mode is set up) |
+| Edge: chat's own screen | Code walk: the tap calls `refresh()`, which runs `backgroundPanel.setShown(resumed)` before `renderHelpers()`. Device, chat in background mode with its own screen in use, parent and sub-agents idle: right after ×, with no navigation and no other chat event, that screen shows in its usual panel and Show on my screen works. | review; device after ship (if background mode is set up) |
+| Edge: no button, no crash | Code walk: the only `helpersClose` use outside the rebuild is behind `helpersClose != null`. Device: after ×, the chat keeps refreshing (send it a message and let it reply) with no crash. A sub-agent's chat refreshes while it works with no crash. A chat that never had sub-agents opens and replies with no crash. | review; device after ship |
 
 `HelpersBoxTest` cases:
 - empty list → false;
@@ -108,7 +114,7 @@ locally if Gradle works on this device; otherwise CI on the PR is the proof.
   box shows while it works (no ×) and hides again when it is done, because the key still matches. This is intended:
   the user closed that round, and its work shows while it runs (decisions).
 - **Closed box, own card gone.** If the chat's own screen is in use, its `BackgroundPanel` shows in place of the
-  "This chat" card (Design 5). That is today's behaviour for a chat without sub-agents, not new UI.
+  "This chat" card, brought back by the tap's `refresh()` (Design 5). That is today's behaviour for a chat without sub-agents, not new UI.
 - **Upstream syncs.** `renderHelpers` is upstream code, so a sync that rewrites it will conflict here. Keep the
   diff small and in one place. The `Sessions` lines are separate statements, and the field is fork-only.
 - **`Helpers` and `Sessions.Session` on the JVM.** Both load under `isReturnDefaultValues`: `Session` is a static
