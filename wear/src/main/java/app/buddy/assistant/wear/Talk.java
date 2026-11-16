@@ -17,6 +17,7 @@ import android.speech.tts.TextToSpeech;
 import android.speech.tts.UtteranceProgressListener;
 import android.util.Log;
 
+import com.google.android.gms.tasks.Task;
 import com.google.android.gms.wearable.ChannelClient;
 import com.google.android.gms.wearable.MessageClient;
 import com.google.android.gms.wearable.MessageEvent;
@@ -38,8 +39,9 @@ import java.util.function.BooleanSupplier;
  * One conversation with Buddy on the phone, from the moment the user's words are sent until the answer is said. It is
  * a foreground service, not the screen, that listens and speaks: the wait outlives the screen (the watch face comes
  * back when the wrist goes down, and Android may reclaim a stopped activity's process). TalkActivity only draws
- * {@link #lines}. The wait ENDS on done, an error, lost contact, the 15-minute ceiling or the screen being swiped away;
- * the service STOPS once the last reply has been said (so a done that comes mid-reply doesn't cut it off).
+ * {@link #lines}. The wait ENDS on done, an error, lost contact, the 15-minute ceiling or the screen being closed while
+ * it shows (Back or a swipe; a relaunch of the app doesn't count). A failure of later words doesn't end a run the phone
+ * has accepted. The service STOPS once the last reply has been said (so a done that comes mid-reply doesn't cut it off).
  * Replies are said in order: by the watch's TTS, or, when the phone says a reply comes in ChatGPT's voice
  * (docs/features/007-watch-live-voice/plan.md), by playing its channel; the watch alone decides which, once.
  */
@@ -61,20 +63,27 @@ public class Talk extends Service {
         void send(BooleanSupplier valid, Phone.Sent done);
     }
 
-    // the conversation, process-wide and main-thread only; one at a time, a new one replaces it
+    // the conversation, process-wide and main-thread only; one at a time. New words for the same chat join it while it
+    // is live (waiting, or still saying its replies), sent one at a time; anything else replaces it
     static String chat = "", title = "";
     static int accent = Look.ACCENT;
     static final List<Line> lines = new ArrayList<>();
+    /** heard: nothing in flight (the latest words were heard, refused or given up). */
     static boolean waiting, heard;
-    /** Counts conversations: a send or registration callback from an earlier one must not touch the current one. */
+    /** The phone took words of this conversation and hasn't sent done since: a run of ours is still going. */
+    static boolean accepted;
+    /** Goes up on a new conversation and an ended wait: their callbacks (sends, status checks) must not touch what follows. */
     private static int run;
+    /** Goes up with each words sent and words given up: their callbacks must not send them late or settle the next words. */
+    private static int sends;
     /** The latest step of the run ("Opening Calendar"), shown while it works. */
     static String status = "";
     /** Lines that came while no screen showed them: reopening the chat just shows them, it doesn't listen again. */
     static boolean unseen;
     /** The open screen's redraw, or null. */
     static Runnable onChange;
-    private static Sender sender;
+    /** Words still to send, oldest first. */
+    private static final List<Sender> queue = new ArrayList<>();
     private static Talk instance;
 
     private static final String PATHS = "/buddy";
@@ -133,26 +142,37 @@ public class Talk extends Service {
             h.post(() -> voiceClosed(ch));
         }
     };
-    private final Runnable noHeard = () -> fail(R.string.talk_no_answer);
+    private Task<Void> registration;
+    private final Runnable noHeard = () -> settle(getString(R.string.talk_no_answer));
     private final Runnable quiet = this::askStatus;
     private final Runnable noStatus = () -> fail(R.string.talk_lost);
     private final Runnable ceiling = () -> fail(R.string.talk_ceiling);
     private final Runnable forceStop = this::stop;
 
-    /** Starts the conversation: the listener first, then {@code send}, so a fast answer can't come before anyone listens. */
+    /**
+     * Starts the conversation: the listener first, then {@code send}, so a fast answer can't come before anyone listens.
+     * If this chat's conversation is still live the words join it (lines and speech stay) instead of replacing it.
+     */
     static void begin(Context c, String chat, String title, int accent, Sender send) {
         Call.hangUp(); // the last one started owns the speaker
-        Talk.chat = chat;
-        Talk.title = title;
-        Talk.accent = accent;
-        lines.clear();
+        boolean join = instance != null && chat.equals(Talk.chat);
+        boolean wasWaiting = waiting;
+        if (!join) {
+            Talk.chat = chat;
+            Talk.title = title;
+            Talk.accent = accent;
+            lines.clear();
+            queue.clear();
+            heard = false;
+            accepted = false;
+            run++;
+        }
         waiting = true;
-        heard = false;
         status = "";
         unseen = false;
-        sender = send;
-        run++;
-        c.startForegroundService(new Intent(c, Talk.class)); // the screen is showing, so this is allowed
+        queue.add(send);
+        if (join) instance.join(wasWaiting);
+        else c.startForegroundService(new Intent(c, Talk.class)); // the screen is showing, so this is allowed
         changed();
     }
 
@@ -162,7 +182,7 @@ public class Talk extends Service {
                 .putExtra("chat", chat).putExtra("title", title).putExtra("accent", accent);
     }
 
-    /** The user swiped the talk screen away: stop waiting (what is being said is finished). */
+    /** The user closed the talk screen (Back or a swipe): stop waiting (what is being said is finished). */
     static void left() {
         if (waiting && instance != null) instance.end();
     }
@@ -200,20 +220,73 @@ public class Talk extends Service {
         wake.acquire(WAKE_MS); // the deadlines below must run with the screen off
         h.postDelayed(ceiling, CEILING_MS);
         if (tts == null) tts = new TextToSpeech(this, this::ttsInit);
-        final Sender send = sender;
-        final int mine = run;
-        h.postDelayed(noHeard, NO_HEARD_MS); // armed before anything is sent; any answer from the phone cancels it
         Wearable.getChannelClient(this).registerChannelCallback(channelCallback); // from start to stop: voice channels
-        Wearable.getMessageClient(this).addListener(listener)
-                .addOnSuccessListener(v -> {
-                    if (active(mine)) send.send(() -> active(mine), error -> {
-                        if (error != null && active(mine)) fail(error);
-                    });
-                })
-                .addOnFailureListener(e -> {
-                    if (active(mine)) fail(R.string.talk_connect);
-                });
+        register();
+        next();
         return START_NOT_STICKY;
+    }
+
+    private void register() {
+        final Task<Void> t = Wearable.getMessageClient(this).addListener(listener);
+        registration = t;
+        t.addOnFailureListener(e -> {
+            if (waiting && registration == t) fail(R.string.talk_connect);
+        });
+    }
+
+    /**
+     * Sends the oldest queued words once the listener is registered. Words are sent one at a time: the next ones go
+     * only after these are settled (heard, refused, failed or given up), so their answers can't be mixed up.
+     */
+    private void next() {
+        if (queue.isEmpty()) return;
+        final Sender send = queue.remove(0);
+        heard = false;
+        h.removeCallbacks(noHeard);
+        h.postDelayed(noHeard, NO_HEARD_MS); // armed before anything is sent
+        final int mine = run, w = ++sends;
+        registration.addOnSuccessListener(v -> {
+            if (active(mine) && w == sends) send.send(() -> active(mine) && w == sends, error -> {
+                if (error != null && active(mine) && w == sends) settle(error);
+            });
+        });
+    }
+
+    /** New words for the conversation that is live: waiting, or over but its replies are still being said. */
+    private void join(boolean wasWaiting) {
+        if (!wasWaiting) {
+            h.removeCallbacks(forceStop);
+            getSystemService(NotificationManager.class).notify(1, notification(R.string.talk_notif_waiting));
+            // the listener stays registered after the end (end() keeps it); only a dead registration is retried
+            if (registration.isComplete() && !registration.isSuccessful()) register();
+            next();
+        } else if (heard) {
+            next(); // else the words wait in the queue for the ones in flight
+        }
+        h.removeCallbacks(ceiling);
+        h.postDelayed(ceiling, CEILING_MS);
+        wake.acquire(WAKE_MS);
+    }
+
+    /**
+     * The words in flight failed (send, refusal or no answer): say why, then go on with the next queued words. The wait
+     * itself goes on while the phone has accepted a run (it will send replies and a done), else it ends.
+     */
+    private void settle(String error) {
+        sends++; // callbacks of the words given up must not act any more
+        heard = true;
+        h.removeCallbacks(noHeard);
+        say(ERROR, error);
+        if (!queue.isEmpty()) {
+            next();
+        } else if (accepted) {
+            h.removeCallbacks(quiet); // nothing re-arms it while words are in flight
+            h.postDelayed(quiet, QUIET_MS);
+        } else {
+            end();
+            return;
+        }
+        changed();
     }
 
     /** Whether conversation {@code r} is still the one being waited for. */
@@ -244,33 +317,37 @@ public class Talk extends Service {
             sayItself(in.optLong("id"), "say");
             return;
         }
-        h.removeCallbacks(noHeard); // whatever it is, the phone got the message
         String text = in.optString("text");
         switch (e.getPath()) {
             case Phone.HEARD:
-                heard = true;
+                heard = accepted = true;
+                h.removeCallbacks(noHeard);
                 lines.add(new Line(YOU, text));
+                if (!queue.isEmpty()) next();
                 break;
             case Phone.STEP:
                 status = text;
                 break;
             case Phone.REPLY:
                 status = "";
+                ChatsActivity.remember(this, chat, title, accent); // the default chat: the one that last answered
                 say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1));
                 break;
             case Phone.DONE:
                 if ("stopped".equals(in.optString("outcome"))) say(ERROR, getString(R.string.talk_stopped));
-                end();
+                accepted = false;
+                // words in flight: this done belongs to the run before them; they decide whether the wait goes on
+                if (heard) end();
+                else changed();
                 return;
             case Phone.ERROR:
-                say(ERROR, text);
-                end();
+                settle(text);
                 return;
             case Phone.STATUS:
                 h.removeCallbacks(noStatus);
                 if (!in.optBoolean("running")) {
-                    fail(R.string.talk_stopped_working); // running is false and no done came: the answer is lost
-                    return;
+                    if (heard) fail(R.string.talk_stopped_working); // running is false and no done came: the answer is lost
+                    return; // words in flight: a status asked before them, they start their own run
                 }
                 // only a sign of life: not news for the screen (it would never be released), but keep asking
                 h.removeCallbacks(quiet);
@@ -316,6 +393,9 @@ public class Talk extends Service {
         h.removeCallbacks(quiet);
         h.removeCallbacks(noStatus);
         h.removeCallbacks(ceiling);
+        queue.clear(); // words not sent yet go with the wait
+        accepted = false;
+        run++;
         waiting = false; // the listener stays until stop: after the end it only takes /buddy/say
         status = "";
         getSystemService(NotificationManager.class).notify(1, notification(R.string.talk_notif_speaking));
@@ -329,6 +409,7 @@ public class Talk extends Service {
     }
 
     private void stop() {
+        if (instance == this) instance = null; // a service that is going away must not be joined
         h.removeCallbacksAndMessages(null);
         release();
         stopForeground(STOP_FOREGROUND_REMOVE);
