@@ -633,13 +633,16 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
     @Override
     public void onMessage(Sessions.Session s, Sessions.Msg msg) {
         if (s == ses) {
+            View c = scroll.getChildAt(0); // where the user was, before the new message lays out
+            boolean follow = msg.kind == Bubble.Kind.USER || c == null
+                    || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(this, 48);
             if (ses.messages.size() == 1) { // drop the empty-chat hint
                 messages.removeAllViews();
                 hint = null;
             }
             show(msg);
             lastShown = msg;
-            scrollToEnd();
+            if (follow) scrollToEnd();
         }
     }
 
