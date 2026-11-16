@@ -54,9 +54,9 @@ public class AudioRouteTest {
     @Test
     public void settingsReadSurvivesAPickThatVanishedBetweenQueries() {
         String[][] gone = {{"", "Auto"}};
-        String[][] here = {{"", "Auto"}, {"id:7:FreeCom", "FreeCom"}};
-        assertEquals("FreeCom", SettingsTool.audioNow("id:7:FreeCom", "id:7:FreeCom", here, "speaker"));
-        assertEquals("auto \u2192 speaker (FreeCom isn't connected)", SettingsTool.audioNow("id:7:FreeCom", "id:7:FreeCom", gone, "speaker"));
+        String[][] here = {{"", "Auto"}, {"7:FreeCom", "FreeCom"}};
+        assertEquals("FreeCom", SettingsTool.audioNow("7:FreeCom", "7:FreeCom", here, "speaker"));
+        assertEquals("auto \u2192 speaker (FreeCom isn't connected)", SettingsTool.audioNow("7:FreeCom", "7:FreeCom", gone, "speaker"));
         assertEquals("auto \u2192 speaker", SettingsTool.audioNow("", "", gone, "speaker"));
     }
 }

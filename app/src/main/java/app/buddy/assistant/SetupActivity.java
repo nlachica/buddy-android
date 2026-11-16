@@ -229,6 +229,10 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
 
     private void render() {
         if (isFinishing() || isDestroyed()) return;
+        // one refresh chain: cancel the old note's tick while it is still attached (removeCallbacks needs that)
+        if (autoNote != null) autoNote.removeCallbacks(autoTick);
+        autoNote = null;
+        autoSeq++;
         list.removeAllViews();
         if (page == null) {
             menu();
@@ -649,8 +653,6 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                         ? R.string.setup_audio_device_info_watch : R.string.setup_audio_device_info);
         TextView note = text(this, autoBase, 13, MUTED);
         vc.addView(note, topGap(8));
-        if (autoNote != null) autoNote.removeCallbacks(autoTick); // one refresh chain: the old note's tick must not live on
-        autoSeq++;
         boolean autoUsed = saved.isEmpty() || away; // a connected pick is used as picked; only Auto and a missing pick show "now"
         autoNote = watch || !autoUsed ? null : note;
         if (watch) { // the unreachable state: no watch with the Buddy watch app answers

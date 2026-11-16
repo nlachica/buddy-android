@@ -43,3 +43,8 @@ Coverage and validation: reviewed `main...HEAD` at `654a979`, the touched produc
 Application code was not modified.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+- F1: fixed. The test fixture now uses production-shaped keys (`7:FreeCom`, as `AudioRoute.key()` emits); the expected label and `audioNow` are unchanged.
+- F2: fixed. `render()` now cancels the old note's `autoTick`, clears `autoNote` and bumps `autoSeq` at its start, before `list.removeAllViews()`, while the note is still attached. The later cancel after the note was added is gone. `onPause` is unchanged. Not unit-testable (view lifecycle).
+- Run: Gradle can't start on this host (JVM "Failed to mark memory page as executable"), so the build and tests were NOT run. Left to CI / the Verifier.
