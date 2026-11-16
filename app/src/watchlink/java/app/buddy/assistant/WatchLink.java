@@ -24,7 +24,7 @@ import java.util.Map;
  * The phone's end of the Galaxy Watch app (the wear/ module): the watch lists the chats, sends what the user said to
  * one of them, and gets Buddy's answer back to show and speak. Messages are JSON over the Wear Data Layer, paths under
  * /buddy (the table is in docs/features/003-wear-companion/plan.md; the live call's and the ChatGPT voice's additions
- * are in docs/features/007-watch-live-voice/plan.md). Github build only (src/watchlink).
+ * are in docs/features/007-watch-live-voice/plan.md; the New chat field is in docs/features/013-watch-new-chat/plan.md). Github build only (src/watchlink).
  */
 public class WatchLink extends WearableListenerService {
     private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status";
@@ -75,7 +75,7 @@ public class WatchLink extends WearableListenerService {
                     chats(node);
                     break;
                 case SEND:
-                    deliver(node, in.optString("chat"), in.optString("text").trim());
+                    deliver(node, in.optString("chat"), in.optString("text").trim(), in.optBoolean("new"));
                     break;
                 case STATUS:
                     Sessions.Session ses = ChatHub.get(c).sessions.find(in.optString("chat"));
@@ -107,19 +107,25 @@ public class WatchLink extends WearableListenerService {
     }
 
     /** What the user said on the watch goes to the chat exactly like a typed message. */
-    private static void deliver(String node, String chat, String text) {
+    private static void deliver(String node, String chat, String text, boolean isNew) {
         ChatHub hub = ChatHub.get(app);
         Sessions.Session ses = hub.sessions.find(chat);
+        boolean make = ses == null && isNew && newChatId(chat); // New chat on the watch: its id, made here on the first words
         if (text.isEmpty()) {
             refuse(node, chat, app.getString(R.string.hub_something_wrong));
-        } else if (ses == null) {
+        } else if (ses == null && !make) {
             refuse(node, chat, app.getString(R.string.watch_chat_gone));
         } else if (BuddyService.get() == null) {
             // agent events reach ChatHub only through the accessibility service's MCP server: a run could never answer
             refuse(node, chat, app.getString(R.string.watch_buddy_off));
         } else {
+            if (make) {
+                ses = hub.sessions.create(chat, Prefs.backend(app), false, Prefs.devMode(app));
+                hub.changed();
+            }
             String err = hub.send(ses, text); // a chat that is running takes it as a note
             if (err != null) {
+                if (make) hub.delete(ses); // still empty: send refuses before it adds anything
                 refuse(node, chat, err);
                 return;
             }
@@ -132,6 +138,11 @@ public class WatchLink extends WearableListenerService {
                 hub.addListener(relay);
             }
         }
+    }
+
+    /** The phone's own id format (ChatHub.pruneLinux needs it; the id is also a file name). */
+    static boolean newChatId(String id) {
+        return id.matches("[0-9a-f]{12}");
     }
 
     private static void refuse(String node, String chat, String text) {
