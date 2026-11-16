@@ -8,6 +8,9 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import org.json.JSONArray;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -20,7 +23,7 @@ public class SettingsKeysTest {
     public TemporaryFolder tmp = new TemporaryFolder();
 
     private File root() throws Exception {
-        File r = tmp.newFolder("linux");
+        File r = Files.createTempDirectory(tmp.getRoot().toPath(), "linux").toFile();
         new File(r, "root").mkdirs();
         return r;
     }
@@ -101,6 +104,187 @@ public class SettingsKeysTest {
         assertEquals(64, SettingsTool.digest(KEY).length());
         assertFalse(SettingsTool.digest(KEY).contains("ck_"));
         assertNotEquals(SettingsTool.digest(KEY), SettingsTool.digest(KEY + "x"));
+    }
+
+    // ---------------------------------------------------------------- KeySetting at the gate
+
+    private static final String CARD = "Change Buddy's setting %1$s\nNow: %2$s\nNew: %3$s";
+    private static final String YES = "APPROVED by the user. Go ahead.";
+    private static final String OLD_URL = "https://old.example/sk-path-123/mcp";
+
+    /** A map-backed record: what verify got, how often store ran. */
+    private static final class Mem extends SettingsTool.KeySetting {
+        String url = OLD_URL, stored;
+        Exception verifyError;
+        Runnable duringVerify = () -> { };
+        final List<String> verified = new ArrayList<>();
+        final List<String> stores = new ArrayList<>();
+
+        Mem(File root, String file) {
+            super("mcp/composio/key", "no MCP server composio", root, file);
+        }
+
+        @Override
+        String target() {
+            return url == null ? null : new JSONArray().put(url).toString();
+        }
+
+        @Override
+        String saved() {
+            return stored;
+        }
+
+        @Override
+        void verify(JSONArray t, String key) throws Exception {
+            verified.add(t.getString(0) + " " + key);
+            duringVerify.run();
+            if (verifyError != null) throw verifyError;
+        }
+
+        @Override
+        String store(String key) {
+            stores.add(key);
+            stored = key.isEmpty() ? null : key;
+            return " It lists 3 tools.";
+        }
+    }
+
+    private static String change(Mem m, String value, List<String> cards, java.util.function.Supplier<String> answer) throws Exception {
+        return SettingsTool.change(m, value, CARD, card -> {
+            cards.add(card);
+            return answer.get();
+        }, Runnable::run);
+    }
+
+    private File withKey() throws Exception {
+        File r = root();
+        write(r, "root/k", KEY + "\n");
+        return r;
+    }
+
+    @Test
+    public void setAsksOneCardMasksTheKeyAndStoresIt() throws Exception {
+        for (String had : new String[]{null, "old-key-0000000000"}) {
+            Mem m = new Mem(withKey(), "~/k");
+            m.stored = had;
+            List<String> cards = new ArrayList<>();
+            String r = change(m, "", cards, () -> YES);
+            assertEquals(1, cards.size());
+            assertTrue(cards.get(0), cards.get(0).contains("Now: " + (had == null ? "none" : "set")));
+            assertTrue(cards.get(0), cards.get(0).contains("New: …xyzA (40 characters), from ~/k"));
+            assertEquals(java.util.Collections.singletonList(KEY), m.stores);
+            assertEquals(OLD_URL + " " + KEY, m.verified.get(0));
+            assertEquals("Changed mcp/composio/key: " + (had == null ? "none" : "set") + " → …xyzA (40 characters), from ~/k It lists 3 tools.", r);
+        }
+    }
+
+    @Test
+    public void removeAsksOneCardAndReadsNoFile() throws Exception {
+        Mem m = new Mem(new File("/nonexistent"), null);
+        m.stored = "old-key-0000000000";
+        List<String> cards = new ArrayList<>();
+        assertEquals("Changed mcp/composio/key: set → none (the key is removed)", change(m, "", cards, () -> YES).replace(" It lists 3 tools.", ""));
+        assertEquals(1, cards.size());
+        assertEquals(java.util.Collections.singletonList(""), m.stores);
+        assertTrue(m.verified.isEmpty());
+        Mem none = new Mem(new File("/nonexistent"), null);
+        String r = change(none, "", cards, () -> {
+            throw new AssertionError("no card");
+        });
+        assertEquals("Not changed: mcp/composio/key: there is no key to remove", r);
+    }
+
+    @Test
+    public void aDeniedKeyChangesAndSendsNothing() throws Exception {
+        for (String answer : new String[]{"DENIED: no", "CHANGES REQUESTED: “x”", BuddyService.NOT_NOW, BuddyService.AUTO_APPROVED,
+                BuddyService.RULE_APPROVED}) {
+            Mem m = new Mem(withKey(), "~/k");
+            List<String> cards = new ArrayList<>();
+            assertTrue(answer, change(m, "", cards, () -> answer).startsWith("Not changed. "));
+            assertEquals(1, cards.size());
+            assertTrue(answer, m.verified.isEmpty() && m.stores.isEmpty());
+        }
+    }
+
+    @Test
+    public void theKeyGoesOnlyToTheCardsAddressAndAStaleWriteIsRefused() throws Exception {
+        // the address is edited while the card is open
+        Mem m = new Mem(withKey(), "~/k");
+        String r = change(m, "", new ArrayList<>(), () -> {
+            m.url = "https://new.example/mcp";
+            return YES;
+        });
+        assertEquals(1, m.verified.size());
+        assertTrue(m.verified.get(0), m.verified.get(0).startsWith(OLD_URL + " "));
+        assertTrue(r, r.startsWith("Not changed: mcp/composio/key changed while the card was open"));
+        assertTrue(m.stores.isEmpty());
+        // ... or during verify
+        Mem d = new Mem(withKey(), "~/k");
+        d.duringVerify = () -> d.url = "https://new.example/mcp";
+        r = change(d, "", new ArrayList<>(), () -> YES);
+        assertTrue(d.verified.get(0), d.verified.get(0).startsWith(OLD_URL + " "));
+        assertTrue(r, r.contains("changed while the card was open") && d.stores.isEmpty());
+        // the saved key is swapped, or the record removed
+        Mem k = new Mem(withKey(), "~/k");
+        r = change(k, "", new ArrayList<>(), () -> {
+            k.stored = "someone-elses-key";
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open") && k.stores.isEmpty());
+        Mem g = new Mem(withKey(), "~/k");
+        r = change(g, "", new ArrayList<>(), () -> {
+            g.url = null;
+            return YES;
+        });
+        assertTrue(r, r.contains("changed while the card was open (now: (none))") && g.stores.isEmpty());
+    }
+
+    @Test
+    public void aFailedVerifyNeverShowsTheServersWordsOrTheStoredAddress() throws Exception {
+        String[] words = {"400 at " + OLD_URL, "GET /sk-path-123/mcp failed", "unknown host old.example", "bad key " + KEY + " Bearer " + KEY};
+        for (String w : words) {
+            Mem m = new Mem(withKey(), "~/k");
+            m.verifyError = new java.io.IOException(w);
+            String r = change(m, "", new ArrayList<>(), () -> YES);
+            assertTrue(r, r.startsWith("Not changed: mcp/composio/key: the server refused the key"));
+            for (String leak : new String[]{"old.example", "sk-path-123", "https://", KEY, "400", "GET"}) assertFalse(w + " -> " + r, r.contains(leak));
+            assertTrue(m.stores.isEmpty());
+        }
+    }
+
+    @Test
+    public void aLiteralKeyInValueIsRefusedUnreadAndUnrepeated() throws Exception {
+        for (String file : new String[]{null, "~/k"}) {
+            Mem m = new Mem(new File("/nonexistent"), file);
+            String r = change(m, KEY, new ArrayList<>(), () -> {
+                throw new AssertionError("no card");
+            });
+            assertTrue(r, r.startsWith("Not changed: mcp/composio/key takes its key from key_file"));
+            assertFalse(r, r.contains("ck_") || r.contains("0123"));
+        }
+        Mem gone = new Mem(withKey(), "~/k");
+        gone.url = null;
+        assertEquals("Not changed: no MCP server composio", change(gone, "", new ArrayList<>(), () -> YES));
+    }
+
+    @Test
+    public void noStringTheToolReturnsHoldsMoreThanTheLast4() throws Exception {
+        for (String line : new String[]{"x-consumer-api-key: " + KEY, "Authorization: Bearer " + KEY, KEY}) {
+            File r = root();
+            write(r, "root/k", line);
+            Mem m = new Mem(r, "~/k");
+            m.stored = line;
+            List<String> cards = new ArrayList<>();
+            String all = m.read() + "\n" + m.line() + "\n" + m.view(m.get()) + "\n" + change(m, "", cards, () -> YES) + "\n" + String.join("\n", cards);
+            all += "\n" + change(m, "", cards, () -> { // approved again: the same
+                m.url = null;
+                return YES;
+            }) + String.join("\n", cards);
+            for (String leak : new String[]{KEY.substring(0, 36), "ck_0123", "x-consumer-api-key", OLD_URL, "Bearer"}) {
+                assertFalse(leak + " in: " + all, all.contains(leak));
+            }
+            assertTrue(all, all.contains("…xyzA (40 characters)"));
+        }
     }
 
     // ---------------------------------------------------------------- linuxCaller

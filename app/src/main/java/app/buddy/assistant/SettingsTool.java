@@ -1066,6 +1066,96 @@ final class SettingsTool {
         return here == null || c != null && c.dev;
     }
 
+    /**
+     * A saved key of an MCP server or an API key service: set from a key file, or removed with value "". The snapshot
+     * holds the record's address and a digest of its key, so the key never leaves {@link #saved}, and an address or key
+     * edited while the card is open makes the write stale. The key is checked with the server after the card
+     * ({@link #verify}), only at the address the card was built from.
+     */
+    abstract static class KeySetting extends Setting {
+        private final File root;
+        private final String file, gone; // file: null removes the key; gone: what to say when the record doesn't exist
+        private String key, shown;       // shown: the record's address(es) as the card saw them
+
+        KeySetting(String name, String gone, File root, String file) {
+            super(name, "a key from key_file, or \"\" to remove it; never shown");
+            this.gone = gone;
+            this.root = root;
+            this.file = file;
+        }
+
+        /** The address(es) the key goes to, as a JSONArray string; null when the record is gone. Never shown. */
+        abstract String target();
+
+        /** The saved key, or null. */
+        abstract String saved();
+
+        /** Checks the key with the server at target (off the main thread) and keeps what it returns for {@link #store}. */
+        void verify(JSONArray target, String key) throws Exception {
+        }
+
+        /** Saves the key ("" removes it); returns a note. Main thread, under {@link #lock}. */
+        abstract String store(String key) throws Exception;
+
+        @Override
+        String get() {
+            String t = target();
+            return t == null ? null : new JSONArray().put(t).put(digest(saved())).toString();
+        }
+
+        @Override
+        String view(String snapshot) {
+            if (snapshot == null) return "(none)";
+            try {
+                return new JSONArray(snapshot).getString(1).isEmpty() ? "none" : "set";
+            } catch (org.json.JSONException e) {
+                throw new IllegalStateException(e);
+            }
+        }
+
+        @Override
+        String check(String value) {
+            if (!value.trim().isEmpty()) throw new IllegalArgumentException(name + " takes its key from key_file, never in value; value \"\" removes it");
+            if (target() == null) throw new IllegalArgumentException(gone);
+            if (file == null) {
+                if (saved() == null) throw new IllegalArgumentException(name + ": there is no key to remove");
+                return "";
+            }
+            key = keyFrom(root, file);
+            return mask(key) + ", from " + file.trim();
+        }
+
+        @Override
+        String[] card(String snapshot, String value) {
+            if (snapshot != null) {
+                try {
+                    shown = new JSONArray(snapshot).getString(0);
+                } catch (org.json.JSONException e) {
+                    throw new IllegalStateException(e);
+                }
+            }
+            return new String[]{view(snapshot), value.isEmpty() ? "none (the key is removed)" : value};
+        }
+
+        @Override
+        void prepare(String value) throws Exception {
+            if (value.isEmpty()) return;
+            try {
+                verify(new JSONArray(shown), key);
+            } catch (InterruptedException e) {
+                throw e;
+            } catch (Exception e) { // its words can quote the stored address, which no output shows
+                throw new Exception(name + ": the server refused the key or couldn't be reached (its own words aren't shown: "
+                        + "they can carry its address)");
+            }
+        }
+
+        @Override
+        String set(String value) throws Exception {
+            return store(value.isEmpty() ? "" : key);
+        }
+    }
+
     // ------------------------------------------------------------ MCP servers
 
     /** "mcp/notes = on  (key: set, 3 tools)": never the server's address. */
