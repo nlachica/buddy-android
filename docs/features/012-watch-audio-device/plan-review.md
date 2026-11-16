@@ -121,3 +121,15 @@ so explicit cancellation stays prompt and silent. The new `ReadStreamTest` cases
 - `cancel()` → the closer runs at once and no event follows.
 
 Changed: `plan.md` ("Watch link, phone side", test plan) and a new entry in `decisions.md`.
+
+## Round 4 - Plan Reviewer (gpt-6-astra)
+
+Reviewed at `0d3eb62`. Numbered after the existing Round 3 and its Planner response; this is the requested final pass, limited to blocker/major findings.
+
+No blocker or major finding remains open. F4 is resolved at plan level: `plan.md:146-172` preserves the close reason, ignores local-close notifications, and gives PcmOut a holding closer that defers its failure-triggered channel close until a peer outcome, grace expiry or cancellation. This addresses the actual order in `app/src/watchlink/java/app/buddy/assistant/PcmOut.java:135-156,177-178` without changing 007. Closing the OutputStream separately does not itself represent a local channel close; Google's [ChannelCallback contract](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient.ChannelCallback) distinguishes normal stream closure from explicit local/remote channel closure. The revised real-PcmOut tests cover the intervening local notification, both refusal/write-failure orders, grace expiry and cancellation.
+
+The earlier F1/F2/F3/F5/F6 resolutions remain present: ordered readings and fallback utterances, watch busy-state coverage, receiver-confirmed playback, bounded cleanup and cancellation tokens. The plan supplies implementation steps and verification for all four done-when items, with the new transport isolated from existing watch talk/call paths and F-Droid.
+
+Static review only; no implementation, build or hardware test was run. Background foreground-service startup and phone-TTS streaming still require the planned device checks. A safe phone fallback alone does not satisfy done-when 2.
+
+VERDICT: APPROVE
