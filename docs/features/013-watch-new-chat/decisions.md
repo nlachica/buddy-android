@@ -70,3 +70,9 @@
   `last`. (c) changes how every chat's notification opens (003-012). (d) is more state for the same result. Cost: one
   field, one `begin` parameter, one extra on the notification's intent, one line at `HEARD`.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Coder: small choices the plan left open
+- The New chat pill uses the phone's accent colour (the `accent` the list already holds, the same one the talk screen's
+  mic button uses), not `Look.ACCENT` as Retry does. Dark text as Retry.
+- `WatchLinkTest` was written as planned (a pure `newChatId` regex test). No Android SDK/Gradle on this phone, so
+  whether `WatchLink` loads in the JVM test (plan Risks) is only known from CI. If CI shows it doesn't, drop the test.
