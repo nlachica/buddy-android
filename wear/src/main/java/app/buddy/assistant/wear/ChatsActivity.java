@@ -24,6 +24,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.nio.charset.StandardCharsets;
+import java.util.UUID;
 
 /** The watch's home screen: the chats on the phone, to pick one and talk to. */
 public class ChatsActivity extends Activity {
@@ -162,6 +163,7 @@ public class ChatsActivity extends Activity {
 
     private void showChats(JSONArray chats, int accent) {
         header();
+        body.addView(newChatRow(accent), rowParams());
         if (chats == null || chats.length() == 0) {
             body.addView(note(getString(R.string.chats_empty), Look.TEXT2));
             return;
@@ -175,10 +177,28 @@ public class ChatsActivity extends Activity {
             row.setPadding(Look.dp(this, 14), Look.dp(this, 10), Look.dp(this, 14), Look.dp(this, 10));
             row.setBackground(Look.pill(this, Look.CARD, 16));
             row.setOnClickListener(v -> open(id, title, accent));
-            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
-            lp.topMargin = Look.dp(this, 6);
-            body.addView(row, lp);
+            body.addView(row, rowParams());
         }
+    }
+
+    private LinearLayout.LayoutParams rowParams() {
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.topMargin = Look.dp(this, 6);
+        return lp;
+    }
+
+    /** An action, not a chat (like Retry). The id is made here in the phone's format; the phone creates the chat on the first words (docs/features/013-watch-new-chat/plan.md). */
+    private TextView newChatRow(int accent) {
+        TextView row = Look.text(this, getString(R.string.chats_new), 15, Look.BG);
+        row.setGravity(Gravity.CENTER);
+        row.setPadding(Look.dp(this, 14), Look.dp(this, 10), Look.dp(this, 14), Look.dp(this, 10));
+        row.setBackground(Look.pill(this, accent, 16));
+        row.setOnClickListener(v -> {
+            String id = UUID.randomUUID().toString().replace("-", "").substring(0, 12);
+            startActivity(Talk.intent(this, id, getString(R.string.chats_new), accent)
+                    .putExtra("new", true).putExtra("speak", true));
+        });
+        return row;
     }
 
     private void open(String id, String title, int accent) {

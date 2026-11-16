@@ -7,6 +7,7 @@
     <!-- The chat list -->
     <string name="chats_empty">No chats on your phone yet.</string>
     <!-- Under a chat's title when Buddy is working in it -->
+    <string name="chats_new">New chat</string>
     <string name="chats_working">working</string>
     <string name="chats_no_answer">Buddy on your phone isn\'t answering.</string>
     <string name="retry">Retry</string>
