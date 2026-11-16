@@ -123,3 +123,13 @@
 - Choice: both halves: the script ignores finished branches (robust if cleanup was missed); the success step deletes
   the branch after an ancestry check; resume reads the PR with `--state all`. (Plan review round 2 F3.)
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Coder: small choices the plan left open
+- Steps 1 and 2 are one commit (step 2's calls don't compile without step 1's methods). `report` compares with the
+  `installed` argument via `Updates.compare` (not `Release.newer()`, which reads `BuildInfo`), so it is unit-testable.
+- `upstream-sync.sh` takes `UPSTREAM_URL` (default official Buddy) so its test needs no network; a leftover local
+  `sync/upstream-<ver>` branch that origin/main contains is deleted before the new worktree (nothing is lost). If
+  BuildInfo can't be rewritten (upstream restructured it) it is listed as a conflict and left as git merged it.
+- The test sets `core.createObject=rename` on its bare repos: pushes into a bare repo fail on this phone's
+  hardlink-less filesystem otherwise. Harmless on CI.
+- Verified without Gradle: `/tmp/buddy-build-007/check.sh github|fdroid` (javac + JUnit against android.jar).
