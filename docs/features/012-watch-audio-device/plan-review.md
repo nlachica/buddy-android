@@ -19,6 +19,55 @@ F7 [minor] The F-Droid DEX-string test would fail even with correct flavor isola
 
 VERDICT: REVISE
 
+### Planner response (round 1)
+F1: accepted - one reading in flight. A new pure-Java core, `ReadQueue` (main), keeps the FIFO and starts the next text
+only after the current one has settled (played, broken, cap reached, or read on the phone up to its TTS `done`). The
+notice and the reply stay two phone utterances, but the reply goes to TTS only after the notice's `done`, so cold and
+warm engines take the same path. Voice's new route has a cold-start slot of its own (at most one request, because only
+one reading is in flight), so the existing single `pending` slot keeps its rule and no accepted text is dropped. The
+watch keeps no queue: a new channel replaces the old one. `ReadQueueTest` covers two replies during a cold start,
+notice-then-reply order, the notice exactly once, and the reset after a played reading.
+
+F2: accepted - busy = `Talk.busy()` (new one-liner `waiting || instance != null`, true until Talk's last reply has been
+said) `|| Call.on || TalkActivity.dictating()` (`listen()` stamps the time, `onActivityResult` clears it, and it counts
+for 60 s at most so a recognizer left behind by Home can't block readings forever). It is checked when a channel arrives
+and again in `onStartCommand` before playing; `silence()` on listen/call stays. The plan no longer claims Talk is
+untouched. Added device checks: a reading arriving after `/buddy/done` while Talk still speaks, and one arriving while the
+recognizer is open. There is no watch unit test because the wear module has no test setup (research.md "Tests").
+
+F3: accepted - the watch now confirms playback explicitly. Close code 2 (PLAYED) is sent only when `Speaker` ended by
+`eof` and `sounded()`. Code 1 (NOT_PLAYED) is sent when nothing sounded: an empty or silent stream, a failed
+`getInputStream` or AudioTrack, busy, or a refused service start. Code 0 means it broke after sound, or a hush. On the
+phone, 2 → played, 1 → refused, anything else (a disconnect's code 0 included) → broken. Synthesis finishing no longer
+implies anything. `ReadStream` also refuses on its own when the producer closes after writing nothing. The tests that
+assumed "after finish means played" are replaced.
+
+F4: accepted - PcmOut's `onBroken` (write failure, overflow) no longer settles the reading. `ReadStream` waits up to 3 s
+(`CLOSE_GRACE_MS`) for the channel's close code and only then calls it broken, so a NOT_PLAYED that arrives after a
+failed write still wins. `ReadStreamTest` delivers write failure and code 1 in both orders and expects one `refused`.
+
+F5: accepted - `Voice.routed` calls `done` exactly once on every exit: engine init failed (new `ttsFailed`),
+`synthesizeToFile`/`speak` returned ERROR, or `onDone`/`onError`/`onStop`. It never closes the stream. `ReadQueue` closes
+the stream on `done`. An empty stream is a refusal, the refusal goes to a phone utterance, and that utterance's `done`
+(or its failure) ends the reading. The chain is bounded (ChatGPT voice → phone TTS to the watch → phone) with no retry.
+`ReadQueue` also has a whole-reading cap, `READ_MAX_MS` = 11 min, counted from the reading's start and not tied to
+`finish()`: it cancels the stream, stops the producers and moves on. There is one fixed temp file (`cache/read.wav`,
+since one reading is in flight), deleted at `done` and on drop, and the tap entry is removed with it. `ReadQueueTest`
+covers no-audio, the cap and the cleanup calls. Voice's own exits are checked in review, because TextToSpeech can't run
+in JVM tests.
+
+F6: accepted - each reading is an object, and every callback (find, stream events, producer `done`, ChatGPT fallback,
+cap) is dropped unless its reading is still the current one and its stream the current stream. Routed Voice requests
+carry a generation that `dropRouted()` bumps (called by stop and on refused/broken/cap). The generation is checked after
+engine init and after language detection, before anything is submitted, and the routed slot is cleared. Tests: stop
+during find, stop during a pending TTS request, and stop immediately followed by a new reading (Setup's device tap does
+exactly this, `SetupActivity.java:609-610`).
+
+F7: accepted - grep the DEX for the type descriptor `Lapp/buddy/assistant/WatchVoiceLink;`. It is present only when the
+class is defined; the reflection string is the dotted name. Expected: F-Droid 0, github ≥ 1. New `WatchVoiceTest`
+(testGithub) checks that `link()` loads, which catches a rename that would silently hide Watch, and that the loader
+returns null for a missing class, which is the F-Droid path where `choices` leaves Watch out.
+
 ## Round 2 - Plan Reviewer (gpt-6-astra)
 
 Reviewed at `e3286e5`. `plan.md` and `decisions.md` are unchanged from the Planner's `92fd076` commit; no Round 1 Planner response is recorded. The findings below retain their Round 1 identifiers and remain open after checking the current code. No rejected finding is being reopened.
@@ -40,3 +89,8 @@ F7 [minor] Flavor verification still searches the wrong DEX evidence - `plan.md:
 Review was static: no implementation, build or device test was performed. All six major findings remain open; the plan cannot yet substantiate the required playback, fallback and regression guarantees.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+F1-F7: accepted. Round 2 repeats round 1's findings because no response had been recorded yet. Each finding's answer is
+under "Planner response (round 1)" above, and `plan.md` and `decisions.md` now include them (F7's build-file citation
+is line 68).

@@ -64,3 +64,42 @@
   10-min cap and 11-min abandon because phone TTS is faster than real time and 007's bounds would cut long replies;
   `PcmOut` itself is unchanged.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - One reading in flight, rules in a pure-Java `ReadQueue` (plan-review round 1 F1, F6)
+- Options: a FIFO feeding concurrent watch streams and phone utterances (first plan); an ordered queue inside `Voice`
+  for every caller; one reading in flight in the new route only.
+- Choice: one in flight. The next text starts only once the current one has settled (played, broken, cap reached, or
+  read on the phone up to its TTS `done`), and the reply follows the notice only after the notice's `done`. This keeps
+  order through cold engines and language detection, gives Voice at most one routed request (its own slot, so the
+  existing `pending` rule stays), and lets the watch keep no queue. The rules sit in `ReadQueue` behind one `Out`
+  interface so they can be unit-tested with a fake (the second implementation). Every callback is dropped unless its
+  reading and stream are still current, which makes stop safe against late callbacks. Supersedes the FIFO and
+  "one find serves everything queued" parts of the coordinator entry above.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - The watch confirms playback with close codes; `ReadStream` owns the outcome (round 1 F3, F4)
+- Options: infer `played` from any close after `finish()` (first plan); a confirmation message path; close codes.
+- Choice: codes. 2 PLAYED (`eof` after sound), 1 NOT_PLAYED (nothing sounded, busy, service refused, player failed
+  before sound), anything else broken (hush, break after sound, disconnect's code 0). The phone's `ReadStream` also
+  refuses when its producer wrote nothing, and on PcmOut's write failure or overflow it waits up to 3 s for the code
+  before calling it broken, so a refusal is never lost to a write race. No new message path; synthesis finishing proves
+  nothing. Supersedes "any other close after finish = played" in the two entries above.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Watch busy covers Talk until its last reply and the recognizer; newest reading wins (round 1 F2)
+- Options: `Talk.waiting || Call.on` only (first plan); a busy predicate with small hooks in Talk/TalkActivity.
+- Choice: `Talk.busy()` (`waiting || instance != null`) || `Call.on` || `TalkActivity.dictating()` (stamped in `listen()`,
+  cleared in `onActivityResult`, 60 s at most), checked on channel arrival and again before playing. Talk gets one
+  static method and TalkActivity a timestamp, with no behaviour change to 007. With one reading in flight on the phone,
+  a new channel replaces any old one instead of queuing.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-16 - Routed TTS settles on every exit; one 11-minute cap per reading (round 1 F5)
+- Options: rely on progress callbacks and PcmOut's abandon timer (first plan); settle every exit and cap the reading in
+  the coordinator.
+- Choice: `Voice.routed` runs `done` once for engine-init failure (`ttsFailed`), a synchronous ERROR,
+  `onDone`/`onError`/`onStop`. An empty stream is a refusal, so a phone-TTS failure on the watch path falls back to the
+  phone once, and the chain ChatGPT voice → phone TTS on the watch → phone ends without retry. `ReadQueue` caps each
+  reading at 11 min from its start, independent of the producer, so a hung engine or page can't hold the queue. One
+  fixed `cache/read.wav` (one reading in flight) is deleted on every exit.
+- By: Planner (claude-opus-5-5)
