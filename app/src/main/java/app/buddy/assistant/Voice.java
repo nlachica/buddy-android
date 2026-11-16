@@ -236,7 +236,8 @@ final class Voice {
         if (clean.isEmpty()) return;
         SpeechPause.begin(c);
         AudioRoute.use(c);
-        if (WatchVoice.chosen(c)) WatchVoice.speak(c, clean);
+        // github build: every reading goes through ReadQueue, which decides watch or phone when it starts (016)
+        if (WatchVoice.link() != null) WatchVoice.speak(c, clean, !WatchVoice.KEY.equals(Prefs.audioDevice(c)));
         else here(c, clean);
     }
 
@@ -246,7 +247,7 @@ final class Voice {
     }
 
     /** Read on the phone: ChatGPT's voice with the phone's as its fallback, or the phone's. */
-    private static void here(Context c, String clean) {
+    static void here(Context c, String clean) {
         if (chatgptVoice(c)) {
             final Context app = c.getApplicationContext();
             CodexSpeech.speak(app, clean, t -> { // the phone's voice if ChatGPT's fails
@@ -469,7 +470,12 @@ final class Voice {
 
     /** Buddy is reading something aloud (phone voice, ChatGPT's, or on the watch). */
     static boolean isSpeaking() {
-        return CodexSpeech.active() || (tts != null && ttsReady && tts.isSpeaking()) || WatchVoice.active();
+        return phoneSpeaking() || WatchVoice.active();
+    }
+
+    /** The phone itself is speaking (ChatGPT's voice or the phone's), not the watch queue. */
+    static boolean phoneSpeaking() {
+        return CodexSpeech.active() || (tts != null && ttsReady && tts.isSpeaking());
     }
 
     static void stopSpeaking() {
