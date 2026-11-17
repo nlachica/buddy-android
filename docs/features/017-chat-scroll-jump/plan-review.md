@@ -104,3 +104,22 @@ Reviewed the round-2 revision and planner response, including the updates that a
 F1 [major] Selection state does not distinguish an explicit reveal from an automatic jump - `plan.md:69-70` allows every rectangle request whenever the focused TextView `hasSelection()`. That remains true after the user releases the selection handle. A later re-measure still calls `onPreDraw` → `bringPointIntoView(selectionEnd)` → `requestRectangleOnScreen`, so the new exception permits the same automatic jump while a range remains selected. `plan.md:172-175` explicitly accepts this resize-driven move because the user previously touched the reply; that is not an explicit request to move now and does not meet the brief's goal. AOSP evidence: [TextView.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/widget/TextView.java#8452), lines 8452-8474, 11019-11022, 11591-11604 and 11806-11824. The inverse also matters: plain arrow-key movement inside a selectable reply changes a collapsed cursor, so `hasSelection()` is false. [ArrowKeyMovementMethod.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/text/method/ArrowKeyMovementMethod.java#109), lines 109-118, handles Down with `Selection.moveDown`; TextView's selection-change callback then schedules the same non-immediate rectangle request (TextView.java:12484-12491). Leaving ScrollView's `arrowScroll` unchanged does not preserve that child-handled navigation. -> Permit reveals for actual selection/cursor movement or active user navigation, rather than for the lifetime of a nonempty selection; continue suppressing unchanged-selection requests caused by layout. Keep immediate accessibility requests and handle dragging working. Add two focused checks: leave a range selected, release the handle, then change the chat height without touching the reply (no unsolicited move); and use ordinary arrow keys within a reply longer than the viewport (the cursor stays visible). These are consequences of the new predicate, not a request to restore the blanket override.
 
 VERDICT: REVISE
+
+### Planner response (round 3)
+
+F1: accepted. The pass test is now "the cursor or selection moved", not "a range is selected". The full chat's
+ScrollView keeps the focused TextView and its `(selectionStart, selectionEnd)` from the previous rectangle request (one
+view field, two ints). `requestChildRectangleOnScreen` passes a request on if it is `immediate`, or if the focused
+TextView, its start or its end differs from the stored ones. Every request then updates the stored values.
+- A re-measure with nothing moved (TextView.java:11019-11022 → `onPreDraw` → `bringPointIntoView`, :8452-8474) repeats
+  the stored values and is dropped, with or without a selected range. That covers your first case.
+- Every cursor or selection change goes through `spanChange` → `registerForPreDraw` (:12484-12491), so it reaches the
+  ScrollView with new values and is passed. That covers a handle drag, plain arrow keys moving a collapsed cursor
+  (`Selection.moveDown`, ArrowKeyMovementMethod.java:109-118), a tap and Select all. That is your second case.
+- `bringPointIntoView` only sends the request from a focused view (`requestRectWithoutFocus || isFocused()`, :11591),
+  so the focused TextView is the one that sent it. Only replies are selectable (`ChatActivity.java:2655`), and their text
+  is set once when they are built, so no automatic `setText` resets a focused reply's cursor.
+- TalkBack's show-on-screen stays (immediate). `onSizeChanged`, `requestChildFocus` and `arrowScroll` are unchanged.
+- The two checks are added: a range left selected, then a height change without touching the reply, must not move the
+  chat (Goal: no jump row). Down arrow through a reply longer than the screen must keep the cursor in view (Kept
+  behaviour row). Risk 1 now says that only a user's own cursor or selection move scrolls, not an open selection.

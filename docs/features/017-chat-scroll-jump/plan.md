@@ -1,6 +1,6 @@
 # Plan: 017-chat-scroll-jump
-<!-- Planner (claude-opus-5-5), 2026-11-17, revised for plan review round 2. Sources: brief.md, research.md (incl.
-     Device evidence), plan-review.md rounds 1-2, code at d1efceb, AOSP android14-release ScrollView.java, TextView.java,
+<!-- Planner (claude-opus-5-5), 2026-11-17, revised for plan review round 3. Sources: brief.md, research.md (incl.
+     Device evidence), plan-review.md rounds 1-3, code at d1efceb, AOSP android14-release ScrollView.java, TextView.java,
      View.java, Editor.java, ArrowKeyMovementMethod.java (fetched 2026-11-17; line numbers below are from those files). -->
 
 ## Goal
@@ -47,10 +47,12 @@ keyboard focus moves still reveal.
    viewport (:1794-1808; the reviewer's point: this path alone can't pull from far away).
 
 **Who starts each reveal.** Automatic, and the bug: the cursor's request on re-measure (step 4) and the resize reveal
-(step 5). Started by the user, and kept: a selection being made (a handle drag changes the selection, `spanChange` →
-pre-draw → the same cursor request, TextView.java:12484-12491), TalkBack's "show on screen" (`requestRectangleOnScreen(r,
-true)`, View.java:15256-15260), arrow keys (`arrowScroll`, ScrollView.java:1291-1305), and a focus change by tap or key
-(`requestChildFocus`, :1683-1693).
+(step 5). Started by the user, and kept: the user moving a reply's cursor or selection (a tap, a handle drag, arrow keys
+inside the reply via `Selection.moveDown`, ArrowKeyMovementMethod.java:109-118, Select all). Each change goes
+`spanChange` → pre-draw → the same cursor request (TextView.java:12484-12491), but with a new selection. Also kept:
+TalkBack's "show on screen" (`requestRectangleOnScreen(r, true)`, View.java:15256-15260), arrow keys between views
+(`arrowScroll`, ScrollView.java:1291-1305), and a focus change by tap or key (`requestChildFocus`, :1683-1693). So
+the step-4 request can't be told apart by who sent it, only by whether the selection moved since the last one.
 
 **The bubble panel is different.** Its replies get links through `LinkMovementMethod`, which makes them `FOCUSABLE`
 but not focusable in touch mode (TextView.java:2763-2766), and it has no selectable text. In touch mode no message view
@@ -66,9 +68,14 @@ never take focus" can only mean never *programmatically*.
 1. `scrollToEnd` without `fullScroll`. This removes step 2: no reply gets focus unless the user touches it.
 2. `scroll` becomes an anonymous `ScrollView` subclass (the bubble's already is, `Bubble.java:421-427`) with two
    overrides that close only the automatic paths:
-   - `requestChildRectangleOnScreen(child, r, immediate)`: if `immediate`, or `findFocus()` is a TextView with
-     `hasSelection()`, return super; else return false. This drops step 4 and keeps TalkBack and handle drags.
-     Returning false stops only this level. `View.requestRectangleOnScreen` keeps its own coordinates for the parents
+   - `requestChildRectangleOnScreen(child, r, immediate)`: keep the focused TextView and its `(selectionStart,
+     selectionEnd)` from the previous request (one view field, two ints). `moved` = `findFocus()` is a TextView and it,
+     its start or its end differs from the stored ones. Store the new values, then return super if `immediate ||
+     moved`, else false. A re-measure repeats the stored values and is dropped (step 4), with or without a selected
+     range. A tap, handle drag, arrow key or Select all moves the selection and passes, and TalkBack's is immediate.
+     The request only comes from a focused view (`requestRectWithoutFocus || isFocused()`, TextView.java:11591). Only
+     replies are selectable, and their text is set once when built (`replyText`, :2653-2662), so nothing resets a
+     focused reply's cursor on its own. Returning false stops only this level. `View.requestRectangleOnScreen` keeps its own coordinates for the parents
      (View.java:8100-8128), and the window is `adjustResize`, so nothing above pans.
    - `onSizeChanged(w, h, ow, oh)`: call super only if `findFocus()` is null or the ScrollView itself.
      `View.onSizeChanged` is empty (View.java:17766), and FrameLayout and ViewGroup don't override it. So with a focused
@@ -124,6 +131,8 @@ Alternatives considered:
   selection and link taps (above).
 - One override, `computeScrollDeltaToGetChildRectOnScreen` returning 0 (round 1): also drops TalkBack's show-on-screen,
   arrow-key reveal and selection-handle drags (review round 2 F3).
+- Pass rectangle requests while the focused reply `hasSelection()` (round 2): passes every re-measure while a range stays
+  selected, and drops arrow keys moving a collapsed cursor (review round 3 F1).
 - `setRevealOnFocusHint(false)` plus an `onSizeChanged` override (round 0): leaves step 4, the jump to the top.
 - `clearFocus()` on touch or scroll: misses a tapped reply carried off screen by followed output, and a resize while
   it is still on screen.
@@ -163,16 +172,20 @@ Release (orchestrator, after merge, per AGENTS.md "Updating Buddy on the phone")
 | 1 Root cause | Design's chain (AOSP lines) plus research.md's snapshot, plus a **controlled repro**, run by the orchestrator with phone tools. **On fork.8 now:** open the full chat of a chat that starts within its first page and is 3+ screens long (freshly opened, so measure caches are empty). Scroll to the top. Tap once on the text (not a link) of the first reply; `read_screen` shows it `{focused}`. Drag to the end. Then change the chat area's height without touching the chat: tap the mic so the voice bar replaces the composer, then cancel (or an approval card, or the run strip from a run started outside the screen). Expected: the chat jumps back up to that reply. Record `read_screen` before and after. **On fork.9:** same steps, no move. Also on fork.9, through a run at the end with nothing tapped: no `{focused}` message view in either screen. If fork.8 doesn't jump after 3 tries, record that in verify.md and keep this row pending. |
 | 2 Rebuilds keep the place | Full chat: (a) read back mid-chat while the agent runs, open another app or a link, come back: same text on screen, new messages below; (b) same at the end: at the end with the new messages; (c) open a chat from the list or a notification: at the end; (d) "Show earlier": stays on the message that was at the top. Bubble: (e) a chat over 150 items, read back while replies arrive: the text doesn't move; back at the end, the next reply follows; (f) read midway, open the model chip, pick a model (and once just close it): same text; (g) same through the chat list back to the same chat: same text, and the header shows the chat's title, the model chip, and the running strip if it runs; at the end before opening: at the end, with what came meanwhile; (h) a different chat from the list: opens at its end. |
 | Goal: logs | Both screens, reading inside a tall open log while the run works: (i) the run ends with a reply: the log stays open and the text doesn't move; (j) the run ends with no reply (stop it, or a run that only uses tools), so only the status/header refreshes: same. The same at the end: the log folds and the reply is followed (as today). Full chat: leave for another app while reading the open log, let the run finish, come back: same text, log open. |
-| Goal: no jump | Both screens: long chat, at the end, idle and while running (helper cards and strip coming and going, voice bar, keyboard): stays put, new output followed (012). Full chat: tap a reply near the top, scroll to the end, start a run elsewhere: no move. Tap a link in a reply on screen, come back, let the strip appear: no move. Scroll up while running: never moves. **Bubble: if the panel still jumps on fork.9, this row and 017 fail.** The orchestrator runs research.md's logging plan on the panel (a diagnostic build is fine) and takes the evidence back to the Researcher and Planner inside 017. |
-| Kept behaviour | Full chat: long-press selects reply text and Copy works; dragging a selection handle to the bottom edge scrolls the chat with it; a link in a reply opens; long-press on a user message copies; the copy icon copies the reply. With TalkBack on (Nicholas, or the orchestrator if it can switch TalkBack), swipe through a long full chat past the screen's bottom: the chat scrolls to each message read. Arrow keys, only if a hardware keyboard is at hand: they move through the replies and scroll. Bubble: a link in a reply opens; long-press copies; tapping the conversation still hides the keyboard. |
+| Goal: no jump | Both screens: long chat, at the end, idle and while running (helper cards and strip coming and going, voice bar, keyboard): stays put, new output followed (012). Full chat: tap a reply near the top, scroll to the end, start a run elsewhere: no move. Tap a link in a reply on screen, come back, let the strip appear: no move. Select a range in a reply near the top,
+release the handle, scroll to the end, then show the voice bar without touching the reply: no move. Scroll up while
+running: never moves. **Bubble: if the panel still jumps on fork.9, this row and 017 fail.** The orchestrator runs research.md's logging plan on the panel (a diagnostic build is fine) and takes the evidence back to the Researcher and Planner inside 017. |
+| Kept behaviour | Full chat: long-press selects reply text and Copy works; dragging a selection handle to the bottom edge scrolls the chat with it; a link in a reply opens; long-press on a user message copies; the copy icon copies the reply. With TalkBack on (Nicholas, or the orchestrator if it can switch TalkBack), swipe through a long full chat past the screen's bottom: the chat scrolls to each message read. Arrow keys (a hardware keyboard, or key events from the phone tools if they can send them): Down through a reply longer
+than the screen keeps the cursor in view, then moves on through the replies and scrolls. Bubble: a link in a reply opens; long-press copies; tapping the conversation still hides the keyboard. |
 | 3 CI / review | `./gradlew testGithubDebugUnitTest` incl. `ChatScrollTest`; PR CI (`build.yml`) green; Codex code review APPROVE. |
 | 3 Phone | Nicholas runs the device rows on the installed fork. verify.md rows stay `pending` until he has. |
 
 ## Risks
 1. **What still moves the full chat, on purpose.** A tap that first gives a long, partly visible reply focus scrolls it
-   into view (`requestChildFocus`, today's behaviour, kept for keyboard focus moves). While a selection stays open in a
-   reply, a re-measure keeps its end in view (Android's selection rule, kept so handle drags scroll). Both need the
-   user's own touch on that reply.
+   into view (`requestChildFocus`, today's behaviour, kept for keyboard focus moves). Moving a reply's cursor or
+   selection (tap, handle drag, arrow keys, Select all) scrolls to it, as today. An open selection that doesn't move
+   does not. Both need the user's own action on that reply. If a selection moved without a request (none known), the
+   next request reveals it once.
 2. **The bubble's reported jump may have another cause.** Its message views can't take focus in touch mode (Design). The
    trim and same-chat fixes stand on their own. If the panel still jumps on fork.9, 017 is not done. The logging plan
    runs on the panel, and the fix comes back through this feature's pipeline.
