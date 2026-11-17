@@ -30,3 +30,4 @@ apps, money transfers). Also revert 019's behaviour so Routine allowed is exactl
 
 ## Clarifications
 - 2026-11-17 Nicholas: Routine allowed stays as it was; Bypass is the new mode; only secrets and money need approval.
+- 2026-11-17 Nicholas accepted the plan's Q1 recommendations: (a) phone_shell no card unless it names a secret/money, (b) unnamed-money Send goes through (always-ask rule per app), (c) clipboard_read keeps its card, (d) per-app modes, button rules, built-in words and allowed apps keep their card.
