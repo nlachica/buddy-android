@@ -303,6 +303,20 @@ public class LiveWatchTest {
     }
 
     @Test
+    public void speechThatResumesAfterAHeldEndIsNotClosedByTheOldEnd() {
+        Reading r = onWatch();
+        utterance(); // A, still draining
+        utterance(); // B: held, and it ended
+        c.pcm(LOUD); // C starts before A answers
+        r.events.played();
+        Reading n = f.last();
+        assertEquals(12, n.got.size()); // B's loud block and hangover, then C's first block
+        assertFalse(n.closed); // B's end marker must not close the reading in the middle of C
+        c.pcm(LOUD);
+        assertEquals(13, n.got.size()); // C goes into the open reading, not into held
+    }
+
+    @Test
     public void oneThresholdDecidesWhatStartsAnUtterance() {
         Reading r = onWatch();
         c.pcm(block(500)); // peak 0.015: between the watch's 0.01 and the page's 0.02

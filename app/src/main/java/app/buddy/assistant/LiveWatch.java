@@ -288,6 +288,7 @@ final class LiveWatch {
                     fed = true;
                 } else if (drain != null) {
                     held.add(b);
+                    heldEnded = false; // describes the end of the audio held now, not of an earlier utterance
                 }
             } else if (fed) {
                 finishCur();
