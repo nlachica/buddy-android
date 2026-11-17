@@ -24,6 +24,7 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Speak to one chat and read what Buddy answers. The words come from the watch's own speech recognizer (the system's
@@ -219,6 +220,34 @@ public class TalkActivity extends Activity {
                 throw new IllegalStateException(e);
             }
         });
+    }
+
+    /** Whether a snapshot of the phone's chat is this screen's own and newer than the last it used (they may arrive in any order). */
+    static boolean takes(String chat, long view, long n, String myChat, long myView, long lastN) {
+        return chat.equals(myChat) && view == myView && n > lastN;
+    }
+
+    /**
+     * The Talk lines drawn under the snapshot's rows. With no snapshot (yet, or an old phone): all, as before. With
+     * one: only the watch's own lines made after it was used; the phone's messages (mirror) are in the snapshot.
+     */
+    static List<Talk.Line> below(List<Talk.Line> lines, boolean snapshot, int mark) {
+        List<Talk.Line> out = new ArrayList<>();
+        for (Talk.Line l : lines) if (!snapshot || (!l.mirror && l.seq > mark)) out.add(l);
+        return out;
+    }
+
+    /**
+     * Where row {@code old.get(i)} is in the {@code now} rows: the nearest one at or before i with the same kind and
+     * text (rows only leave from the top), or -1 if it left. Two equal messages may anchor to the wrong one.
+     */
+    static int anchor(List<Talk.Line> old, int i, List<Talk.Line> now) {
+        Talk.Line a = old.get(i);
+        for (int j = Math.min(i, now.size() - 1); j >= 0; j--) {
+            Talk.Line b = now.get(j);
+            if (b.kind == a.kind && b.text.equals(a.text)) return j;
+        }
+        return -1;
     }
 
     /** Talk has news: the screen stays on while it waits, for at most two minutes of silence from the phone. */

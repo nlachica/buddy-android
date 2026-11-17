@@ -49,7 +49,8 @@ public class Talk extends Service {
     static final int YOU = 0, BUDDY = 1, ERROR = 2;
 
     static final class Line {
-        private static int count;
+        /** The seq of the newest line made so far. */
+        static int count;
         final int kind;
         final String text;
         /** Goes up with every line, also across lines.clear(): TalkActivity tells which came after a snapshot of the chat. */

@@ -60,4 +60,6 @@ android {
 dependencies {
     // The Wear Data Layer (talks to the phone's Buddy)
     implementation("com.google.android.gms:play-services-wearable:20.0.1")
+    // JVM tests of the talk screen's pure rules (022); nothing in the APK
+    testImplementation("junit:junit:4.13.2")
 }
