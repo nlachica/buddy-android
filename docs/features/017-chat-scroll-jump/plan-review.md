@@ -123,3 +123,13 @@ TextView, its start or its end differs from the stored ones. Every request then 
 - The two checks are added: a range left selected, then a height change without touching the reply, must not move the
   chat (Goal: no jump row). Down arrow through a reply longer than the screen must keep the cursor in view (Kept
   behaviour row). Risk 1 now says that only a user's own cursor or selection move scrolls, not an open selection.
+
+## Round 4 - Plan Reviewer (gpt-6-astra)
+
+No new findings. Round 3 F1 is resolved in the plan: the rectangle-request guard compares the focused TextView and both selection offsets with the previous request instead of allowing requests for the lifetime of a selected range (`plan.md:71-83`). The verification cases now cover both an unchanged selection during resize and arrow-key movement within a long reply. Immediate accessibility requests and the existing focus-navigation paths remain available.
+
+Rechecked the affected code and the earlier resolutions: both automatic log-close entry points use the proposed guarded fold; same-chat Bubble returns retain their views and refresh the header; trimming is deferred while reading back; full-chat resume appends missed messages without rebuilding while reading back. No blocker or major finding remains open.
+
+This approves the implementation plan, not feature completion. The controlled before/after reproduction, CI, code review and Nicholas's phone checks remain pending. A continuing Bubble jump fails verification and returns to diagnosis within 017, as the plan now requires. No app build or device tests were run in this plan-review round.
+
+VERDICT: APPROVE
