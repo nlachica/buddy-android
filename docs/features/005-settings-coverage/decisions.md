@@ -163,3 +163,9 @@
 - Upstream added the switch "Ask about new apps" (`Prefs.askNewApps`/`setAskNewApps`, SetupActivity). Registered it in
   `SettingsTool.scalars` as `ask_new_apps` (on/off) next to `agents_tap_buddy`, so it takes the same approval card
   with old and new value as the other safety settings. It is already in Backup's list. By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: three switches registered
+- Upstream added "Outside sessions in background" (`outside_background`), "Phone tools on Tailscale" (`tailnet_tools`) and
+  "Pause media while listening" (`pause_media_for_listening`, pref `listen_pause_media`). Registered as on/off scalars in
+  `SettingsTool.scalars` so each takes the approval card with old and new value. The paired-computers list
+  (`tailnet_devices`) is not registered: it holds pairing keys, and stays this phone's own (Backup `OWN`). By: Orchestrator (claude-sonnet-5-5)

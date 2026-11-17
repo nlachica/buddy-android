@@ -210,3 +210,9 @@
 ## 2026-11-17 - Coder: round 1 review fixes
 - Checkout evidence for a form or an address reuses `BrowserTools.CHECKOUT` (the pattern `riskyTap` uses), so Bypass never skips the card of a checkout that Ask cards. The address check is the small static `moneyUrl` so it can be tested without a service.
 - The money words in `Bypass.MONEY` are checked against all of `Guard.RISKY`; a missing money term is added there, with a table test for the money subset. Send/delete terms stay out.
+
+## 2026-11-17 - Upstream 2.3.12 sync: phone_shell card
+- Conflict in `Tools.phoneShell`: upstream makes every command from another computer (Phone tools on Tailscale) ask;
+  the fork passes the Bypass flag to `askConfirm`. Kept both: `(phoneShellAsk || remote)` with
+  `!remote && !Bypass.secretOrMoney(cmd)` (a remote computer never skips the card in Bypass). `HELPER_NO` keeps the fork's `buddy_settings` and gains upstream's `add_notification_rule`.
+  By: Orchestrator (claude-sonnet-5-5)
