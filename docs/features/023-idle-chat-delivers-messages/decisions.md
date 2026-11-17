@@ -129,3 +129,14 @@
   JUnit can't reach. A `say` dispatched before the tap is a sent message whose turn the user stopped, as with any
   message sent just before Stop.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Coder: choices the plan left open
+- `say` writes with `timeout 5 tee "$S/in"` (opening the FIFO blocks without a reader); `close_input` and `say` take the lock
+  with `timeout 5 flock 9` on fd 9, because Buddy's busybox `flock` has no `-w`, and the close runs in `stream_claude`'s
+  own shell (not a subshell) so it closes fd 3 for real.
+- `stream_claude` gets `fifo_reset` (removes `in`, `in.sent`, `in.done`, `in.lock`) before each pipeline, which is the
+  "start of `ask`" cleanup; `stop` removes `in`, `in.sent`, `in.done`.
+- `buddy_done` now posts `leftover` for stopped chats too (it was inline); the "not sent" line and `unsent` update happen in
+  that post, still before `changed()` returns to the watch link's own post.
+- Local checks: Gradle's JVM won't start here, so the app tests ran with a hand-made javac/JUnit script (`/tmp/buddy-build-023/check.sh`,
+  copied from feature 017). `BypassTest.everyShortLabelOfATapReachesTheDecision` fails only there (it needs Gradle's mockable android.jar).
