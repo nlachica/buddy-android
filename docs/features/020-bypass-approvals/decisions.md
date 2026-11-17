@@ -193,3 +193,16 @@
   users). `B.draft(not)` is moved out the same way, with no clip. T11 checks the producer's source for those keys, as
   there is no JS test harness; the phone check covers a real checkout form.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Coder: small choices the plan left open
+- `guardAction`'s 5- and 6-argument overloads became one 7-argument method (`otherRisk`, `money`): the only callers are
+  `guard`, `review` (twice) and Enter, all updated, and two overloads differing only by trailing booleans would be ambiguous.
+- `pendingDialog` tests the clipped 300-character message outside Bypass (Ask/Routine/Always ask unchanged) and the whole
+  message in a Bypass chat (`bypass ? full : msg` into `dialogAsks`), so a risky word past character 300 is judged there.
+- Browser `click` computes `money` before the ask branch (it also feeds `pendingDialog`); `type` reads `__buddy.draft()` once,
+  after the `submit` early return, so a type without submit costs no extra eval.
+- `approve` and `guardAction` judge `secretOrMoney(summary)` (card line plus quoted draft/reviewer reason) as well as the
+  caller's `money`, a superset of the plan's `card` / reviewer-reason inputs.
+- T4/T5/T6 live in `ChatApprovalsSettingTest` (they need its `row`/`edit` helpers); T1-T3, T7-T11 in `BypassTest`.
+- Local runs of `BypassTest` need an `android.util.Log` shim (the real `AccessibilityNodeInfo` static init calls
+  `Log.isLoggable`); Gradle's mockable android.jar returns defaults, so CI needs none. Added to `/tmp/buddy-build-020` only.
