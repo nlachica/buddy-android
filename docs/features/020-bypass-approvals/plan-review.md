@@ -119,3 +119,75 @@ F5 [major] Two allowed settings changes still silently remove money checks - The
 F6 [major] Settings classification must use the same value normalization as the write - The proposed asker captures raw `a.optString("value")` (`plan.md:200`) and defines value-dependent exceptions for `trust`, `allow`, `on` and `off`, without specifying normalization. Actual settings accept trimmed, case-insensitive values: `Scalar.check`, `app.check` and `button.check` canonicalize before writing (`app/src/main/java/app/buddy/assistant/SettingsTool.java:134-139,475-485,581-588`), and `change` uses that checked value (`:1472`). Implementing the stated comparisons literally would let `app/<pkg>=" TRUST "`, `button/*/Pay=" ALLOW "` or `builtin_risky_words=" OFF "` bypass the exception and still write the unsafe value. T5 only varies capitalization for approvals, whose exception is name-only. -> Specify matching trim/case normalization inside `keepsCard` (or feed it the canonical checked value) and test mixed-case/whitespace variants for every value-dependent exception through the settings gate, including denial yielding zero writes.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted.
+- The plan no longer claims Bypass shows every card Ask would. Goal now says what Bypass promises: the secret-and-money
+  check reads every input of the step's own risk check, unclipped, and the agent can't change approvals modes, Safety
+  settings or allowed apps without a card. It also says what Bypass can't promise.
+- Q1 is now blocking: the plan's first lines say so. It asks Nicholas four things, each with a recommendation and a
+  one-line alternative:
+  - (a) phone_shell's command-line check;
+  - (b) money steps with no money word or name ("Send" in "Chase");
+  - (c) the clipboard;
+  - (d) Safety settings carding although the brief's goal lists "safety" as no-card.
+- The orchestrator records his answers in the brief's Clarifications. Done-when 3 is judged against them (test plan,
+  done-when 3).
+- Clipboard: back to keeping its card in Bypass. Not opted in, so no code: the read-first path and the
+  PhoneToolActivity change are gone. Round 1 F5 allowed this branch once Nicholas confirms it (Q1c). It keeps Ask's
+  protection, where read-first let an unflagged password through.
+- Narrowing (b): the user's always-ask buttons now keep their card in Bypass (`userAsks`, `Tools.java:1760`; the
+  browser tap's ask-list check, `BrowserTools.java:248`). So Nicholas can mark a money step Buddy can't recognise. The
+  limit stays in Q1b and Risks.
+- The earlier user-set Trust and never-ask choices are unchanged.
+
+F2: accepted.
+- `guard` computes `Bypass.tapMoney(Guard.moneyApp(svc, pkg), target, hit) || userAsks` once, before formatting.
+  `tapMoney` is `moneyApp || secretOrMoney(Guard.riskyLabel(target), Guard.riskyLabel(hit))`: the labels the ask
+  decision read (`Tools.java:1761-1762`), from text, description, tooltip and id.
+- It reaches `guardAction` through a new `money` argument, directly and through `review`. The summary is still used
+  for the card.
+- Native Enter is the same kind of gap: its risk check knows `web` and `Guard.browser`. It passes `moneyApp(pkg) ||
+  web || browser`, upstream's own reason for keeping Routine allowed off that Enter (`:1965-1966`).
+- T9 (fake `AccessibilityNodeInfo`; `isReturnDefaultValues` is on):
+  - visible "Continue" with description "Pay now": `tapMoney` is true, while the card text "Tap “Continue” in Shop"
+    is not money;
+  - a plain target over a hit described "Pay": true;
+  - plain targets: false.
+
+F3: accepted.
+- `browser.js:321` stops clipping `draft`. `approve` still clips it to 300 for the card (`BrowserTools.java:465`).
+- `approve`'s opt-in reads `secretOrMoney(card, draft)` on the full draft, not the summary. Enter passes the typed
+  `text`, which was never clipped.
+- T10: a secret or a "Pay $20" past character 300 is caught, and clipped it isn't.
+- Denial stopping the click or Enter is upstream's unchanged `if (blocked != null) return` (`:250-252`, `:341-342`).
+  BrowserTools has no JVM harness, so this is a code-review item in the test plan.
+
+F4: accepted.
+- `pendingDialog(key, approved, money)` cards in Bypass when any of these holds:
+  - the opener's `money`;
+  - `moneySite(key)`, read on the page the dialog is on: `Guard.moneyApp(svc, host)` or `secretOrMoney(url)`;
+  - the full message names a secret or money.
+- The open and back callers (`:128`, `:172`) pass `false` and still get the site test.
+- T8 adds `bank.example/checkout` with "Send now?" and an unapproved opener: it cards. The harmless dialog on a
+  non-money site stays skipped. Cancel on denial is the unchanged `:507`.
+
+F5: accepted, simpler than suggested.
+- `keepsCard` goes by name only: every change of these cards in Bypass, whatever the value:
+  - `app/*`, `button/*` and `builtin_risky_words`;
+  - `chat/*/allowed/*` and `chat/*/approvals`;
+  - the key routes.
+- That covers Smart → Hard or Default and rule removals, with no table of which transitions loosen. Tightening
+  changes card too: rare in Bypass, and the safe side.
+- `reviewer` needs no entry: it takes only `same`, `claude` or `codex` (`SettingsTool.java:312`), so it can't turn
+  the reviewer off.
+- T4 runs both sequences: removing an existing ask rule, and `builtin_risky_words=off`. Each gets one card, and
+  denial gives zero writes, so the old protection stays.
+- The brief's goal names "safety" as no-card, so this goes to Nicholas as Q1d.
+
+F6: accepted; mostly moot after F5.
+- `keepsCard` reads no value. It takes `s.name`, the canonical name of the setting `find` resolved, not the raw
+  argument.
+- T4 still runs mixed-case and padded values through the real gate: `button/*/Pay=" ALLOW "`,
+  `builtin_risky_words=" OFF "` and `chat/c1/approvals=" Bypass "`. Each gives one card, and denial gives zero writes.

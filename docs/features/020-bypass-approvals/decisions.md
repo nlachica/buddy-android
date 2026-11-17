@@ -116,3 +116,46 @@
 - Choice: `git checkout HEAD -- docs/features/019-settings-no-card-routine/decisions.md` after the revert, checked in
   the staged stat. 6883d32 had appended 17 lines there.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Bypass's limits go to Nicholas as a blocking Q1; no Ask-equivalence claim (plan review round 2, F1)
+- Options: keep claiming "every secret and money card Ask would show" while listing counterexamples; state what Bypass
+  recognises and put each limit to Nicholas before coding.
+- Choice: the second. Q1 asks four things, each with a recommended answer and a one-line alternative: (a) phone_shell's
+  command-line check, (b) money steps with no money word or name, (c) the clipboard, (d) Safety settings carding although
+  the brief's goal lists "safety" as no-card. The orchestrator records his answers in the brief's Clarifications, and
+  done-when 3 is judged against them. Supersedes the framing of "phone_shell's secret check reads the command line
+  only; Nicholas asked (Q1)".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The clipboard keeps its card in Bypass (plan review round 2, F1)
+- Options: read first and card on the sensitive flag or the predicate (round 1); keep the card, as in Ask.
+- Choice: keep the card (no opt-in, no code; the PhoneToolActivity change is gone). An unflagged copied password would
+  reach the agent before anything could judge it. Both options need Nicholas (Q1c), and this one keeps Ask's
+  protection. Supersedes "The clipboard is read first in Bypass and cards only when it holds a secret".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Each Bypass check reads its site's own risk inputs, unclipped (plan review round 2, F2-F4)
+- Options: judge the card's summary text; pass each site's structured evidence in.
+- Choice: pass it in, computed where the risk check runs. Native taps: `Bypass.tapMoney(moneyApp(pkg), target, hit)`,
+  which runs `Guard.riskyLabel` on target and hit (text, description, tooltip, id), into a new `guardAction` `money`
+  argument. Browser: `approve` checks the full draft (`browser.js` stops clipping it), and `pendingDialog` gets the
+  opener's `money` plus `moneySite(key)` (host name test and URL) for the page the dialog is on. Native Enter on a web
+  page or in a browser app keeps its card, upstream's own reason for Routine allowed (`Tools.java:1965-1966`).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The user's always-ask buttons keep their card in Bypass
+- Options: skip them like any card the predicate passes; keep them.
+- Choice: keep them (`userAsks` in `guard`, the ask-list check in the browser tap, ored into `money`). They are the
+  user's own rule, like Trust and never-ask, which round 1 kept as set. They are also how Nicholas marks a money step
+  Buddy can't recognise ("Send" in a bank app without a money name: Q1b).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - In Bypass, settings card by name: keys, approvals, Safety settings, allowed apps (plan review round 2, F5, F6)
+- Options: card by value (Trust, allow, on, off, plus round 2's Hard/Default and rule removals), which needs the
+  setters' normalisation; card every change of those names, whatever the value.
+- Choice: by name, read from the resolved `s.name`: `app/*`, `button/*`, `builtin_risky_words`, `chat/*/allowed/*`,
+  `chat/*/approvals`, and the key routes. There is no value to normalise, and no table of which transitions loosen.
+  Tightening changes card too, which is rare and the safe side. `reviewer` needs no entry (same, claude or codex: it
+  can't be turned off). Supersedes the value rules in "Bypass's money floor is Ask's cards; the agent can't loosen them
+  silently".
+- By: Planner (claude-opus-5-5)
