@@ -33,3 +33,13 @@ running (`:541`), and offers "Check again" only on an idle chat (`canRecheck`, `
 own. The plan drops the `prompt == null` carve-out: `send` is unchanged, and its running branch already calls
 `addNote`. There is no mixed rule/user case to test. Updated: plan.md Non-goals, Approach 4 ("Rule runs"), Step 4,
 Open questions; decisions.md entry "No rule carve-out" (revises "Scope of the live path").
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+Round 1 F1 is addressed by deciding ownership when the continuation executes and testing both callback orderings. Round 1 F2 is resolved by the trigger guards: `Triggers.java:366`, `:541` and `:717-718` support the Planner's explanation.
+
+F1 [major] Closing input can recreate the idle-message delay on the next background turn - The acknowledged close/say race is not limited to a millisecond delivery delay (`plan.md:268-270`). Concrete ordering: `say` writes user message A before the close acquires its lock; the old turn's zero-task `result` removes the FIFO and closes stdin (`plan.md:81-82`, `:95-97`); Claude processes queued A, starts another long background job, and ends that turn. By the plan's own tested EOF behavior (`plan.md:57-58`), the process can remain alive waiting for that job. Message B, sent now while the turn is over, gets "no live input"; `sendLive` clears `turnOver`, and `leftover` puts B into notes because the process is still running (`plan.md:125-140`). With no phone tool call, B waits for the background notification or process exit again. The FIFO is only created before launching a process (`plan.md:184-185`), so the new turn's task events cannot restore live delivery. This violates done-when 1 even though A and B are eventually retained. -> Revise the input-close lifecycle so work accepted before closure cannot leave a live process waiting on new background jobs without a usable message channel. Add a deterministic shell case that accepts A before the zero-task close, has A start another background job and end its turn, then sends B and proves it is received before that job completes. Include the equivalent case if a queued task-notification turn starts further background work; do not treat delivery at eventual process exit as satisfying the seconds requirement.
+
+Review was against the plan and repository code; no implementation or device tests were run.
+
+VERDICT: REVISE
