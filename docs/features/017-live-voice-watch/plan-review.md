@@ -84,3 +84,48 @@ F1 [major] The new refusal retry is not bounded - `plan.md:55-58,90-92` makes `l
 F2 [major] Round 1 F3 remains open: successful writes still do not establish watch playback time - The revised `sent` callback runs after the phone's `write` and `flush` (`plan.md:166-175,204-207`; current write site: `app/src/watchlink/java/app/buddy/assistant/PcmOut.java:173-174`). It does not observe the watch's read or AudioTrack playhead, unlike `wear/src/main/java/app/buddy/assistant/wear/Speaker.java:108,130-139`. Google's [ChannelClient stream contract](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient#getOutputStream(com.google.android.gms.wearable.ChannelClient.Channel)) documents buffered transport, not a playback acknowledgement or a maximum delivery delay. The revised plan expressly permits delay hidden in that transport (`plan.md:188-189,357-364`), so the following counterexample still fits its design: one second of speech is accepted by the phone stream in real time, the receiver runs two seconds behind, and the phone queue remains empty. The estimate reopens the mic at roughly t=2 s while the watch plays until roughly t=3 s; the 1-s queue cap never fires. This is an inference from the specified timing, not a hardware measurement. The new tests delay `sent`, which tests a different case, and D2b still contains no delayed-delivery check (`plan.md:333-340,352`). -> Close the original finding with watch-side playback feedback, or establish and validate an end-to-end delay bound that the mute tail and failure policy actually enforce. Include delayed receiver/playback with prompt successful phone writes in verification, and require no self-transcribed speech before marking the feature done. If that cannot be achieved with the installed receiver, reconsider the no-watch-update constraint: it is a Planner choice, not a non-goal in `brief.md:15-16`. Moving this known failure to a post-ship follow-up does not resolve it.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - the retry is a bounded loop over a set, and having no safe device never drops the route:
+- `liveDevice` skips every key in `liveRefused`, a set kept until `use()` and cleared where `refused` is. The new pure
+  `liveAttempt(…, refused, apply)` loops: pick, `apply`, and on false add the key and pick again. Each failed pass
+  adds a new key to a finite list, so buds → speaker → none ends, with no recursive `reconcile()`. A later tick with
+  the same set tries nothing (the failure is kept).
+- The live rule is its own branch in `reconcile()` (`live(am)`), so it never goes through `want()`'s `""` and
+  `drop()`. `want()` is today's again.
+- No device left (the speaker refused or missing): log "route: no safe device" and post `CodexLive.end("the phone
+  speaker couldn't be used")` once (`stuck`). The live branch has no `clearCommunicationDevice()`. Ending the call
+  says why. Muting the page instead would leave a silent call with no reason given.
+- Tests (`AudioRouteTest.liveAttempt`): both refused → none, `apply` called twice (buds, then speaker), and the set
+  holds both. The same set again → none, with no call. Only a speaker, refused → none after one call. The earpiece is
+  never passed to `apply`. The `NONE` branch (no `drop()`, one posted end) is checked in code review, because
+  `reconcile()` needs an `AudioManager`.
+
+F2: accepted - the mic now reopens on the watch's own answer, using the installed watch app. Each utterance (what the
+silence gate passes: from an audible block until 1 s of silence) is one 012 reading through the existing
+`link().open`, finished when the gate closes. The watch's `ReadAloud` closes a reading's channel only once its
+`Speaker` is silent: code 2 after the playhead reached the last frame and the track was released
+(`Speaker.java:144-159`), 0 after `stop()` flushed the track (hush, replaced) or the stream broke, and 1 when nothing
+sounded (`ReadAloud.java:124-127,149-156`). So:
+- The mic is closed from the first audible block until that reading's answer, plus 300 ms for the watch speaker's own
+  output. In the review's case (writes taken at once, playback 2 s behind) it stays closed until the watch says it
+  played the end, however long the transport held the audio.
+- The next reading opens only after the answer, because a new channel replaces the playing one on the watch
+  (`ReadAloud.java:55-62`). Blocks that come meanwhile are held and go into it in order.
+- Moving the setting away mid-utterance finishes that reading instead of cancelling it. The voice moves to the phone
+  at once, and the mic waits for the answer. `toWatch()` is now two bits: the voice is on the watch, the mic is
+  closed.
+- No answer 30 s after a reading's end (a link that neither plays nor disconnects): cancel, fall back, and the mic
+  opens 1 s later. The cancel closes the channel, which makes the watch's reads fail, so its player releases the
+  track. Risk 1 states the one case left: a watch more than 30 s behind on a live but slower-than-real-time link.
+
+The open-ended stream is gone, and with it `openCall`, `CALL_CAP`, `PcmOut`'s `sent` and the phone-side estimate. The
+link only gains an `attached` callback, and `ReadStream`/`PcmOut` stay as they are. Lag inside one long utterance
+still delays the voice (012's player never drops), but it can no longer open the mic. No watch update.
+
+Verification: `LiveWatchTest` 8 has fake readings that take every write at once and answer when the test says:
+`played` 3 s after the end keeps the mic closed throughout and for `TAIL`; also held blocks, a late answer, the 30-s
+give-up, and a setting change mid-utterance. D2b adds a walk-away run that makes the watch lag (live.log "played n
+(+X ms)" with X > 1 s, every "mic open" after its "played"). D2b is a gate: any user line made of the voice's own
+words fails done-when (a).

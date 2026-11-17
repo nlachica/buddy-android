@@ -110,3 +110,29 @@
   reasons: deprecated calls, a second code path, and the only target phone is API 31+. On Android 11 a phone live call
   stays as today, and the Watch texts say "Android 12+". Nicholas may overrule it (plan Open questions).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Live route attempts are bounded by a refused set; no safe device ends the call (replaces the refusal part of the "headset's own call device" entry)
+- Options: retry by calling `reconcile()` again with one `refused` key (round 1: two refused devices alternate
+  forever, review round 2 F1); a set of refused keys and a loop. With no safe device left: `drop()` to Android's
+  routing (the earpiece), mute the page, or end the call.
+- Choice: pure `liveAttempt` loops over `liveDevice` with `liveRefused`, a set kept until `use()`, so each device is
+  tried once and the loop ends (buds → speaker → none). The live rule is its own `reconcile()` branch with no `drop()`.
+  With no device left, the call ends with "the phone speaker couldn't be used", posted once, because ending says why,
+  and a muted page would be a silent call with no reason given. A refused built-in speaker would be a device fault
+  that hasn't been seen on any device.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Each utterance of the call's voice is one 012 reading; the mic reopens on the watch's answer (replaces the "phone-side copy of audibleUntil" entry, the "1-s breaking cap" entry and the open-ended call stream)
+- Options: round 1's open-ended stream with a phone-side playhead from completed writes (blind to audio held in the
+  Data Layer, review round 2 F2); a watch-side "audible" message (exact, a watch update over adb); a fixed long tail
+  (no bound to size it); one 012 reading per utterance, cut by the silence gate.
+- Choice: one reading per utterance. The installed watch app closes a reading with 2 after its playhead reached the
+  last frame and the track was released, 0 after its player was stopped and flushed or broke, and 1 when nothing
+  sounded. That answer is the watch's own "quiet now", with no watch update. The mic is closed from the first audible
+  block until the answer plus 300 ms. The next reading opens only after the answer (a new channel replaces the playing
+  one on the watch), and blocks that come meanwhile are held. A setting change mid-utterance finishes the reading and
+  waits for its answer. A watch that sends no answer for 30 s after a reading's end is given up: its channel is
+  cancelled and the mic opens 1 s later. This removes `openCall`, `CALL_CAP`, `PcmOut`'s `sent` and the estimate; the
+  link only gains an `attached` callback. Costs: a channel and a 300 ms prebuffer per utterance after a pause, the
+  watch's notification per reading, and lag inside one long utterance isn't bounded (it only delays the voice).
+- By: Planner (claude-opus-5-5)
