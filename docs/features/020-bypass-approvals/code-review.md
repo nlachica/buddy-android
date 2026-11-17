@@ -16,3 +16,11 @@ Validation: the local `/tmp/buddy-build-020/check.sh github` compiled production
 Not checked: full Gradle/APK builds, CI, or phone/release smoke checks; those remain the orchestrator's verification work. The local javac harness uses Android/watch stubs and its documented API-35 workaround, so it does not replace CI.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+- F1: fixed in acda943. `BrowserTools.money` ors `CHECKOUT` on the form name, and `moneySite` goes through a new static `moneyUrl` (`CHECKOUT` or `Bypass.secretOrMoney` on the address). Tests in `BypassTest`: `/billing` and `checkoutForm` forms, a suffixed checkout URL and `/billing/address` are money; `/note` stays false.
+- F2: fixed in acda943. `Bypass.MONEY` gains `pedir`, `addtocart`, `inscrever-se`, and `koszyk` / `кошик` with endings (`Dodaj do koszyka`, `додати до кошика`). I ran every term of `Guard.RISKY` through `Bypass.secretOrMoney`: what is still false is only send/post/delete/block/report/call/log-out words. Table test `everyMoneyLabelOfTheAskRulesIsMoney` covers the money subset.
+- F3: fixed in acda943. `ChatApprovalsSettingTest.removingAnAlwaysAskRuleKeepsItsCardAndItsRuleOnDenial`: `button/*/Continue` with an `ask` rule, `""` requested in Bypass, denied: one card, zero writes, rule still `ask`.
+
+Local run (`/tmp/buddy-build-020/check.sh github`, from `app/`): 189 JVM tests pass. CI and the phone check are not run here.

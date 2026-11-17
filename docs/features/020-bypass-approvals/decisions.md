@@ -206,3 +206,7 @@
 - T4/T5/T6 live in `ChatApprovalsSettingTest` (they need its `row`/`edit` helpers); T1-T3, T7-T11 in `BypassTest`.
 - Local runs of `BypassTest` need an `android.util.Log` shim (the real `AccessibilityNodeInfo` static init calls
   `Log.isLoggable`); Gradle's mockable android.jar returns defaults, so CI needs none. Added to `/tmp/buddy-build-020` only.
+
+## 2026-11-17 - Coder: round 1 review fixes
+- Checkout evidence for a form or an address reuses `BrowserTools.CHECKOUT` (the pattern `riskyTap` uses), so Bypass never skips the card of a checkout that Ask cards. The address check is the small static `moneyUrl` so it can be tested without a service.
+- The money words in `Bypass.MONEY` are checked against all of `Guard.RISKY`; a missing money term is added there, with a table test for the money subset. Send/delete terms stay out.
