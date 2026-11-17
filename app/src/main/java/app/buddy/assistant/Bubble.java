@@ -22,6 +22,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -428,6 +429,8 @@ final class Bubble implements ChatHub.Listener {
         messages = new LinearLayout(svc);
         messages.setOrientation(LinearLayout.VERTICAL);
         messages.setPaddingRelative(0, dp(8), 0, dp(8));
+        // 017: nothing here needs input focus, and a focused message makes the ScrollView scroll to it on its own.
+        messages.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         scroll.addView(messages);
         helpersList = new LinearLayout(svc);
         helpersList.setOrientation(LinearLayout.VERTICAL);
@@ -3568,12 +3571,17 @@ final class Bubble implements ChatHub.Listener {
 
     /** New agent output: follow it only if the user is already at the end (or near it), so scrolling back to read isn't yanked. Call before the layout pass. */
     private void followEnd() {
-        View c = scroll.getChildAt(0);
-        if (c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(48)) scrollToEnd();
+        if (atEnd()) scrollToEnd();
     }
 
+    private boolean atEnd() {
+        View c = scroll.getChildAt(0);
+        return c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(48);
+    }
+
+    /** Not fullScroll: that also moves input focus to a message, which then scrolls the chat by itself (017). */
     private void scrollToEnd() {
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> scroll.smoothScrollTo(0, messages.getBottom()));
     }
 
     private TextView subtitle, stripText;
