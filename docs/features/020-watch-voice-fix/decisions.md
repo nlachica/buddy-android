@@ -40,3 +40,21 @@
 - Choice: add it: one word that tests the diagnosis's unproven "hidden offscreen WebView" idea, so a failed resume next
   time points at the right follow-up.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Don't await the first AudioContext resume
+- Options: keep `await ctx.resume()` and add the listener after it; don't await it, and run the first resume through
+  the timer's single-in-flight `wake()`.
+- Choice: don't await it, because a resume the device refuses can stay pending. That would block the mic, the
+  connection, the timers and every log line (plan review F1, the reviewer's probe). Read-aloud already doesn't await
+  (`CodexSpeech.java:414`), and nothing before the timers needs a running context. One guard serves both callers. A
+  second `resume()` while one is pending would only join it.
+- By: Planner (claude-opus-5-5), plan review round 1
+
+## 2026-11-17 - Page check gets a behaviour part and moves into the feature folder
+- Options: syntax-only check in `/tmp` (earlier entry); add a behaviour check with fakes, kept in `/tmp`; the same,
+  committed as `docs/features/020-watch-voice-fix/pagecheck.js`; a JS test framework or wiring into CI.
+- Choice: committed in the feature folder, plain Node (`vm`, `assert`), not in CI. A real call may never pause, so
+  only fakes reach the new branches (retry, in-flight guard, hang-up) before a release (plan review F2). The Coder
+  writes it against the new names, and the reviewer and Verifier must rerun the same file. A framework or CI step
+  would still grow scope beyond the brief. This replaces the "outside the repo" part of the page syntax check entry.
+- By: Planner (claude-opus-5-5), plan review round 1

@@ -10,3 +10,20 @@ F2 [minor] Successful calls do not exercise the pause recovery being added - The
 Review checks: read the brief, diagnosis, research placeholder, plan, decisions and relevant Java/test code; ran the supplied syntax check successfully for both pages and the pending-resume control-flow probe above. No Android build, CI or device audio test was run in this plan review. Only this review file was changed.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - `start()` no longer awaits the first resume. `ctx.onstatechange` is set right after `new
+AudioContext()`, then the first context line (with `page <visibilityState>`), then `wake()`. `wake()` is the
+single-in-flight resume the 70 ms timer also calls, and a resolve or a reject clears its flag (plan Design 2, Step 1).
+This removes a line rather than adding one, and matches read-aloud's `ctx.resume()` without await
+(`CodexSpeech.java:414`). The device-policy limit stays acknowledged: retries don't beat a refusal (Risks 3). The
+executable check is part 1 of the new behaviour check. A pending first resume still installs both timers, logs
+`audio context suspended` and sets `onstatechange`. A rejection or a resolution releases the guard.
+
+F2: accepted - the Node page check gains a behaviour part. It runs the extracted page in `vm` with a short, fixed list
+of fakes and asserts: a pause resumes, a pending `play()` blocks a second one across ticks, a rejected one is retried
+with its error logged once, pause logs stop at 5, the `rtp` line has the new fields, and hang-up resumes nothing
+(Test plan, "Page check", parts 2-4). The Coder writes it first, and it must fail on the current page. To keep it
+small: plain Node, committed as `docs/features/020-watch-voice-fix/pagecheck.js`, not in CI, no production change for
+testability. Device checks still prove the audio itself.

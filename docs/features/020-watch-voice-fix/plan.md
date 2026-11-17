@@ -38,11 +38,19 @@ when it differs from the last one logged. `hangUp()` closes `pc` before it clear
 the call never resumes the element. A muted element that is playing is fine for the tap: that is today's state while
 the voice is on the watch.
 
-**2. Resume a suspended AudioContext (cause 2 of B).** Set `ctx.onstatechange = () => L('audio context ' + ctx.state)`
-after the first `audio context …` line (`:942`). In the 70 ms timer, add: if `ctx.state` is neither `'running'` nor
-`'closed'` and no resume is in flight, call `ctx.resume()` (errors ignored, one call in flight). Checking "not
-running" also covers the newer `'interrupted'` state. The first line also gets `, page ' + document.visibilityState`.
-That one word tests the diagnosis's untested idea that the never-attached WebView (`:668`) is a hidden page.
+**2. Resume a suspended AudioContext (cause 2 of B).** `start()` no longer awaits the first resume (`:941`). A resume
+the device refuses can stay pending, not reject ([Web Audio `resume()`](https://webaudio.github.io/web-audio-api/#dom-audiocontext-resume)).
+Today that would stop the mic, the connection, both timers and every log line (plan review F1). The read-aloud page
+already resumes without awaiting (`CodexSpeech.java:414`). Nothing before the timers needs a running context:
+`sampleRate`, the nodes and `createMediaStreamSource` all work while it is suspended. `start()` now opens with:
+`ctx = new AudioContext(); ctx.onstatechange = () => L('audio context ' + ctx.state);`, then the first line with
+`, page ' + document.visibilityState` added, then `wake()`.
+`wake()` calls `ctx.resume()` if `ctx.state` is neither `'running'` nor `'closed'` and no resume is in flight (`waking`).
+A rejection is ignored, and either outcome clears `waking`. The 70 ms timer calls `wake()` too. Checking "not running"
+also covers the newer `'interrupted'` state. The guard does not weaken the retry. A pending resume settles when the
+context may run, and a second call would only join it. If a device policy never lets the context run, no number of
+calls will (Risks 3). `page <visibilityState>` tests the diagnosis's untested idea that the never-attached WebView
+(`:668`) is a hidden page.
 
 **3. The `rtp 10 s` line (`:988`) gets the states.** Append:
 - `voice peak <max>`: the highest `said()` value over the last 10 s. The 70 ms timer keeps `vMax`, and the stats
@@ -76,20 +84,24 @@ Alternatives, one line each:
   and only worth it if the resume fails (Risks 1).
 - Add a peak getter to `TAP_JS` (diagnosis A-2): it changes code shared with read-aloud, which works, and `said()`
   measures the same path.
+- Keep awaiting the first resume (today): a resume that stays pending blocks setup, the timers and the logs (F1).
 - `live.prev.log` (diagnosis): the brief says `live.log.1`.
 - Also log the setting when the call starts: not asked for. The first change's "old" already shows the starting value.
 
 ## Steps
-1. **Page: keep the voice playing, and log it** (`CodexLive.java`, `PAGE` only):
+1. **Page: keep the voice playing, and log it** (`CodexLive.java`, `PAGE` only; `pagecheck.js` in this folder):
+   - First, write `docs/features/020-watch-voice-fix/pagecheck.js` (Test plan, "Page check"). Its behaviour part must
+     fail on the current page.
    - Page-level state: `pauses = 0`, `resuming = false`, `waking = false`, `resumeErr = ''`.
-   - `keepPlaying()` as in Design 1.
-   - In `start()`: `ctx.onstatechange`, and `page <visibilityState>` on the first context line.
+   - `keepPlaying()` as in Design 1, `wake()` as in Design 2.
+   - In `start()`: drop the `await` on the first resume, and set `ctx.onstatechange`. Log the first context line
+     with `page <visibilityState>`, then call `wake()`.
    - In `ontrack`: `onpause` counts, logs while the count is 5 or less, then calls `keepPlaying()`; `onplaying` logs
      while the count is 5 or less.
-   - In the 70 ms timer: `keepPlaying()`, the context resume, and `vMax = Math.max(vMax, v)`, with `vMax` declared
-     beside `said`.
+   - In the 70 ms timer: `keepPlaying()`, `wake()`, and `vMax = Math.max(vMax, v)`, with `vMax` declared beside
+     `said`.
    - The `rtp 10 s` line additions, then `vMax = 0`.
-   - Run the page syntax check from the Test plan.
+   - Run `pagecheck.js`: both parts pass.
 2. **Setting change log** (`LiveWatch.java` `poll`, `LiveWatchTest.java`). In `aChangeOfTheSettingMovesTheVoice`,
    assert `f.log` holds `setting 2:Speaker -> watch`, `setting watch -> 2:Speaker`, `setting watch -> auto` and
    `setting auto -> 2:Speaker`. Also assert that a poll with no change adds no `setting` line: the number of
@@ -105,15 +117,55 @@ Until then, `verify.md` keeps those rows `pending` with `VERDICT: PARTIAL` (play
 
 | Done-when | How it is proven |
 |---|---|
-| 1. Watch picked: heard on the watch. Phone or speaker picked: heard on the phone | **Local:** the page syntax check below (a typo in `PAGE` would silently break every call). **After-switch:** (a) Set `audio_device` = watch and start a phone live call. Say something that gets a spoken answer. Pass if the watch plays it, `live.log` `rtp` lines show `voice peak` > 0.02 and `audio playing` while the model speaks, every `audio element paused` is followed by `audio element playing`, and the watch's `adb logcat -d -s BuddyTalk` shows `read … received` > 0 with `audible at`. (b) The same with Phone (earpiece) and with Speaker: heard on the phone, with `level` > 0 in the `rtp` lines. |
-| 2. A call started from the watch, incl. New chat, heard both ways | **After-switch:** on the watch, open New chat and start a call. Say a request. Pass if the chat shows the user's words (watch to phone), the watch plays the answer (phone to watch), and `live.log` shows `(watch call)`, `audio context running`, `ctx running` and `voice peak` > 0 in the `rtp` lines. If it fails, keep `live.log` and the watch's `logcat -s BuddyCall` for a new diagnosis. Don't guess at a fix. |
+| 1. Watch picked: heard on the watch. Phone or speaker picked: heard on the phone | **Local:** `pagecheck.js` below. The syntax part guards against a typo in `PAGE`, which would silently break every call. The behaviour part forces a pause, a rejected `play()`, a `play()` held pending, and a hang-up. A real call may not pause at all. **After-switch:** (a) Set `audio_device` = watch and start a phone live call. Say something that gets a spoken answer. Pass if the watch plays it, `live.log` `rtp` lines show `voice peak` > 0.02 and `audio playing` while the model speaks, every `audio element paused` is followed by `audio element playing`, and the watch's `adb logcat -d -s BuddyTalk` shows `read … received` > 0 with `audible at`. (b) The same with Phone (earpiece) and with Speaker: heard on the phone, with `level` > 0 in the `rtp` lines. |
+| 2. A call started from the watch, incl. New chat, heard both ways | **Local:** `pagecheck.js`'s pending-resume part (the setup, the timers and the logs don't wait for the context). **After-switch:** on the watch, open New chat and start a call. Say a request. Pass if the chat shows the user's words (watch to phone), the watch plays the answer (phone to watch), and `live.log` shows `(watch call)`, `audio context running`, `ctx running` and `voice peak` > 0 in the `rtp` lines. If it fails, keep `live.log` and the watch's `logcat -s BuddyCall` for a new diagnosis. Don't guess at a fix. |
 | 3. `live.log` shows element and context state and setting changes; previous log kept as `live.log.1` | **CI:** `LiveWatchTest` (step 2) for the setting lines. **After-switch:** during check 1(a), move the live bar's device chip once. Pass if `live.log` has `watch: setting watch -> …`, and the `rtp` lines show `audio …, n pauses; ctx …`. After check 2, `head -1 ~/.buddy/live.log.1` is the header of the call before it. |
 | 4. CI green | **CI:** the PR's `build.yml` run (`testGithubDebugUnitTest`, both APKs, wear, helper tests, reproducibility). All checks pass. |
 
-Page syntax check (local, Coder and Verifier). Save the script outside the repo, for example as
-`/tmp/pagecheck.js`, and run `node /tmp/pagecheck.js "$PWD"` from the repo root. It must print `syntax ok` for both
-pages. It turns the Java string concatenations into JS strings and parses each page's script without running it. It
-passes on the current code.
+**Page check** (local; the Coder writes it, and the Code Reviewer and Verifier rerun it). It lives in
+`docs/features/020-watch-voice-fix/pagecheck.js`, committed with the feature docs. It is not in CI and not in the APK.
+Run `node docs/features/020-watch-voice-fix/pagecheck.js "$PWD"` from the repo root. Plain Node only: `fs`, `vm`,
+`assert`. No framework, and no change to production code to make the page testable.
+
+*Syntax part*: the script below. It must print `syntax ok` for both pages. It turns the Java string concatenations
+into JS strings and parses each page's script without running it. It passes on the current code.
+
+*Behaviour part* (CodexLive's page only). Run the extracted script with `vm.runInNewContext` and these fakes, nothing
+more:
+- `Buddy`: `log` pushes onto an array. `remote()` returns false, `toWatch()` returns 0. `level`, `connected` and
+  `offer` do nothing, and `failed` throws.
+- `AudioContext`: `state 'suspended'`, `sampleRate 48000`. `resume()` counts its calls and returns a promise the
+  check settles. `createAnalyser()` returns `{getFloatTimeDomainData() {}}`, `createMediaStreamSource()` returns
+  `{connect() {}}`, and `close()` sets `state 'closed'`.
+- `navigator.mediaDevices.getUserMedia` resolves to a stream whose `getAudioTracks()` returns one track with `label`,
+  `getSettings()` and `enabled: true`.
+- `RTCPeerConnection`: the check keeps the instance. It has `addTrack`, `createDataChannel` (returns `{}`),
+  `createOffer`, `setLocalDescription`, `iceGatheringState 'complete'`, `localDescription {sdp: ''}` and
+  `getStats()` (returns `[]`). `close()` sets `connectionState` and `signalingState` to `'closed'`.
+- `document`: `visibilityState 'hidden'`, and `getElementById` returns one fake `out` element. Its `play()` counts its
+  calls and returns a promise the check settles. The check sets `paused` itself.
+- `setInterval` records each callback by its delay, so a "tick" calls the 70 ms callback. `clearInterval` does
+  nothing. `MediaStream` is a stub.
+
+Between steps, wait one macrotask (`setImmediate`). Assert:
+1. *Pending first resume* (F1). Leave the first `resume()` pending. Then the 70 ms and 10 s timers exist, the first
+   log line starts `audio context suspended`, `onstatechange` is set, and `resume()` was called once. Two ticks:
+   still once. Reject it, then tick: twice. Resolve that one with `state 'running'`, then tick: still twice. Set
+   `state 'suspended'`, then tick: three times. Resolve that one with `state 'running'`.
+2. *Pause recovery* (F2). Call the instance's `ontrack` with an audio track and a stream, and settle the first
+   `play()`. Set `paused = true` and call `out.onpause()`: `play()` is called once more, and `audio element paused` is
+   logged. Hold that `play()` pending for 3 ticks: no new call. Reject it with `Error('x')`, then tick: one retry and
+   one `resume failed` line. Reject the retry the same way, then tick: another retry, still one `resume failed` line.
+   Resolve it and set `paused = false`, then tick: no new call.
+3. *Cap and rtp line*. Six more pauses, each resolved: exactly 5 `audio element paused` lines in all. Call the 10 s
+   callback: its line has `voice peak`, `audio playing`, `pauses` and `ctx running`.
+4. *Hang-up*. Call `hangUp()` (a top-level function, so it is on the context object). Then set `paused = true`, call
+   `out.onpause()` and tick: no new `play()` and no new `resume()`.
+
+On the current page, parts 1 and 2 fail: the reviewer's probe shows the first assertion of part 1 failing. That proves
+the check tests the fix.
+
+The syntax part:
 
 ```js
 const fs = require('fs');
@@ -135,7 +187,9 @@ for (const [n, j] of [['CodexLive', lv], ['CodexSpeech', sp]]) {
 2. **Something keeps pausing the element.** The voice would stutter. The logs are capped at 5 pauses, and the count in
    the `rtp` line shows the rate.
 3. **B's cause is unproven** (no logs survived). The fix covers both likely causes. If B still fails, `live.log`,
-   `live.log.1` and the new state fields hold the evidence.
+   `live.log.1` and the new state fields hold the evidence. If the device never lets the context run, retrying won't
+   change that. The call still sets up, though, and every `rtp` line shows `ctx suspended`. As with Risk 1, the next
+   step would be feature-sized and goes to Nicholas.
 4. **A quiet stretch of about 3 min before the voice, in a Watch call,** can still break LiveWatch's opened-ahead
    reading and move the voice to the phone (018 behaviour, out of scope). If verification hits it, record it and
    propose a separate fix.
