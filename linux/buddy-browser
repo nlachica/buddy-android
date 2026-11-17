@@ -23,7 +23,10 @@ install() {
     echo "@edge $base/edge/main" >>/etc/apk/repositories
   grep -q '^@edge .*/edge/community' /etc/apk/repositories ||
     echo "@edge $base/edge/community" >>/etc/apk/repositories
-  apk update -q >&2 && apk add -q webrtc-audio-processing-2@edge chromium >&2 || return 1
+  apk update -q >&2 || return 1
+  # Newer releases' chromium installs as is; the edge pin is only the fallback, since it can clash with packages
+  # already installed (android-tools 35 vs edge's 37 made it fail on a phone that has adb)
+  apk add -q chromium >&2 || apk add -q webrtc-audio-processing-2@edge chromium >&2 || return 1
   [ -x /usr/bin/chromium ]
 }
 
