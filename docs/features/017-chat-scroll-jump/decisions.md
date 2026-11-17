@@ -122,3 +122,9 @@
   `computeScrollDeltaToGetChildRectOnScreen`). `onSizeChanged` already occurs elsewhere in ChatActivity (:808), so
   it is no use as a token.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Coder: small points the plan left open
+- `backToChat()` for a different chat just calls `renderCurrent()` (its `refreshStatus()` paints the header); `updateHeader()` runs only on the same-chat path. `closePicker()` stays as a one-line caller so its two call sites don't change.
+- Full chat `onResume`: a Search `found` view still wins over everything (as today); otherwise it scrolls to the end only if at the end or `lastShown` is gone.
+- `ToolLog`/`StepLog.setLive(on)`: when `on` it opens the rows as before; when not, it goes through `fold()`.
+- By: Coder (claude-sonnet-5-5)
