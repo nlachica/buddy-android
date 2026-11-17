@@ -1,8 +1,9 @@
 #!/bin/sh
 # Pre-release batching check: is it a good moment to bump the version and tag, or should something land first?
 # Run it before any version bump or `v*` tag (AGENTS.md, "Updating Buddy on the phone"). Reports, never changes anything.
-#   tools/release-check.sh [--json] [--quiet]
+#   tools/release-check.sh [--json] [--quiet] [--commit <rev>]
 #     --json   one JSON object (for agents)       --quiet  only the RECOMMENDATION line
+#     --commit <rev>  the commit that will be tagged (default HEAD): it must contain origin/main
 # Exit: 0 ready (release now) | 10 not ready: do what RECOMMENDATION says first | 1 error (gh/git failed: fail closed)
 # Reads: open PRs of the fork (gh), origin's feat/* and fix/* branches (git ls-remote, then fetched into
 # refs/release-check/), `pipe` processes (ps) of any Buddy clone, other git worktrees of this repo, and official Buddy's
@@ -26,25 +27,29 @@ vgt() { awk -v a="$1" -v b="$2" 'BEGIN{na=split(a,x,"[.]");nb=split(b,y,"[.]");n
   for(i=1;i<=n;i++){p=x[i]+0;q=y[i]+0;if(p>q)exit 0;if(p<q)exit 1}exit 1}'; }
 join() { if [ -z "$1" ]; then printf '%s' "$2"; else printf '%s%s%s' "$1" "$3" "$2"; fi; } # join <acc> <item> <sep>
 
-json=0 quiet=0
-for a in "$@"; do
-  case $a in
+json=0 quiet=0 commit=HEAD
+while [ $# -gt 0 ]; do
+  case $1 in
     --json) json=1 ;;
     --quiet) quiet=1 ;;
-    -h | --help) sed -n '2,10p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-    *) die "unknown argument: $a (try --help)" ;;
+    --commit) [ $# -ge 2 ] || die "--commit needs a revision"; commit=$2; shift ;;
+    -h | --help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) die "unknown argument: $1 (try --help)" ;;
   esac
+  shift
 done
 
 top=$(git rev-parse --show-toplevel 2>/dev/null) || die "not inside a git repo"
 cd "$top" || die "cannot cd to $top"
 here=$(pwd -P)
-git fetch -q --prune origin || die "git fetch origin failed"
+# main explicitly: a single-branch or narrow-refspec clone would otherwise keep a stale origin/main
+git fetch -q origin '+refs/heads/main:refs/remotes/origin/main' || die "git fetch origin main failed"
 git rev-parse -q --verify refs/remotes/origin/main >/dev/null || die "origin/main not found"
 now=$(date +%s)
 main7=$(git rev-parse --short origin/main)
 # a tag from a checkout that lacks origin/main would leave out the PRs just merged for this release
-head_has_main=1; git merge-base --is-ancestor refs/remotes/origin/main HEAD 2>/dev/null || head_has_main=0
+csha=$(git rev-parse -q --verify "$commit^{commit}" 2>/dev/null) || die "cannot resolve --commit $commit to a commit"
+head_has_main=1; git merge-base --is-ancestor refs/remotes/origin/main "$csha" 2>/dev/null || head_has_main=0
 
 # ---------- open PRs ----------
 JQ='.[] | ((.statusCheckRollup // []) as $c | (if ($c|length)==0 then "pending"
@@ -227,7 +232,9 @@ else rec="ready: release now"; code=0
 fi
 [ -z "$excl" ] || rec="$rec (excluded: $excl)"
 if [ $head_has_main = 0 ]; then
-  rec="update this checkout first (HEAD does not contain origin/main $main7: git merge --ff-only origin/main), then rerun the check: $rec"
+  if [ "$commit" = HEAD ]; then fixmsg="HEAD does not contain origin/main $main7: git merge --ff-only origin/main"
+  else fixmsg="$commit does not contain origin/main $main7: rebase or merge origin/main into it"; fi
+  rec="update this checkout first ($fixmsg), then rerun the check: $rec"
   code=10
 fi
 

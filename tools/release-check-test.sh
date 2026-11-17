@@ -134,6 +134,31 @@ git merge -q --ff-only origin/main
 run
 check "caught up is ready" 'test $rc = 0'
 
+echo "# --commit <rev> replaces HEAD in the ancestry check"
+setup
+git clone -q --no-local "$T/origin.git" "$T/wt-pusher" && (cd "$T/wt-pusher" && echo n >n && commit n && git push -q origin main)
+old=$(git rev-parse HEAD)
+git fetch -q origin
+run --commit origin/main
+check "--commit with a rev containing origin/main is ready" 'test $rc = 0'
+run --commit "$old"
+check "--commit with a rev lacking origin/main is not ready" 'test $rc = 10 && has "update this checkout first" && has "$old does not contain origin/main"'
+git merge -q --ff-only origin/main
+run --commit "$old"
+check "--commit decides, not HEAD (HEAD is current, rev is old)" 'test $rc = 10'
+run --commit nonexistent-rev
+check "unresolvable --commit is exit 1" 'test $rc = 1'
+run --commit
+check "--commit without a value is exit 1" 'test $rc = 1'
+
+echo "# fetches main explicitly (a stale origin/main in a single-branch clone is refreshed)"
+setup
+git clone -q --no-local --single-branch -b main "$T/origin.git" "$T/wt-stale"
+git clone -q --no-local "$T/origin.git" "$T/wt-pusher" && (cd "$T/wt-pusher" && echo n >n && commit n && git push -q origin main)
+git -C "$T/wt-stale" config remote.origin.fetch '+refs/heads/other:refs/remotes/origin/other'
+out=$(cd "$T/wt-stale" && sh "$CHECK" 2>&1); rc=$?
+check "narrow-refspec clone sees the new origin/main (behind it, so not ready)" 'test $rc = 10 && has "update this checkout first"'
+
 echo "# branch discovery sees origin, not local refs; PR must be from this repo"
 setup
 branch feat/fresh
@@ -207,7 +232,7 @@ fi
 echo "# hook"
 H=$T/hook; mkdir -p "$H/.claude/hooks" "$H/tools"
 cp "$R/.claude/hooks/release-gate.sh" "$H/.claude/hooks/"
-printf '#!/bin/sh\n[ -e "$PWD/READY" ] && exit 0\necho "RECOMMENDATION: wait: pipeline 024 is in code-loop (~30 min); release after it [in $PWD]"\nexit "${FAKE_RC:-10}"\n' >"$H/tools/release-check.sh"
+printf '#!/bin/sh\n[ -e "$PWD/READY" ] && exit 0\necho "RECOMMENDATION: wait: pipeline 024 is in code-loop (~30 min); release after it [in $PWD] [args: $*]"\nexit "${FAKE_RC:-10}"\n' >"$H/tools/release-check.sh"
 mkdir -p "$H/ready" "$H/notready"; : >"$H/ready/READY"
 hook() { err=$(printf '{"tool_input":{"command":"%s"}}' "$1" | (cd / && sh "$H/.claude/hooks/release-gate.sh") 2>&1 >/dev/null); hrc=$?; }
 for c in 'ls -la' 'git status' 'git commit -m release' 'git push origin main' 'git tag -l v*' 'git tag' 'git tag -l v2*' \
@@ -224,6 +249,11 @@ for c in 'git tag v2.3.12-fork.2' 'git add -A && git tag v1.0.0 && git push orig
 done
 hook "cat <<'EOF' >notes\ngit tag v1\ngit push origin refs/tags/x\nEOF\nls"; check "heredoc body is data, not commands" 'test $hrc = 0'
 hook "cat <<EOF\nit's\nEOF\ngit tag v1"; check "a tag command after a heredoc is still seen" 'test $hrc = 2'
+hook 'git tag v1 abc123'; check "git tag <name> <rev> passes --commit <rev>" 'test $hrc = 2 && printf "%s" "$err" | grep -qF "[args: --quiet --commit abc123]"'
+hook 'git tag -a v1 -m x HEAD~2'; check "rev after options" 'printf "%s" "$err" | grep -qF "[args: --quiet --commit HEAD~2]"'
+hook 'git tag v1'; check "no rev: no --commit" 'printf "%s" "$err" | grep -qF "[args: --quiet]"'
+hook 'git push origin v1'; check "push: no --commit" 'printf "%s" "$err" | grep -qF "[args: --quiet]"'
+hook "git -C $H/notready tag v1 abc123"; check "-C plus rev" 'printf "%s" "$err" | grep -qF "in $H/notready] [args: --quiet --commit abc123]"'
 hook 'git tag v1'
 check "recommendation reaches stderr" 'printf "%s" "$err" | grep -qF "wait: pipeline 024 is in code-loop"'
 RELEASE_CHECK_OK=1 hook 'git tag v1'; check "RELEASE_CHECK_OK=1 in env lets it through" 'test $hrc = 0'

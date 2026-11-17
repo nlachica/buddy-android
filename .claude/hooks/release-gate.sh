@@ -10,7 +10,8 @@ input=$(cat)
 # the command string out of the JSON payload, unescaped
 cmd=$(printf '%s' "$input" | sed -nE 's/.*"command"[[:space:]]*:[[:space:]]*"(([^"\\]|\\.)*)".*/\1/p' | head -n 1)
 [ -n "$cmd" ] || exit 0
-# One line per git tag-creation/tag-push found: "<ok 0|1>" then TAB-separated directories (cd's, then -C's) to run in.
+# One line per git tag-creation/tag-push found: "<ok 0|1>", TAB, the commit being tagged (`git tag <name> <rev>`, `-` if none),
+# then TAB-separated directories (cd's, then -C's) to run in.
 hits=$(printf '%s\n' "$cmd" | awk '
 function flush() { if (n > 0) seg(); n = 0 }
 function unesc(s,   o, i, c, d) {
@@ -39,7 +40,7 @@ function skip_heredoc(   e, line) {
   }
   hd = ""
 }
-function seg(   i, k, a, isenv, ok, dirs, verb, list, push, tags, dry, del, name, nopt, remote, ref, parts, m, cl, ch, j, cons) {
+function seg(   i, k, a, isenv, ok, dirs, verb, list, push, tags, dry, del, name, nopt, remote, ref, parts, m, cl, ch, j, cons, rev) {
   i = 1; ok = 0
   while (i <= n && w[i] ~ /^[A-Za-z_][A-Za-z_0-9]*=/) { if (w[i] == "RELEASE_CHECK_OK=1") ok = 1; i++ }
   if (i > n) return
@@ -52,7 +53,7 @@ function seg(   i, k, a, isenv, ok, dirs, verb, list, push, tags, dry, del, name
     else i++
   }
   verb = w[i]; i++
-  list = 0; del = 0; name = ""; dry = 0; tags = 0; push = 0; nopt = 0; remote = ""
+  list = 0; del = 0; name = ""; rev = ""; dry = 0; tags = 0; push = 0; nopt = 0; remote = ""
   for (; i <= n; i++) {
     a = w[i]
     if (nopt == 0 && a == "--") { nopt = 1; continue }
@@ -82,7 +83,7 @@ function seg(   i, k, a, isenv, ok, dirs, verb, list, push, tags, dry, del, name
       }
       continue
     }
-    if (verb == "tag") { if (name == "") name = a }
+    if (verb == "tag") { if (name == "") name = a; else if (rev == "") rev = a }
     else if (verb == "push") {
       if (remote == "") { remote = a; continue }
       ref = a; sub(/^\+/, "", ref)
@@ -90,10 +91,10 @@ function seg(   i, k, a, isenv, ok, dirs, verb, list, push, tags, dry, del, name
       for (j = 1; j <= m; j++) if (parts[j] ~ /^(refs\/tags\/|v[0-9])/) tags = 1
     }
   }
-  if (verb == "tag" && !list && name ~ /^v[0-9]/) hit(ok, dirs)
-  if (verb == "push" && tags && !dry && !del) hit(ok, dirs)
+  if (verb == "tag" && !list && name ~ /^v[0-9]/) hit(ok, dirs, rev)
+  if (verb == "push" && tags && !dry && !del) hit(ok, dirs, "")
 }
-function hit(ok, dirs) { print ok (cwd == "" ? "" : "\t" cwd) dirs }
+function hit(ok, dirs, rev) { print ok "\t" (rev == "" ? "-" : rev) (cwd == "" ? "" : "\t" cwd) dirs }
 {
   s = unesc($0); len = length(s); q = ""; tok = ""; has = 0
   for (p = 1; p <= len; p++) {
@@ -122,12 +123,15 @@ while IFS= read -r line; do
   [ -n "$line" ] || continue
   ok=${line%%"$(printf '\t')"*}
   [ "$ok" != 1 ] || continue # RELEASE_CHECK_OK=1 leads this very command
-  dirs=${line#"$ok"}
+  rest=${line#"$ok$(printf '\t')"}
+  rev=${rest%%"$(printf '\t')"*}
+  dirs=${rest#"$rev"}
+  commit_args=""; [ "$rev" = - ] || commit_args=1
   # cd to each directory in turn (a relative -C is relative to the one before)
   out=$(
     IFS=$(printf '\t'); set -f; set -- $dirs
     for d in "$@"; do cd "$d" 2>/dev/null || { echo "cannot enter $d to find the repository this command targets"; exit 1; }; done
-    sh "$check" --quiet 2>&1
+    if [ -n "$commit_args" ]; then sh "$check" --quiet --commit "$rev" 2>&1; else sh "$check" --quiet 2>&1; fi
   ); rc=$?
   [ $rc -eq 0 ] || { blocked=1; break; }
 done <<EOF

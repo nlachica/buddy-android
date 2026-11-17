@@ -9,6 +9,8 @@
 ## 2026-11-17 - What exit 10 means
 - Options: 10 only for "wait"; 10 whenever the recommendation is anything but "release now".
 - Choice: the second. Ready PRs still to merge or upstream still to bring in also exit 10, so the hook blocks a tag that would leave them out of the batch; the agent merges, reruns, gets 0. Failing, conflicting and draft PRs are listed as excluded and do not block.
+- Orchestrator: the hook is a guard against forgetting the check, not a security boundary. Shell-parsing edge cases (comments, line continuations, repeated env assignments, subshell cd, relative pipe paths) are accepted as-is; RELEASE_CHECK_OK=1 is the escape hatch.
+- Check: fetches `+refs/heads/main:refs/remotes/origin/main` explicitly, so single-branch or narrow-refspec clones never use a stale origin/main. `--commit <rev>` (default HEAD) is the commit the ancestry check uses; the hook passes the rev of `git tag <name> <rev>` when present. Tests added.
 - By: Sonnet 5.5 (orchestrator task)
 
 ## 2026-11-17 - Branches without a PR
