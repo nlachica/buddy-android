@@ -210,3 +210,22 @@
 ## 2026-11-17 - Coder: round 1 review fixes
 - Checkout evidence for a form or an address reuses `BrowserTools.CHECKOUT` (the pattern `riskyTap` uses), so Bypass never skips the card of a checkout that Ask cards. The address check is the small static `moneyUrl` so it can be tested without a service.
 - The money words in `Bypass.MONEY` are checked against all of `Guard.RISKY`; a missing money term is added there, with a table test for the money subset. Send/delete terms stay out.
+
+## 2026-11-17 - Upstream 2.3.12 sync: phone_shell card
+- Conflict in `Tools.phoneShell`: upstream makes every command from another computer (Phone tools on Tailscale) ask;
+  the fork passes the Bypass flag to `askConfirm`. Kept both: `(phoneShellAsk || remote)` with
+  `!remote && !Bypass.secretOrMoney(cmd)` (a remote computer never skips the card in Bypass). `HELPER_NO` keeps the fork's `buddy_settings` and gains upstream's `add_notification_rule`.
+  By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: `add_notification_rule` follows Bypass
+- Review: the new tool's card used the 2-argument `askConfirm`, so a Bypass chat still carded it.
+- Choice: `askConfirm(card, false, !Bypass.secretOrMoney(card))`, the opt-in form every 020 site uses: Bypass adds the rule
+  unless the card (app, filters, instruction) names a secret or money, which keeps the card. The rule still starts on "ask".
+  By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: a standing approval never covers a remote shell command
+- Review: upstream's `(phoneShellAsk || remote) && !Guard.takeApproval(false, cmd)` let a prior confirm skip the card for a
+  command from another computer (Phone tools on Tailscale), against its own comment "every command asks".
+- Choice: `remote || phoneShellAsk && !takeApproval(...)`: a remote command always cards (and spends no approval). One line in
+  upstream code, safe. Local behaviour unchanged.
+  By: Orchestrator (claude-sonnet-5-5)

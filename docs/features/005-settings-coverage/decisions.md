@@ -163,3 +163,35 @@
 - Upstream added the switch "Ask about new apps" (`Prefs.askNewApps`/`setAskNewApps`, SetupActivity). Registered it in
   `SettingsTool.scalars` as `ask_new_apps` (on/off) next to `agents_tap_buddy`, so it takes the same approval card
   with old and new value as the other safety settings. It is already in Backup's list. By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: three switches registered
+- Upstream added "Outside sessions in background" (`outside_background`), "Phone tools on Tailscale" (`tailnet_tools`) and
+  "Pause media while listening" (`pause_media_for_listening`, pref `listen_pause_media`). Registered as on/off scalars in
+  `SettingsTool.scalars` so each takes the approval card with old and new value. The paired-computers list
+  (`tailnet_devices`) is not registered: it holds pairing keys, and stays this phone's own (Backup `OWN`). By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: editing a rule keeps the fields the value leaves out (`chat`)
+- Review found `rule/<id>` rebuilt the rule from the value alone, so an edit dropped `chat` (the binding 2.3.12's
+  `add_notification_rule` sets) and reset every other omitted field to its default.
+- Choice: the value is laid over the rule's current JSON (`merged` in `SettingsTool.rule`), for both the check and the
+  write; `rule/new` is unchanged. `chat` is named in the setting's description. Merge, not replace, so a one-field edit works.
+  By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: `tailnet/<name>` removes one paired computer
+- Review: Setup can revoke one computer (`Tailnet.remove`), buddy_settings had no counterpart; the list stayed "own" for its keys.
+- Choice: an item setting `tailnet/<name>` (listed in the full listing as `= paired`), value `""` removes it, anything else is
+  refused; the normal approval card shows paired -> (deleted). Token and id are never read or shown. Pairing stays on the
+  computer (it needs the computer itself), and `tailnet_devices` stays unregistered in Backup. Not a `keepsCard` name:
+  removing only reduces access.
+  By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: Stop's 20-second give-up is an upstream issue, left as is
+- Review: `ChatHub.stop` marks a chat stopped after `STOP_GIVE_UP_MS` (20 s) when no `buddy_stopped` came, and `buddy-run stop`
+  (linux/buddy-run, `stop)`) says nothing when `sessions/<id>/pid` doesn't exist yet. A Stop pressed in that window is not
+  remembered: the run then writes its PID file and goes on while the chat shows "Stopped".
+- Origin: pure upstream (2.3.12's "Stopping fix"; the fork's only buddy-run changes are the `AGY_PHONE_TOOLS` entry and the
+  002 end-of-run check). Not fixed: it needs a stop marker that `buddy-run` honours at start and expires, which is not a
+  safe ~15-line change without a test of the shell script's start-up. Report upstream.
+  By: Orchestrator (claude-sonnet-5-5)
+
+2026-11-17 (orchestrator, 2.3.12 sync): reverted the `tailnet/<name>` revoke (a stale card could remove a re-paired computer) and the Bypass path for add_notification_rule (a code given as the keyword escaped the secret check). Safe defaults: removing a computer only in Settings, adding a rule always asks. Stop's 20-s give-up race is upstream's own (as shipped in official 2.3.12) and stays listed as an upstream issue.

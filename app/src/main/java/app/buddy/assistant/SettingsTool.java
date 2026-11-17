@@ -157,6 +157,9 @@ final class SettingsTool {
         l.add(onOff("linux_tools_new_chats", () -> Prefs.devMode(svc), on -> Prefs.setDevMode(svc, on)));
         l.add(onOff("agents_tap_buddy", () -> Prefs.agentsTapBuddy(svc), on -> Prefs.setAgentsTapBuddy(svc, on)));
         l.add(onOff("ask_new_apps", () -> Prefs.askNewApps(svc), on -> Prefs.setAskNewApps(svc, on)));
+        l.add(onOff("outside_background", () -> Prefs.outsideBackground(svc), on -> Prefs.setOutsideBackground(svc, on)));
+        l.add(onOff("tailnet_tools", () -> Prefs.tailnetTools(svc), on -> Prefs.setTailnetTools(svc, on)));
+        l.add(onOff("pause_media_for_listening", () -> Prefs.pauseMediaForListening(svc), on -> Prefs.setPauseMediaForListening(svc, on)));
         l.add(onOff("background_new_chats", () -> Prefs.backgroundDefault(svc), on -> Prefs.setBackgroundDefault(svc, on)));
         l.add(new Scalar("phone_commands", () -> Prefs.phoneShell(svc) ? "on" : "off",
                 v -> Prefs.setPhoneShell(svc, v.equals("on")), "", "on", "off") {
@@ -911,7 +914,8 @@ final class SettingsTool {
     /** rule/&lt;id&gt; or rule/new (id null): the rule's JSON; "" deletes it. */
     static Setting rule(BuddyService svc, String id) {
         return new Setting("rule/" + (id == null ? "new" : id), "the rule as JSON (pkg, instruction, from, words, backend, "
-                + "model, approval ask|countdown|now, seconds, limit, on), or \"\" to delete it") {
+                + "model, approval ask|countdown|now, seconds, limit, on, chat: the chat id its notifications come into; "
+                + "fields you leave out stay as they are), or \"\" to delete it") {
             private String added = "";
 
             @Override
@@ -927,7 +931,7 @@ final class SettingsTool {
                     if (id == null) throw new IllegalArgumentException("rule/new needs the rule's JSON");
                     return "";
                 }
-                return ruleJson(buildRule(id, json(value), ruleAgents()));
+                return ruleJson(buildRule(id, merged(id, value), ruleAgents()));
             }
 
             @Override
@@ -940,7 +944,7 @@ final class SettingsTool {
                 if (value.isEmpty()) {
                     Rules.remove(svc, id);
                 } else {
-                    Rules.Rule r = Rules.Rule.of(json(value));
+                    Rules.Rule r = Rules.Rule.of(merged(id, value));
                     if (id == null) { // a new rule: its id must be unused by the time it is saved
                         while (Rules.find(svc, r.id) != null) r.id = Long.toString(Long.parseLong(r.id, 36) + 1, 36);
                         added = " (id " + r.id + ")";
@@ -949,6 +953,23 @@ final class SettingsTool {
                 }
                 Triggers.get(svc).rulesChanged();
                 return added;
+            }
+
+            /** The value laid over the rule as it is now: fields it doesn't name (chat, ...) are kept, not reset. */
+            private JSONObject merged(String id, String value) {
+                JSONObject o = json(value);
+                Rules.Rule old = id == null ? null : Rules.find(svc, id);
+                if (old == null) return o;
+                try {
+                    JSONObject m = old.json();
+                    for (java.util.Iterator<String> k = o.keys(); k.hasNext(); ) {
+                        String key = k.next();
+                        m.put(key, o.get(key));
+                    }
+                    return m;
+                } catch (org.json.JSONException e) {
+                    throw new IllegalStateException(e);
+                }
             }
 
             @Override

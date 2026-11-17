@@ -154,3 +154,8 @@
 - The Settings `AudioDeviceCallback` is registered on every API level (it exists since API 23); the row itself
   only shows on 31+.
 - The voice bar's chip uses `TEXT` colour on `CARD2`, to read as a tappable choice next to the muted status.
+
+## 2026-11-17 - Upstream 2.3.12 sync: AudioRoute and SpeechPause both kept
+- Conflict in `Voice.listen` and `CodexLive.start`: the fork calls `AudioRoute.use`, upstream (#56) calls
+  `SpeechPause.listen` at the same place. Kept both, AudioRoute first (it reads the phone's mode before anything pauses
+  media), then SpeechPause. By: Orchestrator (claude-sonnet-5-5)
