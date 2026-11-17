@@ -1078,33 +1078,6 @@ final class SettingsTool {
         };
     }
 
-    /**
-     * tailnet/&lt;name&gt;: a computer paired for Phone tools on Tailscale. Only "" (remove it, so its token stops working)
-     * is accepted: pairing needs the computer itself, and the token is never shown here.
-     */
-    static Setting tailnetComputer(BuddyService svc, String computer) {
-        return new Setting("tailnet/" + computer, "\"\" to remove this computer (its pairing stops working)") {
-            @Override
-            String get() {
-                for (Tailnet.Device d : Tailnet.devices(svc)) if (d.name.equals(computer)) return "paired";
-                return null;
-            }
-
-            @Override
-            String check(String value) {
-                if (get() == null) throw new IllegalArgumentException("no paired computer named " + computer);
-                if (!value.trim().isEmpty()) throw new IllegalArgumentException("only \"\" works: it removes the computer");
-                return "";
-            }
-
-            @Override
-            String set(String value) {
-                for (Tailnet.Device d : Tailnet.devices(svc)) if (d.name.equals(computer)) Tailnet.remove(svc, d.id);
-                return "";
-            }
-        };
-    }
-
     /** A line per skill in the listing: its description, or that it is linked. */
     private static String skillLines(File root) {
         StringBuilder b = new StringBuilder();
@@ -1619,7 +1592,6 @@ final class SettingsTool {
             String id = name.substring(5);
             return id.matches("[A-Za-z0-9]+") ? rule(svc, id.equals("new") ? null : id) : null;
         }
-        if (name.startsWith("tailnet/") && name.length() > 8) return tailnetComputer(svc, name.substring(8));
         if (name.startsWith("skill/")) return skill(Skills.dir(svc), name.substring(6));
         if (name.matches("mcp/[a-z0-9_]+/key")) {
             return mcpKey(svc, name.substring(4, name.length() - 4), Linux.root(svc), file);
@@ -1805,8 +1777,6 @@ final class SettingsTool {
                     .append(r.instruction.length() > 60 ? r.instruction.substring(0, 60) + "…" : r.instruction)
                     .append("  (approval ").append(r.approval).append(")\n");
         }
-        b.append("\nComputers paired for Phone tools on Tailscale (tailnet/<name>; \"\" removes one):\n");
-        for (Tailnet.Device d : Tailnet.devices(svc)) b.append("tailnet/").append(d.name).append(" = paired\n");
         b.append("\nSkills (skill/<name>):\n").append(skillLines(Skills.dir(svc)));
         b.append("\nMCP servers (mcp/<id>; a new id with an address adds one, key_file adds its key; each also has mcp/<id>/key):\n");
         for (McpServers.S m : McpServers.all()) b.append(mcpLine(m, McpServers.header(svc, m.id) != null)).append('\n');

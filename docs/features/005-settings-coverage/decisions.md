@@ -193,3 +193,5 @@
   002 end-of-run check). Not fixed: it needs a stop marker that `buddy-run` honours at start and expires, which is not a
   safe ~15-line change without a test of the shell script's start-up. Report upstream.
   By: Orchestrator (claude-sonnet-5-5)
+
+2026-11-17 (orchestrator, 2.3.12 sync): reverted the `tailnet/<name>` revoke (a stale card could remove a re-paired computer) and the Bypass path for add_notification_rule (a code given as the keyword escaped the secret check). Safe defaults: removing a computer only in Settings, adding a rule always asks. Stop's 20-s give-up race is upstream's own (as shipped in official 2.3.12) and stays listed as an upstream issue.
