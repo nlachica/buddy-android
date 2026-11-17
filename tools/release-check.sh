@@ -4,13 +4,15 @@
 #   tools/release-check.sh [--json] [--quiet]
 #     --json   one JSON object (for agents)       --quiet  only the RECOMMENDATION line
 # Exit: 0 ready (release now) | 10 not ready: do what RECOMMENDATION says first | 1 error (gh/git failed: fail closed)
-# Reads: open PRs of the fork (gh), origin's feat/* and fix/* branches, `pipe` processes (ps), other git worktrees of
-# this repo, and official Buddy's latest release against the version in origin/main's BuildInfo.
+# Reads: open PRs of the fork (gh), origin's feat/* and fix/* branches (git ls-remote, then fetched into
+# refs/release-check/), `pipe` processes (ps) of any Buddy clone, other git worktrees of this repo, and official Buddy's
+# latest release against the version in origin/main's BuildInfo. Not ready too when HEAD lacks origin/main.
 # Env: RELEASE_CHECK_FRESH_DAYS (default 3): a branch without PR newer than this counts as work in flight.
 # POSIX sh, busybox-friendly (no grep --include, no GNU-only flags).
 set -u
 set -f # ps args are split into words below; never glob them
 FORK=nlachica/buddy-android
+FORK_OWNER=${FORK%%/*}
 UPSTREAM=ghorbelhamdi/buddy-android
 BI=app/src/main/java/app/buddy/assistant/BuildInfo.java
 FRESH_DAYS=${RELEASE_CHECK_FRESH_DAYS:-3}
@@ -41,21 +43,24 @@ git fetch -q --prune origin || die "git fetch origin failed"
 git rev-parse -q --verify refs/remotes/origin/main >/dev/null || die "origin/main not found"
 now=$(date +%s)
 main7=$(git rev-parse --short origin/main)
+# a tag from a checkout that lacks origin/main would leave out the PRs just merged for this release
+head_has_main=1; git merge-base --is-ancestor refs/remotes/origin/main HEAD 2>/dev/null || head_has_main=0
 
 # ---------- open PRs ----------
 JQ='.[] | ((.statusCheckRollup // []) as $c | (if ($c|length)==0 then "pending"
   elif any($c[]; ((.conclusion // "")|IN("FAILURE","TIMED_OUT","CANCELLED","ACTION_REQUIRED","STARTUP_FAILURE")) or ((.state // "")|IN("FAILURE","ERROR"))) then "fail"
   elif any($c[]; ((.status // "COMPLETED") != "COMPLETED") or ((.state // "")|IN("PENDING","EXPECTED"))) then "pending"
-  else "pass" end)) as $ci | [.number, .headRefName, .mergeable, .isDraft, $ci] | @tsv'
-prs=$(gh pr list -R "$FORK" --state open --limit 100 --json number,headRefName,mergeable,isDraft,statusCheckRollup --jq "$JQ") ||
+  else "pass" end)) as $ci | [.number, .headRefName, .mergeable, .isDraft, $ci, (.headRepositoryOwner.login // "")] | @tsv'
+prs=$(gh pr list -R "$FORK" --state open --limit 100 --json number,headRefName,mergeable,isDraft,statusCheckRollup,headRepositoryOwner --jq "$JQ") ||
   die "gh pr list failed (is gh logged in and online?)"
 
 ready="" pend="" excl="" ready_n=0 pend_n=0 sync_pr_ready="" heads="" t_prs="" j_prs="" npr=0
-while IFS=$TAB read -r num br mrg draft ci; do
+while IFS=$TAB read -r num br mrg draft ci owner; do
   [ -n "$num" ] || continue
   npr=$((npr + 1))
-  heads="$heads
-$br"
+  # only a PR from this repo's own branch hides that branch; a same-named branch of another fork does not
+  if [ "$owner" = "$FORK_OWNER" ]; then heads="$heads
+$br"; fi
   if [ "$draft" = true ]; then st=excluded why="draft"
   elif [ "$ci" = fail ]; then st=excluded why="failing CI"
   elif [ "$mrg" = CONFLICTING ]; then st=excluded why="merge conflicts"
@@ -77,12 +82,18 @@ EOF
 
 # ---------- remote feat/* and fix/* branches, unmerged and without an open PR ----------
 fresh="" t_br="" j_br="" nbr=0
-refs=$(git for-each-ref --format='%(refname:short) %(committerdate:raw)' refs/remotes/origin/feat refs/remotes/origin/fix) ||
-  die "git for-each-ref failed"
-while read -r ref epoch tz; do
-  [ -n "$ref" ] || continue
-  name=${ref#origin/}
-  git merge-base --is-ancestor "refs/remotes/$ref" refs/remotes/origin/main && continue # merged
+# ls-remote lists what origin really has (a single-branch clone has no refs/remotes/origin/feat/*); the fetch brings the
+# commits (dates, ancestry) into a private namespace
+refs=$(git ls-remote --heads origin 'refs/heads/feat/*' 'refs/heads/fix/*') || die "git ls-remote origin failed"
+if [ -n "$refs" ]; then
+  git fetch -q --no-tags --prune origin '+refs/heads/feat/*:refs/release-check/feat/*' '+refs/heads/fix/*:refs/release-check/fix/*' ||
+    die "git fetch of origin's feat/* and fix/* failed"
+fi
+while read -r sha ref; do
+  [ -n "$sha" ] || continue
+  name=${ref#refs/heads/}
+  epoch=$(git show -s --format=%ct "$sha^{commit}" 2>/dev/null) || die "cannot read $name ($sha); rerun, it may have moved"
+  git merge-base --is-ancestor "$sha" refs/remotes/origin/main && continue # merged
   case "$heads
 " in *"
 $name
@@ -99,6 +110,19 @@ EOF
 
 # ---------- running pipelines (processes `pipe run|plan-loop|code-loop ...`) ----------
 ours=$(cd "$(git rev-parse --git-common-dir)" && pwd -P)
+our_url=$(git remote get-url origin 2>/dev/null)
+# buddy_clone DIR: is DIR a clone of Buddy (any clone: the release may run from a fresh one)? Same git dir or same origin
+# URL as this repo, an origin URL naming buddy-android, or a folder named buddy-fork*, bf-* or buddy-android*.
+buddy_clone() {
+  d=$(cd "$1" 2>/dev/null && pwd -P) || return 0 # unresolvable: counts, to fail safe
+  case ${d##*/} in buddy-fork* | bf-* | buddy-android*) return 0 ;; esac
+  cd_=$(cd "$d" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || cd_=""
+  [ -z "$cd_" ] || [ "$cd_" != "$ours" ] || return 0
+  url=$(git -C "$d" remote get-url origin 2>/dev/null) || url=""
+  [ -z "$url" ] || [ -z "$our_url" ] || [ "$url" != "$our_url" ] || return 0
+  case $url in *buddy-android*) return 0 ;; esac
+  return 1
+}
 if psout=$(ps -eo pid,etime,args 2>/dev/null) || psout=$(ps -o pid,etime,args 2>/dev/null); then E=1
 elif psout=$(ps -o pid,args 2>/dev/null); then E=0
 else die "cannot list processes (ps failed)"; fi
@@ -125,10 +149,7 @@ while read -r pid rest; do
   while [ $# -gt 0 ]; do case $1 in -*) shift ;; *) break ;; esac; done
   repo=${1:-} slug=${2:-}
   [ -n "$slug" ] || continue
-  if [ -d "$repo" ]; then # a pipeline for some other repo does not hold up this release
-    theirs=$(cd "$repo" && cd "$(git rev-parse --git-common-dir 2>/dev/null)" 2>/dev/null && pwd -P) || theirs=""
-    [ -z "$theirs" ] || [ "$theirs" = "$ours" ] || continue
-  fi
+  if [ -d "$repo" ] && ! buddy_clone "$repo"; then continue; fi # a pipeline for some other repo does not hold up this release
   key="$slug $stage"
   case $seen in *"|$key|"*) continue ;; esac # the same pipeline shows as several processes
   seen="$seen$key|"
@@ -205,11 +226,15 @@ elif [ -n "$actions" ]; then rec="$actions, then release once"; code=10
 else rec="ready: release now"; code=0
 fi
 [ -z "$excl" ] || rec="$rec (excluded: $excl)"
+if [ $head_has_main = 0 ]; then
+  rec="update this checkout first (HEAD does not contain origin/main $main7: git merge --ff-only origin/main), then rerun the check: $rec"
+  code=10
+fi
 
 # ---------- output ----------
 if [ $json = 1 ]; then
-  printf '{"exit":%s,"ready":%s,"recommendation":"%s","main":"%s","fork_version":"%s","upstream":{"latest":"%s","base":"%s","newer":%s},' \
-    "$code" "$([ $code = 0 ] && echo true || echo false)" "$(js "$rec")" "$main7" "$(js "$base_ver")" "$(js "$up_tag")" "$(js "$base")" \
+  printf '{"exit":%s,"ready":%s,"recommendation":"%s","head_has_main":%s,"main":"%s","fork_version":"%s","upstream":{"latest":"%s","base":"%s","newer":%s},' \
+    "$code" "$([ $code = 0 ] && echo true || echo false)" "$(js "$rec")" "$([ $head_has_main = 1 ] && echo true || echo false)" "$main7" "$(js "$base_ver")" "$(js "$up_tag")" "$(js "$base")" \
     "$([ $up_newer = 1 ] && echo true || echo false)"
   printf '"prs":[%s],"branches":[%s],"pipelines":[%s],"worktrees":[%s]}\n' "$j_prs" "$j_br" "$j_pp" "$j_wt"
 elif [ $quiet = 1 ]; then

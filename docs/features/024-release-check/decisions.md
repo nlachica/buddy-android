@@ -38,3 +38,14 @@
 ## 2026-11-17 - Number clash
 - The ask named `023-release-check`; the worktree `/root/.buddy/work/bf-023` already carries an unpushed `feat/023-idle-chat-delivers-messages`. Kept the asked name; rename one of them if both ship. (The check itself lists that worktree as unpushed work.)
 - By: Sonnet 5.5
+
+## 2026-11-17 - Codex review fixes (hook and check)
+- Hook parses the command instead of grepping the payload. It takes the `command` string out of the JSON, unescapes it, tokenizes it with shell quoting (so `git tag "v2.1"` is seen, a quoted message is not), splits on `; & | ( ) \n` and skips heredoc bodies. Only two things trigger the check: `git tag` that creates a `v<digit>...` tag (no `-l/--list/-d/--delete/-v/--verify/-n`, option arguments of `-m/-F/-u` skipped) and `git push` of a tag (`v<digit>...` or `refs/tags/...` refspec, or `--tags`) without `--dry-run/-n` or `--delete`. Listing, deleting and dry runs pass. Unparseable shell fails towards blocking, which the override covers.
+- `RELEASE_CHECK_OK=1` counts only in the environment or as a leading env assignment of the very `git` command, never inside a message, a later argument, a comment or another command's prefix.
+- The check runs in the repo the command targets: `git -C dir` (and `cd dir` earlier in the command), directories entered in order so a relative `-C` follows a `cd`. A directory it cannot enter blocks ("cannot enter ..."). The check script itself is the one next to the hook.
+- Check: HEAD must contain `origin/main` (after the fetch). If not: exit 10, "update this checkout first (git merge --ff-only origin/main), then rerun". Exit 0 now means a tag of this commit includes everything merged for the batch. JSON gets `head_has_main`.
+- Check: branches come from `git ls-remote --heads origin` (feat/*, fix/*), not local remote-tracking refs, so a single-branch clone sees them. Their commits are fetched into `refs/release-check/` (pruned each run) for dates and the merged test; an unreadable branch is exit 1.
+- Check: an open PR hides a branch only when its head branch name matches and `headRepositoryOwner` is `nlachica`; another fork's same-named PR does not. A PR without owner info does not hide it (fail safe).
+- Check: a running pipeline counts when its repo argument is any clone of Buddy, whichever clone the check runs in: same git dir, same `origin` URL, an origin URL containing `buddy-android`, or a folder named `buddy-fork*`, `bf-*` or `buddy-android*`. An unresolvable path still counts; a resolvable repo that matches none does not.
+- Tests added for each (`tools/release-check-test.sh`), also run with busybox sh/awk/sed/grep.
+- By: Sonnet 5.5

@@ -26,8 +26,10 @@ To ship a change to Buddy's own code (github flavor only), from a chat with Linu
      "release now": then run the tag commands with `RELEASE_CHECK_OK=1` in front.
    - **Exit 1**: the check itself failed (gh offline or logged out, git error). Fix that or tell Nicholas; don't tag blind.
 
-   A Claude Code hook (`.claude/hooks/release-gate.sh`) runs `tools/release-check.sh --quiet` whenever a command contains
-   `git tag v...` or `git push origin v...` and blocks it unless the check exits 0 or `RELEASE_CHECK_OK=1` is set.
+   A Claude Code hook (`.claude/hooks/release-gate.sh`) runs `tools/release-check.sh --quiet` (in the repo the command
+   targets: `git -C`, or a `cd` before it) whenever a command creates a tag `v<digit>...` or pushes a tag (`v<digit>...`,
+   `refs/tags/...`, `--tags`; not `--dry-run`, not listing or deleting) and blocks it unless the check exits 0 or
+   `RELEASE_CHECK_OK=1` is set (in the environment, or as a leading assignment of that git command).
    Only Nicholas's "release now" and the sync Tag step below justify it; never set it just to get past a block.
 2. In `BuildInfo.java` set `VERSION` to `<upstream>-fork.<n>` (e.g. `2.3.7-fork.2`) and `VERSION_CODE` to
    max(fork, upstream) + 1. Android only installs a higher code. `n` restarts at 1 on a new upstream version (the sync
