@@ -20,21 +20,30 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 
+import com.google.android.gms.wearable.MessageClient;
+import com.google.android.gms.wearable.Wearable;
+
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * Speak to one chat and read what Buddy answers. The words come from the watch's own speech recognizer (the system's
  * voice screen, so this app needs no microphone permission). The conversation itself lives in {@link Talk}; this only
- * draws it.
+ * draws it, above it the chat's latest messages from the phone (/buddy/history, docs/features/022-watch-chat-view/plan.md).
  */
 public class TalkActivity extends Activity {
     private static final int LISTEN = 1, CALL = 2;
     /** With nothing from the phone for this long, the screen may go to sleep; Talk carries on without it. */
     private static final long SCREEN_ON_MS = 120_000;
+    /** The phone's answer to a history request, and the wait for a snapshot that a line of Talk says is coming. */
+    private static final long NO_ANSWER_MS = 8000;
+    /** A request's number: only goes up, also across restarts of the app (the phone ignores older ones). */
+    private static long viewSeq = System.currentTimeMillis();
 
     /** When the watch's recognizer was opened, or 0: ReadAloud keeps off the speaker meanwhile (a recognizer left with Home counts for a minute). */
     private static long listenedAt;
@@ -57,12 +66,34 @@ public class TalkActivity extends Activity {
     private int accent;
     /** A New chat the phone hasn't heard yet (Talk.fresh): no call button; cleared when a YOU line shows. */
     private boolean fresh;
-    private ImageView call;
+    private ImageView call, face;
     /** ChatsActivity.relaunches when this screen was created: a change means a relaunch cleared it. */
     private int opened;
     private final Runnable redraw = this::changed;
     private ScrollView scroll;
-    private LinearLayout body;
+    private LinearLayout body, history, live;
+    private boolean started, listening, snapshot, caughtUp, followNext;
+    /** This screen's current request, the last snapshot's n, and the newest Talk line when it was used. */
+    private long view, lastN;
+    private int mark;
+    /** The used snapshot's messages. */
+    private final List<Talk.Line> rows = new ArrayList<>();
+    /** Why the phone's messages aren't here (no answer, can't reach it), shown under the conversation. */
+    private String note = "";
+    private final Runnable noAnswer = () -> {
+        note = getString(R.string.chats_no_answer);
+        draw();
+    };
+    private final Runnable catchUp = this::request;
+    private final MessageClient.OnMessageReceivedListener listener = e -> {
+        if (!Phone.HISTORY.equals(e.getPath())) return;
+        try {
+            JSONObject in = new JSONObject(new String(e.getData(), StandardCharsets.UTF_8));
+            main.post(() -> onSnapshot(in));
+        } catch (JSONException x) {
+            // not for us
+        }
+    };
 
     @Override
     protected void onCreate(Bundle b) {
@@ -99,6 +130,15 @@ public class TalkActivity extends Activity {
         body.setGravity(Gravity.CENTER_HORIZONTAL);
         int side = Look.sidePad(this);
         body.setPadding(side, Look.dp(this, 4), side, Look.dp(this, 8));
+        face = new ImageView(this);
+        face.setImageResource(R.drawable.bubble_face);
+        body.addView(face);
+        history = new LinearLayout(this); // the phone's messages: rebuilt only when a snapshot comes
+        history.setOrientation(LinearLayout.VERTICAL);
+        body.addView(history, new LinearLayout.LayoutParams(-1, -2));
+        live = new LinearLayout(this); // what Talk has: rebuilt on every change
+        live.setOrientation(LinearLayout.VERTICAL);
+        body.addView(live, new LinearLayout.LayoutParams(-1, -2));
         scroll.addView(body);
         root.addView(scroll, new LinearLayout.LayoutParams(-1, 0, 1f));
 
@@ -132,6 +172,7 @@ public class TalkActivity extends Activity {
         lp.bottomMargin = Look.dp(this, round ? 14 : 6);
         root.addView(buttons, lp);
         setContentView(root);
+        scroll.requestFocus(); // the bezel turns what has focus; the talk screen never asked before
 
         // only quick talk (the Home double-press, "speak") listens by itself: the app list and a pick leave the mic and
         // call buttons to the user. Not when Talk has news for this chat, or Android is recreating us.
@@ -144,7 +185,9 @@ public class TalkActivity extends Activity {
     @Override
     protected void onStart() {
         super.onStart();
+        started = true;
         Talk.onChange = redraw;
+        if (!fresh) request(); // a New chat the phone hasn't made has no messages to ask for; draw() asks when it has
         changed();
         Talk.unseen = false;
     }
@@ -152,6 +195,14 @@ public class TalkActivity extends Activity {
     @Override
     protected void onStop() {
         super.onStop();
+        started = false;
+        main.removeCallbacks(noAnswer);
+        main.removeCallbacks(catchUp);
+        if (listening) {
+            listening = false;
+            Wearable.getMessageClient(this).removeListener(listener);
+            tell(view, true); // fire and forget: the phone also stops by itself after a while
+        }
         if (Talk.onChange == redraw) Talk.onChange = null; // a newer screen may have taken it already
         main.removeCallbacks(dim);
         // Back or a swipe while showing: no more waiting. Not a relaunch from the launcher (it clears this screen too):
@@ -209,6 +260,7 @@ public class TalkActivity extends Activity {
         ArrayList<String> heard = data == null ? null : data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
         if (request != LISTEN || result != RESULT_OK || heard == null || heard.isEmpty()) return; // cancelled: the mic button is there
         final String text = heard.get(0);
+        followNext = true; // the user's own words and the answer to them are what to see
         final boolean isNew = fresh; // the chat may never exist: Talk remembers it when the phone has heard
         if (!isNew) ChatsActivity.remember(this, chat, title, accent);
         Talk.begin(this, chat, title, accent, isNew, (valid, done) -> {
@@ -263,31 +315,144 @@ public class TalkActivity extends Activity {
         draw();
     }
 
+    /**
+     * Asks the phone for this chat's latest messages and, while the screen shows, for each new one: listening first, so
+     * that a quick answer can't come before anyone is there. A new `view` each time (the phone ignores older ones).
+     */
+    private void request() {
+        main.removeCallbacks(noAnswer);
+        main.removeCallbacks(catchUp);
+        final long mine = view = ++viewSeq;
+        note = "";
+        main.postDelayed(noAnswer, NO_ANSWER_MS); // armed before sending; a snapshot or an error cancels it
+        if (listening) {
+            tell(mine, false);
+            return;
+        }
+        listening = true;
+        Wearable.getMessageClient(this).addListener(listener)
+                .addOnSuccessListener(v -> {
+                    if (!listening) Wearable.getMessageClient(this).removeListener(listener); // left meanwhile
+                    else if (view == mine) tell(mine, false);
+                })
+                .addOnFailureListener(e -> {
+                    if (view == mine) failed(getString(R.string.phone_unreachable));
+                });
+    }
+
+    private void tell(long mine, boolean stop) {
+        try {
+            JSONObject msg = new JSONObject().put("chat", chat).put("view", mine);
+            if (stop) msg.put("stop", true);
+            Phone.send(this, Phone.HISTORY, msg, () -> stop || (started && view == mine), error -> {
+                if (error != null && !stop && started && view == mine) failed(error);
+            });
+        } catch (JSONException e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private void failed(String why) {
+        main.removeCallbacks(noAnswer);
+        note = why;
+        draw();
+    }
+
+    /** The phone's messages of this chat: they replace the rows, and the reading place is kept (see anchor). */
+    private void onSnapshot(JSONObject in) {
+        if (!started || !takes(in.optString("chat"), in.optLong("view"), in.optLong("n"), chat, view, lastN)) return;
+        lastN = in.optLong("n");
+        main.removeCallbacks(noAnswer);
+        main.removeCallbacks(catchUp);
+        caughtUp = false;
+        note = "";
+        List<Talk.Line> old = new ArrayList<>(rows);
+        rows.clear();
+        JSONArray ms = in.optJSONArray("messages");
+        for (int k = 0; ms != null && k < ms.length(); k++) {
+            JSONObject m = ms.optJSONObject(k);
+            if (m == null) continue;
+            String kind = m.optString("kind");
+            rows.add(new Talk.Line("you".equals(kind) ? Talk.YOU : "error".equals(kind) ? Talk.ERROR : Talk.BUDDY, m.optString("text")));
+        }
+        mark = Talk.Line.count; // the watch's own lines made after this one are not in it
+        boolean first = !snapshot;
+        snapshot = true;
+        // reading place: the end if the user is at it; otherwise the top-most row in view, found again in the new rows
+        final boolean follow = first || atEnd();
+        int top = -1, offset = 0;
+        for (int k = 0; !follow && k < history.getChildCount(); k++) {
+            View r = history.getChildAt(k);
+            if (history.getTop() + r.getBottom() > scroll.getScrollY()) {
+                top = k;
+                offset = history.getTop() + r.getTop() - scroll.getScrollY();
+                break;
+            }
+        }
+        history.removeAllViews();
+        for (Talk.Line l : rows) history.addView(line(l.kind, l.text));
+        final int at = top < 0 || top >= old.size() ? -1 : anchor(old, top, rows), keep = offset;
+        final boolean place = !follow && top >= 0;
+        drawLive();
+        scroll.post(() -> {
+            if (follow) scroll.fullScroll(View.FOCUS_DOWN);
+            else if (place) scroll.scrollTo(0, history.getTop() + (at < 0 ? 0 : history.getChildAt(at).getTop() - keep));
+        });
+    }
+
+    /** The user is at the end (within 48dp of it): new things scroll into view (012's rule). */
+    private boolean atEnd() {
+        return body.getHeight() - (scroll.getScrollY() + scroll.getHeight()) <= Look.dp(this, 48);
+    }
+
+    private TextView line(int kind, String text) {
+        TextView t = Look.text(this, kind == Talk.YOU ? getString(R.string.talk_you, text) : text, 15,
+                kind == Talk.ERROR ? Look.ERR : kind == Talk.YOU ? Look.TEXT2 : Look.TEXT);
+        t.setPadding(0, Look.dp(this, 8), 0, 0);
+        return t;
+    }
+
     private void draw() {
-        body.removeAllViews();
+        final boolean follow = followNext || atEnd();
+        followNext = false;
+        drawLive();
+        if (follow) scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+    }
+
+    /** Everything under the phone's messages: Talk's lines the snapshot doesn't hold, the status, what went wrong. */
+    private void drawLive() {
+        live.removeAllViews();
         boolean mine = chat.equals(Talk.chat);
         boolean working = mine && Talk.waiting;
-        ImageView face = new ImageView(this);
         face.setImageResource(working ? R.drawable.bubble_face_thinking : R.drawable.bubble_face);
-        body.addView(face);
         if (mine) {
+            boolean ahead = false; // a message of the phone's own that its snapshot hasn't come with yet
             for (Talk.Line l : Talk.lines) {
-                if (l.kind == Talk.YOU) fresh = false; // only /buddy/heard adds one: the chat exists
-                TextView t = Look.text(this, l.kind == Talk.YOU ? getString(R.string.talk_you, l.text) : l.text, 15,
-                        l.kind == Talk.ERROR ? Look.ERR : l.kind == Talk.YOU ? Look.TEXT2 : Look.TEXT);
-                t.setPadding(0, Look.dp(this, 8), 0, 0);
-                body.addView(t);
+                if (l.kind == Talk.YOU && fresh) { // only /buddy/heard adds one: the chat exists
+                    fresh = false;
+                    if (started) request(); // so it has messages to show, and new ones from the phone's side
+                }
+                ahead |= snapshot && l.mirror && l.seq > mark;
+            }
+            for (Talk.Line l : below(Talk.lines, snapshot, mark)) live.addView(line(l.kind, l.text));
+            if (ahead && !caughtUp) { // the snapshot with it should be right behind: if not in 8 s, ask again, once
+                caughtUp = true;
+                main.postDelayed(catchUp, NO_ANSWER_MS);
             }
             String status = !working ? "" : !Talk.heard ? getString(R.string.talk_sending)
                     : sleepy ? getString(R.string.talk_sleepy) : Talk.status;
             if (!status.isEmpty()) {
                 TextView t = Look.text(this, status, 13, Look.MUTED);
                 t.setPadding(0, Look.dp(this, 8), 0, 0);
-                body.addView(t);
+                live.addView(t);
             }
         }
-        if (!problem.isEmpty()) body.addView(Look.text(this, problem, 14, Look.ERR));
+        if (!note.isEmpty()) {
+            TextView t = Look.text(this, note, 13, Look.MUTED);
+            t.setPadding(0, Look.dp(this, 8), 0, 0);
+            live.addView(t);
+        }
+        if (!problem.isEmpty()) live.addView(Look.text(this, problem, 14, Look.ERR));
         call.setVisibility(fresh ? View.GONE : View.VISIBLE);
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
     }
 }
