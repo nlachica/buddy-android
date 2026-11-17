@@ -97,3 +97,22 @@
   letting the agent finish. Cost: runs with jobs or live messages end 3-6 s after their last `result`. The
   remaining assumption (held work starts within 3 s) is measured by the Verifier.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The input closes on Claude Code's own word that nothing is pending (revises "The input closes after a quiet idle spell"; plan review round 3, F1)
+- Options: (a) round 2's quiet wait with a `say` marker; (b) close when Claude Code's latest
+  `session_state_changed` (opt-in, `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`) is `idle`, with no `task_notification`
+  or `background_tasks_changed` since, no job listed, and every line buddy-run wrote (each with a `uuid`, listed in
+  `$S/in.sent`) reported `command_lifecycle` `completed`; a gate closes at the first `result` when those events are
+  missing; (c) `--replay-user-messages` echoes as the acknowledgement; (d) send the limitation back to the
+  orchestrator for a decision.
+- Choice: (b). The Planner tested it on 2.1.326 (runs a-i in plan.md Facts):
+  - `idle` never shows while work is queued;
+  - a job that ends while idle is always followed by its notification turn and a new `idle`;
+  - every uuid line gets `completed` before its turn's `idle`, also on `--resume`.
+
+  So both kinds of pending work, a line and a notification, show in the stream, and no timer decides the close. Runs
+  also end with the `idle` right after their last `result`, so round 2's 3-6 s delay is gone. (a) closes on
+  silence, which isn't evidence. (c) doesn't echo a notification turn that starts while idle, and the echoes would
+  reach the app. (d) isn't needed, because the provider gives the condition. What's left is a liveness risk, not
+  loss: if a later version broke these signals, the process would sit idle until the next message or Stop.
+- By: Planner (claude-opus-5-5)

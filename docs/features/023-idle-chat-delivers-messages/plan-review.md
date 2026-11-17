@@ -91,3 +91,52 @@ F1 [major] The quiet timer still closes input with accepted work pending - `clos
 Review covered the plan, prior responses and relevant runner/app code. No implementation or device tests were run; the delayed-start sequence above is a trace of the proposed state machine.
 
 VERDICT: REVISE
+
+### Planner response (round 3)
+
+F1: accepted. No timer decides the close any more: Claude Code's own events do. I checked the events first, with
+Claude Code 2.1.326 and Haiku in Buddy's Linux, a FIFO harness and nine timestamped runs (plan.md Facts):
+- With `CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1`, Claude Code sends `session_state_changed` `running`/`idle`. `idle`
+  never shows while work is queued:
+  - lines queued at a `result` ran next, `result` → `system/init`, with no `idle` between (runs d, e);
+  - a job that ended mid-turn was folded into that turn (c).
+- A job that ends while idle gives `task_notification` and `background_tasks_changed []`, then `running` →
+  notification turn → `idle` (b, f, h).
+- A line that carries a `uuid` gets `command_lifecycle` `queued`/`started`/`completed` for it, before its turn's
+  `idle`, also on `--resume`. Notification turns get none (g, h, i).
+
+New close rule in `stream_claude`:
+- Every line buddy-run writes carries a uuid, listed in `$S/in.sent`. Uuids reported `completed` go to `$S/in.done`.
+- Under the lock, the input closes only when all of these hold:
+  - the latest state is `idle`, with no `task_notification` or `background_tasks_changed` since;
+  - no job is listed;
+  - every sent uuid is done.
+- The `QUIET` wait and the `in.said` marker are gone. So is round 2's 3-6 s later end: runs close at the `idle`
+  right after their last `result`.
+
+Your trace:
+- A's uuid is in `in.sent` and not `completed`, so no close happens, however long A waits. A's turn lists its job, and
+  B's `say` succeeds.
+- Queued notification: the job's end clears `idle`. The next `idle` comes after the notification turn, which lists any
+  job it starts.
+
+A Claude Code without these events closes at its first `result` (a gate): today's behaviour, with no live input. What
+is left is a liveness risk, not loss. If a later version broke these signals, the process would sit idle until the
+next message or Stop (Risks).
+
+`--replay-user-messages` was the other candidate. It doesn't echo a notification turn that starts while idle (b, f).
+
+Tests:
+- `claude_queued` and `claude_notify` now hold the next `system/init` back for 7 s. That is longer than round 2's
+  whole close, so round 2 fails both.
+- In `queued`, A sits unread in the FIFO after `idle` has been sent, which is the hardest case.
+- In both, the late turn then starts a job, and B or ping must get through before that job ends.
+- New `legacy` case for the gate.
+- Real-agent check: (a2) checks that every uuid in `in.sent` is in `in.done` and the input is still open; (b) expects
+  `buddy_done` within 3 s of the last `result`.
+
+Nothing goes back to the orchestrator: the provider gives the condition.
+
+Updated: plan.md Facts, Approach 1 and 2, "Why this meets the brief", Alternatives, Steps 1-2, Test plan rows 1 and 3,
+the real-agent check, Risks and Open questions. decisions.md: new entry "The input closes on Claude Code's own word
+that nothing is pending".
