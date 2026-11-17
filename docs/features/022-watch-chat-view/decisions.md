@@ -53,3 +53,9 @@
 
 ## Orchestrator decision after plan round 3 (no APPROVE)
 Round 3 F1 accepted as stated, overriding plan.md where they conflict: the phone keeps the latest `view` per node in the existing registration state; it ignores any start or stop older than that, and remembers a stopped view so a delayed start can't revive it; a newer start always wins. Tests: start 2 → start 1 → stop 1 (view 2 still gets updates); stop 2 → delayed start 2 (stays stopped); newer start after a stop works. Why: small, contained, and no new transport, so another planning round isn't worth it.
+
+## 2026-11-17 - Coder: details the plan left open
+- Registration rule (round 3 F1): `WatchLink.register(map, node, chat, view, stop, now)` keeps one entry per node, a stopped one too (`chat == null`). Older `view` ignored; a start of an already stopped `view` ignored; a newer start or stop always wins. Entries, stopped ones included, lapse after the same 30 min as a registration, so a watch whose clock went back is not ignored for ever. Four JVM tests (the three the orchestrator named, plus the lapse).
+- The snapshot rule is a pure `TalkActivity.takes(...)`, next to `below()` and `anchor()`, so it is tested too. These three went into step 4 with their tests (tests that call them would not compile otherwise); step 5 is the view code only.
+- `mirror` is set on the last line right after `lines.add`/`say(...)` at `/buddy/heard` and `/buddy/reply` (one line each in `Talk.java`), instead of a new constructor argument or a `say` parameter. `Line.count` is package-private so the screen can read the newest `seq` for `mark`.
+- Under a snapshot the screen asks again (`catchUp`) when a mirror line is newer than `mark`; `Talk.fresh` clearing calls `request()` from `drawLive()`, the one place that sees the first YOU line.
