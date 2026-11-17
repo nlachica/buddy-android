@@ -22,8 +22,7 @@ To ship a change to Buddy's own code (github flavor only), from a chat with Linu
    installer, where the user taps Update. Buddy restarts on the new version; chats and settings stay.
 
 `install_apk` refuses Buddy's own APK on purpose: `update_buddy` is the one route, so it always has the card.
-Buddy's settings are read and changed with the `buddy_settings` tool (also one approval card per change, except that a chat set to Routine allowed changes ordinary look-and-sound settings with
-no card and a note in the chat; keys, permissions, safety and approvals, Linux tools and MCP servers still card), including MCP server
+Buddy's settings are read and changed with the `buddy_settings` tool (also one approval card per change, except in a chat set to Bypass, where only keys, approvals modes, Safety settings and a chat's allowed apps still card), including MCP server
 and API keys, read from a file in Buddy's Linux and never shown.
 
 ## Bringing in official Buddy

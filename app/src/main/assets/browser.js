@@ -303,25 +303,40 @@
     var form = el.form || el.closest('form');
     var submits = el.tagName === 'BUTTON' ? (el.type || 'submit').toLowerCase() === 'submit' && !!form
       : el.tagName === 'INPUT' && /^(submit|image)$/i.test(el.type);
+    return {
+      x: x, y: y, w: r.width, h: r.height, covered: covered, label: label(el), role: role(el) || el.tagName.toLowerCase(),
+      ids: clean([el.id, el.getAttribute('name'), el.getAttribute('data-testid'), el.className && el.className.baseVal === undefined ? el.className : ''].join(' '), 200),
+      title: clean(el.getAttribute('title') || el.getAttribute('aria-label') || el.value || '', 60),
+      submits: submits, payForm: payForm(form), form: formName(form),
+      href: el.getAttribute('href') || '',
+      disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true' || el.getAttribute('aria-busy') === 'true'),
+      // what's typed in the field that has the focus (a comment about to be posted), for the approval card
+      draft: B.draft(el)
+    };
+  };
+
+  // The text of the field that has the focus, whole (the phone judges all of it, the card shows 300 characters); not
+  // the field `not`, and '' for a password or payment field
+  B.draft = function (not) {
+    var a = document.activeElement;
+    if (!a || a === document.body || a === not) return '';
+    return clean(a.isContentEditable ? a.innerText : /^(INPUT|TEXTAREA)$/.test(a.tagName) && !B.sensitive(a) ? a.value : '');
+  };
+
+  // Is one of the form's fields a payment field?
+  function payForm(form) {
     var pay = false;
     if (form) {
       var fs = form.querySelectorAll('input,select');
       for (var i = 0; i < fs.length; i++) if (B.sensitive(fs[i]) === 'payment') pay = true;
     }
-    return {
-      x: x, y: y, w: r.width, h: r.height, covered: covered, label: label(el), role: role(el) || el.tagName.toLowerCase(),
-      ids: clean([el.id, el.getAttribute('name'), el.getAttribute('data-testid'), el.className && el.className.baseVal === undefined ? el.className : ''].join(' '), 200),
-      title: clean(el.getAttribute('title') || el.getAttribute('aria-label') || el.value || '', 60),
-      submits: submits, payForm: pay, form: form ? clean((form.getAttribute('action') || '') + ' ' + (form.id || '') + ' ' + (form.getAttribute('name') || ''), 200) : '',
-      href: el.getAttribute('href') || '',
-      disabled: !!(el.disabled || el.getAttribute('aria-disabled') === 'true' || el.getAttribute('aria-busy') === 'true'),
-      // what's typed in the field that has the focus (a comment about to be posted), for the approval card
-      draft: (function (a) {
-        if (!a || a === document.body || a === el) return '';
-        return clean(a.isContentEditable ? a.innerText : /^(INPUT|TEXTAREA)$/.test(a.tagName) && !B.sensitive(a) ? a.value : '', 300);
-      })(document.activeElement)
-    };
-  };
+    return pay;
+  }
+
+  // The form's action, id and name, which say "checkout"
+  function formName(form) {
+    return form ? clean((form.getAttribute('action') || '') + ' ' + (form.id || '') + ' ' + (form.getAttribute('name') || ''), 200) : '';
+  }
 
   // Did the next click reach the item? A page that re-draws under the pointer between the press and the release (a
   // text box losing its focus re-renders the form) loses the click: no click event reaches the item.
@@ -401,7 +416,8 @@
     }
     var search = r === 'searchbox' || el.getAttribute('role') === 'searchbox' || /search|query|^q$|suche|recherche|buscar/i.test((el.name || '') + ' ' + (el.id || '') + ' ' + (el.getAttribute('aria-label') || '') + ' ' + (el.getAttribute('placeholder') || ''))
       || !!(form && /search/i.test(form.getAttribute('role') || form.getAttribute('action') || ''));
-    return {ok: true, label: label(el), multiline: el.tagName === 'TEXTAREA' || el.isContentEditable, search: search, submitLabel: btn};
+    return {ok: true, label: label(el), multiline: el.tagName === 'TEXTAREA' || el.isContentEditable, search: search, submitLabel: btn,
+      payForm: payForm(form), form: formName(form)};
   };
 
   // Pick an option of a select by its text or value

@@ -40,7 +40,7 @@ public class ChatApprovalsSettingTest {
         AtomicReference<String> stored = new AtomicReference<>("");
         SettingsTool.Scalar s = row(stored, new AtomicInteger(), "Trip", null);
         assertEquals("chat/c1/approvals", s.name);
-        String all = "  (ask (Ask), routine (Routine allowed), strict (Always ask))";
+        String all = "  (ask (Ask), routine (Routine allowed), strict (Always ask), bypass (Bypass))";
         assertEquals("chat/c1/approvals = ask" + all, s.read());
         stored.set("routine");
         assertEquals("chat/c1/approvals = routine" + all, s.read());
@@ -58,7 +58,7 @@ public class ChatApprovalsSettingTest {
                 s.check(bad);
                 throw new AssertionError(bad);
             } catch (IllegalArgumentException e) {
-                assertTrue(e.getMessage(), e.getMessage().contains("takes: ask (Ask), routine (Routine allowed), strict (Always ask)"));
+                assertTrue(e.getMessage(), e.getMessage().contains("takes: ask (Ask), routine (Routine allowed), strict (Always ask), bypass (Bypass)"));
             }
         }
     }
@@ -165,5 +165,122 @@ public class ChatApprovalsSettingTest {
         assertTrue(s, lines[2].contains("approvals strict,"));
         assertTrue(s, lines[3].contains("approvals n/a (notification rule's chat),"));
         assertFalse(s, s.contains("chat/sub"));
+    }
+
+    /** 020: the decision path of BuddyService.askConfirm for a setting, with the user's card counted. */
+    private static String bypassEdit(SettingsTool.Setting s, String v, String mode, boolean ruleRun, boolean keyFile,
+                                     AtomicInteger cards, boolean answerYes) throws Exception {
+        return edit(s, v, card -> {
+            if (Bypass.skips(!SettingsTool.keepsCard(s.name, keyFile), mode, ruleRun)) return BuddyService.BYPASSED;
+            cards.incrementAndGet();
+            return answerYes ? YES : "DENIED: no";
+        });
+    }
+
+    private static SettingsTool.Scalar scalar(String name, AtomicReference<String> stored, AtomicInteger writes, String... values) {
+        return new SettingsTool.Scalar(name, stored::get, v -> {
+            writes.incrementAndGet();
+            stored.set(v);
+        }, "", values);
+    }
+
+    @Test
+    public void inBypassOrdinarySettingsGoThroughAndMoneySwitchesKeepTheirCard() throws Exception {
+        AtomicInteger cards = new AtomicInteger(), writes = new AtomicInteger();
+        AtomicReference<String> audio = new AtomicReference<>("speaker");
+        String r = bypassEdit(scalar("audio_device", audio, writes, "auto", "speaker"), "auto", "bypass", false, false, cards, true);
+        assertTrue(r, r.startsWith("Changed"));
+        assertEquals(0, cards.get());
+        assertEquals(1, writes.get());
+        assertEquals("auto", audio.get());
+
+        // each of these cards, and on a denial writes nothing
+        AtomicReference<String> rule = new AtomicReference<>(null);
+        Object[][] keeps = {
+                {SettingsTool.button("com.bank.app", "Send", "Bank", true, rule::get, v -> writes.incrementAndGet()), "allow"},
+                {SettingsTool.button(null, "Pay", "", true, rule::get, v -> writes.incrementAndGet()), " ALLOW "},
+                {scalar("builtin_risky_words", new AtomicReference<>("on"), writes, "on", "off"), " OFF "},
+                {row(new AtomicReference<>("bypass"), writes, "Trip", null), " Ask "},
+                {row(new AtomicReference<>("ask"), writes, "Trip", null), " Bypass "},
+        };
+        int before = writes.get();
+        for (Object[] k : keeps) {
+            cards.set(0);
+            String d = bypassEdit((SettingsTool.Setting) k[0], (String) k[1], "bypass", false, false, cards, false);
+            assertTrue(d, d.startsWith("Not changed"));
+            assertEquals(k[0].toString(), 1, cards.get());
+        }
+        assertEquals(before, writes.get());
+    }
+
+    @Test
+    public void removingAnAlwaysAskRuleKeepsItsCardAndItsRuleOnDenial() throws Exception {
+        AtomicInteger cards = new AtomicInteger(), writes = new AtomicInteger();
+        AtomicReference<String> rule = new AtomicReference<>("ask");
+        String d = bypassEdit(SettingsTool.button(null, "Continue", "", true, rule::get, v -> {
+            writes.incrementAndGet();
+            rule.set(v);
+        }), "", "bypass", false, false, cards, false);
+        assertTrue(d, d.startsWith("Not changed"));
+        assertEquals(1, cards.get());
+        assertEquals(0, writes.get());
+        assertEquals("ask", rule.get());
+    }
+
+    @Test
+    public void otherModesAndRuleRunsSkipNoSettingCard() throws Exception {
+        for (Object[] m : new Object[][]{{"routine", false}, {"", false}, {"strict", false}, {"bypass", true}}) {
+            AtomicInteger cards = new AtomicInteger();
+            bypassEdit(scalar("audio_device", new AtomicReference<>("speaker"), new AtomicInteger(), "auto", "speaker"), "auto",
+                    (String) m[0], (Boolean) m[1], false, cards, true);
+            assertEquals(m[0] + " " + m[1], 1, cards.get());
+        }
+    }
+
+    @Test
+    public void bypassedIsAnApprovalButNotASelfApproval() throws Exception {
+        assertTrue(BuddyService.BYPASSED.startsWith("APPROVED"));
+        assertFalse(BuddyService.selfApproved(BuddyService.BYPASSED));
+        assertEquals(null, SettingsTool.approval(card -> BuddyService.BYPASSED, "x"));
+    }
+
+    @Test
+    public void keepsCardByName() {
+        for (String n : new String[]{"mcp/notes/key", "service/deepseek/key", "chat/c1/approvals", "app/com.x", "button/*/Pay",
+                "button/com.bank.app/Send", "button/*/Delete", "chat/c1/allowed/com.whatsapp", "builtin_risky_words"}) {
+            assertTrue(n, SettingsTool.keepsCard(n, false));
+        }
+        assertTrue(SettingsTool.keepsCard("mcp/new", true));
+        for (String n : new String[]{"audio_device", "reviewer", "reviewer_model/codex", "phone_commands", "linux_tools_new_chats",
+                "agents_tap_buddy", "mcp/notes", "service/deepseek", "skill/x", "rule/abc", "chat/c1/schedule",
+                "chat/c1/linux_tools", "default_agent", "default_model/claude"}) {
+            assertFalse(n, SettingsTool.keepsCard(n, false));
+        }
+    }
+
+    @Test
+    public void bypassIsAChoiceWithAnEffectAndShowsInTheListing() throws Exception {
+        AtomicReference<String> stored = new AtomicReference<>("ask");
+        SettingsTool.Scalar s = row(stored, new AtomicInteger(), "Trip", null);
+        assertEquals("bypass", s.check("BYPASS"));
+        assertTrue(s.read(), s.read().contains("bypass (Bypass)"));
+        List<String> cards = new ArrayList<>();
+        edit(s, "bypass", card -> {
+            cards.add(card);
+            return YES;
+        });
+        assertEquals("bypass", stored.get());
+        assertTrue(cards.get(0), cards.get(0).contains("bypass (Bypass): no approval cards"));
+        assertTrue(cards.get(0), cards.get(0).contains("still ask"));
+        Sessions.Session c = new Sessions.Session("c1", "claude");
+        c.approvals = "bypass";
+        StringBuilder out = new StringBuilder();
+        SettingsTool.chatLines(out, java.util.Collections.singletonList(c), null, x -> true);
+        assertTrue(out.toString(), out.toString().contains("approvals bypass"));
+        // 019's sentence is gone from Routine allowed's card
+        edit(row(new AtomicReference<>("ask"), new AtomicInteger(), "Trip", null), "routine", card -> {
+            assertFalse(card, card.contains("Ordinary Buddy settings"));
+            return YES;
+        });
     }
 }

@@ -125,7 +125,7 @@ final class BrowserTools {
         if (why != null) return text(why);
         Browser.used();
         Browser.agentUsed(key);
-        String dialog = pendingDialog(key, false);
+        String dialog = pendingDialog(key, false, false);
         if (dialog != null && !"browser_read".equals(name)) return text(dialog);
         switch (name) { // the bubble says what's going on (a tap says its button once it's known)
             case "browser_open": step(key, svc.getString(R.string.activity_browser_opening), a.optString("url")); break;
@@ -144,7 +144,7 @@ final class BrowserTools {
             case "browser_screenshot": return screenshot(key);
             case "browser_back": {
                 if (!Browser.back(key)) return text("There's no previous page in this tab.");
-                String d = pendingDialog(key, false);
+                String d = pendingDialog(key, false, false);
                 return text(d != null ? d : after(key, "Went back.", null));
             }
             case "browser_tabs": return text(tabs(key, a));
@@ -169,7 +169,7 @@ final class BrowserTools {
         }
         String err = Browser.navigate(key, url);
         if (err != null) return "Couldn't open " + url + ": " + err + ". Check the address, or use the phone instead.";
-        String dialog = pendingDialog(key, false);
+        String dialog = pendingDialog(key, false, false);
         return (dialog == null ? "" : dialog + "\n\n") + read(key, 0);
     }
 
@@ -245,10 +245,13 @@ final class BrowserTools {
         boolean approved = false;
         String risky = riskyTap(t, before == null ? "" : before[0]);
         boolean allow = Guard.listed(svc, "allow", label, null); // the user said: never ask for this one
-        if (!allow && (Guard.listed(svc, "ask", label, null) || (Prefs.guardBuiltin(svc) && risky != null))) {
+        boolean userAsks = Guard.listed(svc, "ask", label, null);
+        // 020: Bypass keeps the card for money (the page, the item) or a secret in the whole draft, or a listed button
+        boolean money = userAsks || money(t) || moneySite(key) || Bypass.secretOrMoney(t.optString("draft", ""));
+        if (!allow && (userAsks || (Prefs.guardBuiltin(svc) && risky != null))) {
             String name = label.isEmpty() ? risky : label;
             String blocked = approve("Tap “" + name + "”", svc.getString(R.string.browser_card_tap, name, host),
-                    t.optString("draft", ""), Guard.sendsText(name));
+                    t.optString("draft", ""), Guard.sendsText(name), money);
             if (blocked != null) return blocked;
             approved = true;
         }
@@ -257,7 +260,7 @@ final class BrowserTools {
         Browser.eval(key, "__buddy.armClick(" + ref + ")");
         Browser.click(key, t.getDouble("x"), t.getDouble("y"));
         Thread.sleep(500);
-        String dialog = pendingDialog(key, approved), again = "";
+        String dialog = pendingDialog(key, approved, money), again = "";
         if (dialog == null && lostClick(key, before)) {
             // the page re-drew under the pointer (a text box losing its focus re-renders the form), so the item never
             // got the click: once more where it is now (drawn again as a new element, it's the one with the same role
@@ -270,7 +273,7 @@ final class BrowserTools {
                 Browser.eval(key, "__buddy.armClick(" + ref + ")");
                 Browser.click(key, t2.getDouble("x"), t2.getDouble("y"));
                 Thread.sleep(500);
-                dialog = pendingDialog(key, approved);
+                dialog = pendingDialog(key, approved, money);
                 again = dialog == null && lostClick(key, before)
                         ? " The tap didn't reach it, twice (the page moved under it); take a browser_screenshot to see why."
                         : " (The first tap didn't reach it, as the page moved under it, so Buddy tapped once more.)";
@@ -337,14 +340,16 @@ final class BrowserTools {
         // Enter in a search box only searches; in a message box or a form sent by a risky button it sends
         String sendLabel = f.optString("submitLabel", "");
         boolean risky = !f.optBoolean("search") && (f.optBoolean("multiline") || Guard.riskyText(sendLabel) != null);
+        // 020: Bypass keeps the card for a payment form or money in the form, the page or the field's whole text
+        boolean money = money(f) || moneySite(key) || Bypass.secretOrMoney(String.valueOf(Browser.eval(key, "__buddy.draft()")));
         if (risky && Prefs.guardBuiltin(svc)) {
-            String blocked = approve("Press Enter to send", svc.getString(R.string.browser_card_enter, host(key)), text, true);
+            String blocked = approve("Press Enter to send", svc.getString(R.string.browser_card_enter, host(key)), text, true, money);
             if (blocked != null) return result + " Not sent: " + blocked;
         }
         String[] before = Browser.page(key);
         Browser.key(key, "Enter");
         Thread.sleep(500);
-        String dialog = pendingDialog(key, risky);
+        String dialog = pendingDialog(key, risky, money);
         if (dialog == null) Browser.settle(key, 10_000);
         return after(key, result + " Pressed Enter.", before) + (dialog == null ? "" : "\n" + dialog);
     }
@@ -458,14 +463,36 @@ final class BrowserTools {
      * otherwise the tool's answer. what: the action in English, for the agent; card: the card's line; draft: text it
      * would send, shown on the card (may be empty).
      */
-    private String approve(String what, String card, String draft, boolean send) throws InterruptedException {
+    private String approve(String what, String card, String draft, boolean send, boolean money) throws InterruptedException {
         if (Guard.takeApproval(send)) return null;
         String summary = draft == null || draft.trim().isEmpty() ? card
                 : svc.getString(R.string.tools_card_detail, card, svc.getString(R.string.tools_card_quote, ChatHub.clip(draft.trim(), 300)));
-        String answer = svc.askConfirm(summary, false);
+        String answer = svc.askConfirm(summary, false, !money && !Bypass.secretOrMoney(summary));
         if (answer.startsWith("APPROVED")) return null;
         if (answer.startsWith("CHANGES")) return "Not done: the user wants changes first. " + answer;
         return "BLOCKED by Buddy's safety rule: the user did not approve “" + what + "”. Don't retry it; ask the user what they want.";
+    }
+
+    /** Does a page's "Are you sure?" dialog go to the user: it is a risky one, and no tap approved it (or this is a Bypass chat). */
+    static boolean dialogAsks(boolean approved, boolean bypass, String msg) {
+        return RISKY_DIALOG.matcher(msg).find() && (!approved || bypass);
+    }
+
+    /** 020: does this item, or the field's form, point at money: a payment form, or money in its form, title, label, ids? */
+    static boolean money(JSONObject o) {
+        return o.optBoolean("payForm") || CHECKOUT.matcher(o.optString("form")).find() || Bypass.secretOrMoney(o.optString("form"),
+                o.optString("title"), o.optString("label"), o.optString("ids"), o.optString("submitLabel"));
+    }
+
+    /** 020: is the chat's page a money site: a bank or payment name for its host, or money in its address? */
+    private boolean moneySite(String key) {
+        String[] p = Browser.page(key);
+        return Guard.moneyApp(svc, host(key)) || moneyUrl(p == null ? "" : p[0]);
+    }
+
+    /** 020: does an address name money: a checkout page as riskyTap reads one, or a money word? */
+    static boolean moneyUrl(String url) {
+        return CHECKOUT.matcher(url).find() || Bypass.secretOrMoney(url);
     }
 
     /**
@@ -473,7 +500,7 @@ final class BrowserTools {
      * the page the first time, an "Are you sure?" about something risky goes to the user unless the tap that opened it was
      * approved. What happened, or null for none.
      */
-    private String pendingDialog(String key, boolean approved) throws Exception {
+    private String pendingDialog(String key, boolean approved, boolean money) throws Exception {
         JSONObject d = Browser.dialog(key);
         if (d == null) return null;
         String type = d.optString("type"), msg = ChatHub.clip(d.optString("message", ""), 300);
@@ -500,9 +527,13 @@ final class BrowserTools {
             Browser.answerDialog(key, false);
             return "The page asked for text in a dialog (“" + msg + "”); Buddy cancelled it. Ask the user if it's needed.";
         }
-        boolean ok = approved || !RISKY_DIALOG.matcher(msg).find();
+        // 020: in a Bypass chat an earlier approval doesn't cover the dialog: it is judged on its own whole text and site
+        String full = d.optString("message", "");
+        boolean bypass = Bypass.on(svc, McpServer.CALLER_CHAT.get());
+        boolean ok = !dialogAsks(approved, bypass, bypass ? full : msg);
         if (!ok) {
-            String answer = svc.askConfirm(svc.getString(R.string.browser_card_dialog, host(key), msg), false);
+            String answer = svc.askConfirm(svc.getString(R.string.browser_card_dialog, host(key), msg), false,
+                    !money && !moneySite(key) && !Bypass.secretOrMoney(full));
             ok = answer.startsWith("APPROVED");
         }
         Browser.answerDialog(key, ok);

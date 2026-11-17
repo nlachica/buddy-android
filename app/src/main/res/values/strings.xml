@@ -453,6 +453,8 @@
     <!-- Note in the chat when the countdown ran out. Keep the mark ✓ and the space after it. %1$s = what was approved (shortened). -->
     <string name="card_note_auto_approved">✓ Approved after the countdown: %1$s</string>
     <string name="card_note_rule_approved">✓ Approved by your rule, without asking: %1$s</string>
+    <!-- 020 (fork): a step a chat set to Bypass went ahead with, no card. %1$s: what it was -->
+    <string name="card_note_bypassed">✓ Approved by Bypass, without asking: %1$s</string>
     <!-- Note in the chat after the user tapped the countdown to stop it: the card now waits for them. -->
     <string name="card_note_countdown_stopped">Countdown stopped: waiting for your OK</string>
 
@@ -516,6 +518,9 @@
     <string name="chat_approvals_routine">Routine allowed</string>
     <string name="chat_approvals_routine_info">Routine steps go ahead in every app without a card: sending a message, or a step the reviewer would ask about. Each one is noted in the chat. Paying, buying, deleting, installing, passwords and security settings still ask you, and so does everything in banking and payment apps, Settings and app stores.</string>
     <string name="chat_approvals_strict">Always ask</string>
+    <!-- 020 (fork): the fourth mode. English only, like the fork's other strings. -->
+    <string name="chat_approvals_bypass">Bypass</string>
+    <string name="chat_approvals_bypass_info">No approval cards: the agent does what you ask, including changing Buddy\'s settings, running phone commands and installing. Each step is noted in the chat. Still asks: paying, buying, money transfers, banking and payment apps, passwords, codes and keys, reading the clipboard, buttons you set to always ask, and changes to Safety settings and allowed apps. Apps you set to Trust and buttons you set to never ask stay as you set them.</string>
     <string name="chat_approvals_apps">Apps in this chat</string>
     <!-- Under that title. "The reviewer" = Buddy's smart reviewer (App permissions). -->
     <string name="chat_allowed_info">Until this chat\'s task ends, routine approvals in these apps go ahead on their own: sending a message, or a step the reviewer would ask about. Each one shows in the chat. Paying, buying, deleting, installing, passwords and security settings still ask you.</string>

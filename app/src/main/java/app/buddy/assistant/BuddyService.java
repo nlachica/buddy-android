@@ -869,6 +869,23 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         });
     }
 
+    /**
+     * 020: how a card a Bypass chat skips answers. Not selfApproved: the user's standing choice of Bypass is the yes
+     * (so buddy_settings and update_buddy accept it); callers that must keep their card never get it.
+     */
+    static final String BYPASSED = "APPROVED: this chat is set to Bypass, so Buddy went ahead without asking the user (the "
+            + "chat notes it). Go ahead with this, and only this. Paying, buying, money transfers and anything with "
+            + "passwords, codes or keys still ask them.";
+
+    /** A card the Bypass mode skipped: the chat says so. */
+    private void noteBypassed(String chat, String summary) {
+        runOnMain(() -> {
+            ChatHub hub = ChatHub.get(this);
+            Sessions.Session s = chat == null ? null : hub.sessions.find(chat);
+            if (s != null) hub.note(s, Bubble.Kind.STEP, getString(R.string.card_note_bypassed, summary.trim()));
+        });
+    }
+
     /** Blocks the calling (tool) thread until the user answers in the bubble. */
     String askConfirm(final String summary) throws InterruptedException {
         return askConfirm(summary, false);
@@ -894,9 +911,21 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
      * after its countdown, and not at all while the phone is locked: then the answer is NOT_NOW.
      */
     String askConfirm(final String summary, boolean canAuto) throws InterruptedException {
+        return askConfirm(summary, canAuto, false);
+    }
+
+    /**
+     * As above; bypass: in a Bypass chat this card is skipped and noted. The caller has checked that the step isn't
+     * about secrets or money; a card that doesn't opt in keeps its card in every mode.
+     */
+    String askConfirm(final String summary, boolean canAuto, boolean bypass) throws InterruptedException {
         final String chat = McpServer.CALLER_CHAT.get();
         // a helper only looks things up: no card for it, whatever the step
         if (Helpers.is(this, chat)) return "DENIED: " + Helpers.refuse("sending, posting, buying, deleting or changing things");
+        if (Bypass.skips(bypass, ChatHub.get(this).approvalsFor(chat), Triggers.ruleRun(chat))) {
+            noteBypassed(chat, summary);
+            return BYPASSED;
+        }
         boolean rule = Triggers.ruleRun(chat);
         int cd = canAuto ? Triggers.countdown(chat) : 0;
         boolean now = canAuto && Triggers.instant(chat); // the rule's "Don't ask": no card when the second check agrees
