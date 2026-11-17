@@ -635,7 +635,7 @@ final class ChatHub {
     }
 
     /**
-     * The calling chat's approvals choice (any thread, see Session.approvals): "", "routine" or "strict". Always ""
+     * The calling chat's approvals choice (any thread, see Session.approvals): "", "routine", "strict" or "bypass". Always ""
      * for a session outside Buddy's chats and for a sub-agent, which only looks things up.
      */
     String approvalsFor(String chat) {

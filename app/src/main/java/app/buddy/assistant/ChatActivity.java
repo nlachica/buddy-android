@@ -1194,7 +1194,7 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         hub.setOnScreen(ses, hasFocus && resumed);
     }
 
-    /** The three ways this chat can ask before its agent's actions (see Session.approvals). */
+    /** The four ways this chat can ask before its agent's actions (see Session.approvals). */
     private void approvalsSheet() {
         if (!hub.approvalsEditable(ses)) return;
         LinearLayout c = protect(column(this));
@@ -1205,7 +1205,8 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         final Dialog[] d = new Dialog[1];
         String[][] choices = {{"", getString(R.string.chat_approvals_ask_info, getString(R.string.perms_title))},
                 {"routine", getString(R.string.chat_approvals_routine_info)},
-                {"strict", getString(R.string.chat_approvals_strict_info, getString(R.string.perms_mode_trust))}};
+                {"strict", getString(R.string.chat_approvals_strict_info, getString(R.string.perms_mode_trust))},
+                {Bypass.MODE, getString(R.string.chat_approvals_bypass_info)}};
         for (String[] ch : choices) {
             LinearLayout r = row(this);
             r.setGravity(Gravity.CENTER_VERTICAL);

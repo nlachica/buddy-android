@@ -376,10 +376,11 @@ final class Ui {
         return l;
     }
 
-    /** The choice's short name: Ask, Routine allowed, Always ask. */
+    /** The choice's short name: Ask, Routine allowed, Always ask, Bypass. */
     static String approvalsName(Context c, String choice) {
         return c.getString("routine".equals(choice) ? R.string.chat_approvals_routine
-                : "strict".equals(choice) ? R.string.chat_approvals_strict : R.string.chat_approvals_ask);
+                : "strict".equals(choice) ? R.string.chat_approvals_strict
+                : Bypass.MODE.equals(choice) ? R.string.chat_approvals_bypass : R.string.chat_approvals_ask);
     }
 
     /** Ask: quiet. Any other choice stands out in the accent, so it can't be on without being seen. */
