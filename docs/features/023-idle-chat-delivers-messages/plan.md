@@ -77,26 +77,43 @@ first try and the "no conversation found" retry. `run_claude` drops the prompt a
 - Opens the FIFO write-only on fd 3. This waits for the agent's read end; SIGPIPE is ignored, so a write to a gone
   agent only fails.
 - Writes `$MSG` as the first user line.
-- Tracks the latest `background_tasks_changed` task count.
-- At each `result` with zero tasks, and at the end of the stream, it closes the input: under `flock "$S/in.lock"`,
-  it removes `$S/in` and closes fd 3. Claude Code then finishes anything queued and exits, as it does today.
-- While a `result` arrives with tasks listed, the input stays open. It can only stay open for the life of those
-  jobs.
+- Tracks three things: whether a turn is in progress (`system/init` starts one, `result` ends it), the latest
+  `background_tasks_changed` task count, and whether this run has ever listed a task.
+- Closes the input once the agent is idle with no tasks listed:
+  - at once, if the run has never listed a task (today's timing for most runs);
+  - otherwise only after `QUIET=3` seconds with no line from the agent (a timed read). Any line restarts the wait,
+    and a `system/init` cancels it until the next `result`.
+- Also closes it at the end of the stream.
+- The close (`close_input`) runs under `flock "$S/in.lock"`. If `$S/in.said` exists (a `say` has got a line in since
+  the last try), it removes the marker and leaves the input open, and the wait starts again. Otherwise it removes
+  `$S/in` and closes fd 3. Claude Code then finishes anything queued and exits, as it does today.
 
-Claude Code versions that don't send `background_tasks_changed` count zero tasks, so they close at the first
+Why the wait (plan review round 2, F1): work that got in before a close runs after the `result`, and it may start a
+new job. That work is a line from a `say` that won the lock, or a finished job's notification. If the input were
+already shut, messages sent during that new job would wait for it to end, which is the bug again.
+- Claude Code starts work it already holds as soon as a turn ends, and that turn's first event is `system/init`. So
+  the work begins inside the wait, with the input still open. The Verifier measures this (see Risks).
+- If that work starts a job, its `result` lists the job, and the input stays open.
+- A `say` during the wait leaves the marker, so the close can't slip in between its line and the agent's
+  `system/init`.
+
+While tasks are listed, the input stays open. It can only stay open for the life of those jobs, plus `QUIET`.
+Claude Code versions that don't send `background_tasks_changed` never list a task, so they close at the first
 `result`: today's behaviour.
 
 **2. `buddy-run <token> say <session> <text>`**, a new command next to `stop`:
 - Takes the same lock.
-- If `$S/in` still exists (it is a FIFO) and `$S/pid` is alive, writes one user line to it, under `timeout 5`, and
-  exits 0.
+- If `$S/in` still exists (it is a FIFO) and `$S/pid` is alive, writes one user line to it, under `timeout 5`,
+  touches `$S/in.said`, and exits 0.
 - Otherwise it exits 3 ("no live input").
 
 The lock makes "close" and "say" exclusive:
-- A line written before the close is read before EOF, so the agent gets it.
-- After the close, `say` refuses, and the app falls back.
+- A line written before a close attempt leaves the marker. That attempt then keeps the input open, and the agent
+  starts the line within the wait.
+- After the close, `say` refuses, and the app falls back. The agent was idle with no tasks listed, so it ends soon
+  and `buddy_done` delivers the text.
 
-`stop` and the start of `ask` remove a stale `$S/in`.
+`stop` and the start of `ask` remove a stale `$S/in` and `$S/in.said`.
 
 **3. The app knows when the turn is over (ChatHub).**
 - A runtime flag `Sessions.Session.turnOver`.
@@ -157,11 +174,12 @@ The lock makes "close" and "say" exclusive:
   them, as today.
 
 Why this meets the brief:
-- Done-when 1: the agent gets the message within a proot exec, about a second.
+- Done-when 1: the agent gets the message within a proot exec, about a second. That holds after work that got in
+  just before a close too, because the input closes only once the agent has stayed idle with no jobs listed.
 - Done-when 2: nothing changes while `turnOver` is false.
 - Done-when 3: Buddy never starts a second process for the chat. Claude Code's own queue orders user lines and task
-  notifications (`queue-operation` enqueue/dequeue in the transcript), and the input stays open until a turn ends
-  with no jobs pending. A live send that fails stays with `leftover` until it is delivered or back in the box.
+  notifications (`queue-operation` enqueue/dequeue in the transcript), and the input stays open until the agent is
+  idle with no jobs pending. A live send that fails stays with `leftover` until it is delivered or back in the box.
 - Every provider: the app logic has no backend check. Claude Code gets the live path. The others fall back to the
   existing path, which already delivers right after their turn, because their process ends with it.
 
@@ -176,6 +194,10 @@ Alternatives considered:
 - buddy-run polls or long-polls the app for notes while idle: a new endpoint plus an hour of polling, for no gain over
   a push.
 - Process-tree or idle-timeout guesses for "jobs pending": fragile. Claude Code reports its task list.
+- Close at the zero-task `result` itself (round 1): work that got in just before the close can start a new job with
+  the input already shut (round 2 F1).
+- Count acknowledged lines (`--replay-user-messages`) to close only when none is pending: untested here, and it says
+  nothing about a queued job notification, which needs the wait anyway.
 
 ## Steps
 
@@ -186,34 +208,54 @@ Alternatives considered:
    - In `stream_claude`:
      - `trap '' PIPE`;
      - if `[ -p "$S/in" ]`: `exec 3>"$S/in"` and write `$MSG` as the first user line (jq);
-     - track `bg` from `background_tasks_changed`;
-     - at `result` with `bg=0`, and after the loop, close the input under `flock "$S/in.lock"` (rm the FIFO, close
-       fd 3).
+     - track `inturn` (1 at the start; `system/init` sets it, `result` clears it), `bg` (from
+       `background_tasks_changed`) and `seen` (a task was ever listed);
+     - when `inturn=0` and `bg=0`: if `seen=0`, call `close_input` at once. Otherwise, or if it kept the input open,
+       read with `read -t "$QUIET"` until a line comes (handled as usual, and the state is checked again) or the
+       time runs out (`close_input` again). A timed-out read keeps any partial line it got;
+     - `close_input` as in Approach 1. After the loop, close under the lock without checking the marker.
    - With no FIFO (the `BUDDY_TEST_STREAM` fixture mode), the input plumbing is skipped, so the recorded fixtures
      run unchanged.
-   - In `stop`, also `rm -f "$S/in"`.
+   - In `stop`, also `rm -f "$S/in" "$S/in.said"`.
    - `HELPER_VERSION=33`, as feature 002 bumped it.
 
-   Tests (`linux/test/run.sh`): link `flock` and `mkfifo` into `$H/bin`. Add a stand-in mode `live` to the `agent`
-   script:
-   - read the first stdin line and echo its content as an assistant text;
-   - emit `background_tasks_changed` with one task, then `result`;
-   - block on the next stdin line, echo it, then emit `background_tasks_changed` `[]` and `result`;
-   - `cat >/dev/null` until EOF, then exit 0.
+   Tests (`linux/test/run.sh`): link `flock` and `mkfifo` into `$H/bin`. New modes for the `agent` stand-in (each
+   turn starts with `system/init`; "echo" means the line's content as an assistant text):
+   - `noinput`: `result` with no tasks, then `cat >/dev/null`, exit 0. It must end within 10 s, which proves that a
+     run that never lists a task closes its input at its `result`.
+   - `queued` (round 2 F1: a line got in just before a zero-task close):
+     - echo the first stdin line, wait (up to 10 s) for `$BUDDY_FAKE_DIR/go`, then emit `result` with no tasks;
+     - like Claude's queue, read the next line, echo it, emit `background_tasks_changed` with one task, and `result`;
+     - read the next line, echo it, emit `background_tasks_changed` `[]` and `result`;
+     - `cat >/dev/null` until EOF, exit 0.
+   - `notify` (round 2 F1: a queued notification turn starts a job):
+     - echo the first line, emit `background_tasks_changed` with one task, then `[]` (the job ended mid-turn), then
+       `result`;
+     - at once, the notification turn: echo "notified", emit `background_tasks_changed` with a new task, `result`;
+     - read the next line, echo it, emit `background_tasks_changed` `[]` and `result`;
+     - `cat >/dev/null` until EOF, exit 0.
 
-   Add a mode `noinput`: `result` with no tasks, then `cat >/dev/null`, exit 0. It must end within 10 s, which proves
-   the input is closed at a no-jobs `result`. Existing cases must pass unchanged.
+   Existing cases must pass unchanged.
 2. **buddy-run `say`** (`linux/buddy-run`, usage line and header comment):
    - `say)`: `valid_sid`, lock with `flock -w 5`;
    - `[ -p "$S/in" ]` and the pid alive, else exit 3;
-   - `jq -cn --arg t "$TEXT" '{type:"user",message:{role:"user",content:$t}}'` written via `timeout 5`, exit 0.
+   - `jq -cn --arg t "$TEXT" '{type:"user",message:{role:"user",content:$t}}'` written via `timeout 5`, then
+     `touch "$S/in.said"`, exit 0.
 
-   Tests, using the `live` stand-in, with the wrapper in the background:
-   - wait for the first `result` in the events;
-   - `buddy-run test say run ping` must exit 0;
-   - the wrapper ends within 20 s;
-   - a second `say` exits 3;
-   - the events match `fixtures/run/claude_live.expected.jsonl`: "hi" and "ping" texts, two results, `buddy_done`.
+   Tests, with the wrapper in the background:
+   - `queued`:
+     - wait for the "hi" text in the events, then `buddy-run test say run A` must exit 0, then touch `go`;
+     - wait for the second `result`, then `say run B` must exit 0. Round 1's close refused it with 3;
+     - the wrapper ends within 20 s, and a `say` after that exits 3 (no FIFO);
+     - the events match `fixtures/run/claude_queued.expected.jsonl`: "hi", "A" and "B" texts, three results,
+       `buddy_done`.
+
+     The stand-in's job ends only after it reads B, so B reached the agent before the job completed.
+   - `notify`: wait for the second `result`; `say run ping` must exit 0; the wrapper ends within 20 s; the events
+     match `fixtures/run/claude_notify.expected.jsonl`.
+
+   Both cases emit their lines with no delay, so they don't depend on timing: round 1's close fails them every time.
+   Their end, about two `QUIET`s after the last `result`, also proves the wait gives way.
 3. **App: turn tracking.** Add `boolean turnOver` to `Sessions.Session` (runtime, comment). In `ChatHub`, add
    `static void trackTurn(Sessions.Session, String type, String subtype)`, called at the top of `onEvent`, and clear
    the flag in `startRun` and `buddy_done`.
@@ -248,9 +290,9 @@ Alternatives considered:
 
 | Done-when | Proof |
 |---|---|
-| 1. New turn within seconds | Two run.sh cases. `claude_live`: `say` while a task is listed reaches the agent, and the stand-in echoes "ping". `noinput`: a no-jobs `result` closes the input and the run ends. Then the real-agent check below (step a), and on the phone in a Claude chat with Linux tools: ask it to start `sleep 300; echo done` with `run_in_background` and end its turn. Send "what's 2+2?" from the bubble, then from the full chat. Each gets an answer within ~5 s while the chat still shows working. |
+| 1. New turn within seconds | Three run.sh cases. `claude_queued`: a line that got in just before a zero-task `result` runs, its turn lists a job, and a later `say` reaches the agent before that job ends. `claude_notify`: the same after a queued notification turn starts a job. `noinput`: a run that never lists a job closes its input at its `result` and ends. Then the real-agent check below (step a), and on the phone in a Claude chat with Linux tools: ask it to start `sleep 300; echo done` with `run_in_background` and end its turn. Send "what's 2+2?" from the bubble, then from the full chat. Each gets an answer within ~5 s while the chat still shows working. |
 | 2. Updates mid-turn unchanged | `TurnTrackTest`: `turnOver` is false from `system/init` to `result`. Existing run.sh cases and unit tests pass. On the phone: during a turn that keeps using phone tools (e.g. "read the screen 4 times, 10 s apart"), send a note. The transcript JSONL shows it in a tool result after `[BUDDY_USER_UPDATE]`, and there is no new user turn. |
-| 3. No collision or loss | `claude_live`: the input stays open while a task is listed and closes only after the `result` with `[]`. `LeftoverTest`: a failed live send on either side of `buddy_done` is sent once, or back in the box after Stop. Real-agent check, step b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered in its own turn. The process then ends (`buddy_done`, chat idle). |
+| 3. No collision or loss | `claude_queued` and `claude_notify`: the input stays open while a task is listed, and closes only once the agent has stayed idle with none, after every line reached it. `LeftoverTest`: a failed live send on either side of `buddy_done` is sent once, or back in the box after Stop. Real-agent check, step b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered in its own turn. The process then ends (`buddy_done`, chat idle). |
 | Every provider | One Codex chat on the phone: a message sent right after its reply starts the next run at once (today's path, unchanged). The fallback is covered by `say` exiting 3 for a session with no FIFO (a run.sh assertion in step 2). |
 
 Real-agent check (Verifier, in Buddy's Linux, Haiku, events to a file):
@@ -258,16 +300,25 @@ Real-agent check (Verifier, in Buddy's Linux, Haiku, events to a file):
   ask t023 claude 1 "<start sleep 40 with run_in_background, reply STARTED>" haiku` in the background. Wait for the
   first `result` in `/tmp/ev`.
 - (a) `bash linux/buddy-run test say t023 "Reply PONG"` exits 0, and a PONG `assistant` event follows within 10 s.
-- (b) After about 40 s, the notification turn's events follow, then `buddy_done`. The run ends without further input.
+- (a2) Right after (a), while the PONG turn runs, `say t023 "Reply PING"` exits 0, and PING is answered, in that
+  turn or the next. If in the next, record the time from the PONG turn's `result` to the next `system/init` (watch
+  `/tmp/ev` with timestamps). It must be well under `QUIET` (3 s); this is the assumption in Risks.
+- (b) After about 40 s, the notification turn's events follow, then `buddy_done` within about 6 s of the last
+  `result`. The run ends without further input.
 - Then `rm -rf ~/.buddy/sessions/t023`. The phone MCP refuses the `test` token, and that is fine for this check.
 
 CI: `bash linux/test/run.sh` and `./gradlew testGithubDebugUnitTest` (both in `build.yml`) must be green.
 
 ## Risks
 
-- **Close/say window after a racing `say`.** If a `say` wins the lock just before a no-jobs `result` closes the
-  input, the agent runs that message with stdin already at EOF. Messages during that new turn then fall back to today's
-  path (delivered at process end). The window is milliseconds, and nothing is lost.
+- **Queued work that starts late.** The wait assumes Claude Code starts work it already holds (a line, a job's
+  notification) within `QUIET` (3 s) of a `result`. A line from a `say` during the wait can't be missed: the marker
+  keeps the input open. If Claude Code ever took longer to start the rest, the close could win, and messages during
+  that work would wait for the process to end, as today. Nothing is lost. The Verifier measures the gap (real-agent
+  check a2), and `QUIET` is one constant to raise.
+- **Runs with jobs or live messages end a little later.** `buddy_done` comes `QUIET` after the last `result`, or twice
+  that if a `say` got in since the last try, so the pill stays a few seconds longer. A message sent meanwhile goes
+  live. Runs that never listed a job and took no live message close at once, as today.
 - **Older Claude Code.** If a version exits at stdin EOF without waiting for its background jobs, closing at the
   first `result` (no `background_tasks_changed` seen) would end jobs that today run to completion. Checked on 2.1.326
   only; Buddy installs the current Claude Code. The Verifier records the version.

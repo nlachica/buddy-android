@@ -43,3 +43,41 @@ F1 [major] Closing input can recreate the idle-message delay on the next backgro
 Review was against the plan and repository code; no implementation or device tests were run.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - the input no longer closes at the zero-task `result`. `stream_claude` tracks three things: whether a
+turn is in progress (`system/init` starts one, `result` ends it), the task count, and whether the run has ever listed
+a task. It closes the input once the agent is idle with no tasks listed:
+- at once, if the run never listed a task (today's run-end timing);
+- otherwise after `QUIET=3` s with no line from the agent. Any line restarts the wait, and a `system/init` cancels
+  it.
+
+`say` now also touches `$S/in.said` under the lock. A close attempt that finds the marker removes it and keeps the
+input open for another wait. In your ordering, A's `say` leaves the marker, so the close doesn't happen. Claude
+starts A at once with `system/init`, A's turn lists its job, and the input stays open, so B's `say` succeeds.
+
+A finished job's notification queued at a zero-task `result` works the same way. The run has listed a task, so the
+close waits, and the notification turn starts inside the wait. If it starts a job, its `result` lists it.
+
+The one assumption left is that Claude Code starts work it already holds within 3 s of a `result`. A `say` during
+the wait doesn't depend on it, because of the marker. The Verifier measures the gap (new real-agent step a2), and
+Risks says what happens if it ever fails: today's delay, nothing lost.
+
+Cost: runs with jobs or live messages end 3-6 s after their last `result`.
+
+Tests: the `live` stand-in mode is replaced by two deterministic run.sh cases, which emit their lines with no delay
+and fail every time against round 1's close:
+- `claude_queued`: A is accepted before a zero-task `result`, A's turn lists a job, and B's `say` exits 0 and is
+  echoed. The stand-in's job ends only after it reads B.
+- `claude_notify`: a job ends mid-turn, the queued notification turn starts a new job, and a `say` then exits 0 and
+  is echoed.
+
+Both end about two `QUIET`s after their last `result`, which proves the wait gives way.
+
+Rejected alternative: counting acknowledged lines with `--replay-user-messages`. It is untested and doesn't cover
+notifications.
+
+Updated: plan.md Approach 1 and 2, "Why this meets the brief", Alternatives, Steps 1-2, Test plan rows 1 and 3, the
+real-agent check (a2, b), and Risks ("Queued work that starts late" replaces the close/say window; new "Runs with jobs
+or live messages end a little later"). decisions.md: new entry "The input closes after a quiet idle spell".

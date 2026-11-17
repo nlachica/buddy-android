@@ -82,3 +82,18 @@
   adds state for a case that doesn't occur. The rest of the scope entry stands: attachments are still refused, and
   only Claude Code gets live input.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The input closes after a quiet idle spell, not at the zero-task `result` (revises "When buddy-run closes Claude Code's input" and "Close/say race"; plan review round 2, F1)
+- Options: (a) close at the zero-task `result` (round 1); (b) close once the agent is idle with no tasks listed:
+  at once if the run never listed a task, else after `QUIET=3` s with no line from it; under the lock, a `say` marker
+  (`$S/in.said`) since the last try keeps the input open for another wait; (c) count acknowledged lines
+  (`--replay-user-messages`) and close only when none is pending; (d) never close, stop the agent when idle.
+- Choice: (b). Work that got in before a close (a racing `say`'s line, a finished job's notification) runs after the
+  `result` and may start a new job. With (a), that job runs with the input shut, and messages wait for it again.
+  Claude Code starts held work as soon as a turn ends, with `system/init` first, so under (b) that work begins with the
+  input open, and a job it starts keeps it open. The marker makes a `say` during the wait safe without timing. The
+  fast path keeps today's run-end timing for runs that never list a job. (c) is an untested flag and says nothing
+  about queued notifications, which still need a wait. (d) has the same timing question and kills instead of
+  letting the agent finish. Cost: runs with jobs or live messages end 3-6 s after their last `result`. The
+  remaining assumption (held work starts within 3 s) is measured by the Verifier.
+- By: Planner (claude-opus-5-5)
