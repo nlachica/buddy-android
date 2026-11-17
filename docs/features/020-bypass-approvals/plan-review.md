@@ -272,3 +272,20 @@ F4 (round 3 F5): accepted, fixed by F3's change.
 
 Also changed: main took `2.3.11-fork.4` / 224 for the watch-voice fix, so step 8 and the phone check now use fork.5 /
 225 for this feature and the next number for the controlled update.
+
+## Round 5 - Plan Reviewer (gpt-6-astra)
+
+No new findings. No blocker or major finding remains open in the plan.
+
+Round 4 F1-F4 are resolved at the design level:
+
+- F1: `plan.md:169-183` now checks every short label within the existing bounded node walk, rather than the first risky label. This addresses the early returns in `app/src/main/java/app/buddy/assistant/Guard.java:666-680,707-718`; T9 covers Send with money in the description, tooltip, ID or child.
+- F2: `plan.md:201-215,356-357` explicitly adds form/payment metadata to the focus producer, matching the Enter consumer. This closes the mismatch between `app/src/main/assets/browser.js:303-315` and `:392-404`; T7, T11 and the planned checkout-form phone check cover the change.
+- F3: `plan.md:184-190` classifies native Enter's combined `value` and the browser's draft after insertion, including append. The native value is constructed at `app/src/main/java/app/buddy/assistant/Tools.java:1920-1922`; browser insertion precedes approval at `app/src/main/java/app/buddy/assistant/BrowserTools.java:332-342`. T10 and the append-and-deny phone checks cover the regression.
+- F4: `plan.md:192-193,348-350,414` explicitly carries draft sensitivity into both reviewer exits, including the no-harness fallback at `app/src/main/java/app/buddy/assistant/Tools.java:1795-1796`.
+
+The remaining done-when items have implementation and verification steps: the fourth mode, carded approvals-setting changes, explicit call-site opt-ins, retained secret/money exceptions, the 019 revert, CI and code review. Nicholas's recorded Q1 answers remain the acceptance boundary; previously resolved Trust/never-ask and flavor decisions are not reopened.
+
+This approves the plan only. Implementation tests, CI and phone behavior were not run in this review and remain required verification work.
+
+VERDICT: APPROVE
