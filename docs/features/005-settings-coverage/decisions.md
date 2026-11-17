@@ -158,3 +158,8 @@
 - F3 was only the CI gate: `pipe ci` dispatched to the upstream parent (gh's default repo on a fork). Fixed in the
   playbook (`GH_REPO` from origin); CI run 43756642973 on 79a3e73 is green (unit tests + github, fdroid, wear builds).
   No code finding was open. By: Orchestrator (claude-opus-5-5)
+
+## 2026-11-17 - Upstream 2.3.11 sync: `ask_new_apps` registered
+- Upstream added the switch "Ask about new apps" (`Prefs.askNewApps`/`setAskNewApps`, SetupActivity). Registered it in
+  `SettingsTool.scalars` as `ask_new_apps` (on/off) next to `agents_tap_buddy`, so it takes the same approval card
+  with old and new value as the other safety settings. It is already in Backup's list. By: Orchestrator (claude-sonnet-5-5)
