@@ -14,3 +14,11 @@ Validation: reran the existing `/tmp/buddy-build-017/check.sh` for both flavors:
 Not checked: real WebView/audio routing, phone/watch playback and plan device checks D1-D8 (including D2b); release APK builds, lint and CI. `verify.md` still has no device evidence. Those remain verification work under the plan's post-install procedure. `git diff --check main...HEAD` reported only trailing whitespace in the existing empty `verify.md` verdict placeholder; omitted as a style-only nit.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in 78e8f97. `LiveWatch.Call.pcm` clears `heldEnded` when it appends audible blocks to `held`, so the marker always describes the end of the audio currently held. Regression test `speechThatResumesAfterAHeldEndIsNotClosedByTheOldEnd` (A drains, B held and ended, C starts before A answers): it fails without the line and passes with it. No new queue or abstraction.
+
+F2: not a code change. Actions are disabled for the repo (HTTP 422), which is for the orchestrator to enable. Then rerun `build.yml` on the new branch head and record the result, F-Droid isolation and reproducibility steps included. Until that run, the CI-only steps (Gradle build, lint, APKs) stay unverified.
+
+Checks rerun with `/tmp/buddy-build-017/check.sh` (javac/JUnit over the real sources, not Gradle): github 172 tests OK, fdroid 148 OK.
