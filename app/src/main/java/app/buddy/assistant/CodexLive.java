@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
  * commands, and it then claims things it never did, so Buddy doesn't depend on it: a hand-off is taken like the rest.)
  * One call at a time; it ends with End (the chat's live bar or the notification), when the screen goes off, when Buddy
  * is paused or stopped, or after a while with nothing said. Every call logs what happens to ~/.buddy/live.log in
- * Buddy's Linux.
+ * Buddy's Linux (the previous call's: live.log.1).
  */
 final class CodexLive {
     static final String ACTION_END = "app.buddy.assistant.END_LIVE";
@@ -153,7 +153,7 @@ final class CodexLive {
         return t != null && t.equals(thread);
     }
 
-    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux)
+    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux; the previous call's: live.log.1)
 
     private static final ExecutorService logger = Executors.newSingleThreadExecutor();
     private static volatile long logStart;
@@ -181,6 +181,7 @@ final class CodexLive {
             try {
                 File f = logFile();
                 f.getParentFile().mkdirs();
+                f.renameTo(new File(f.getParentFile(), "live.log.1")); // the previous call's log; a failed rename must not cost this call its log
                 try (FileOutputStream o = new FileOutputStream(f, false)) {
                     o.write(("live voice call, " + new java.util.Date() + ", Buddy " + BuildInfo.VERSION + "\n")
                             .getBytes(StandardCharsets.UTF_8));
