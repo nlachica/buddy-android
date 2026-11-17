@@ -904,7 +904,7 @@ final class ChatHub {
                         // keep this post BEFORE the changed() below with no changed() in between: the watch link
                         // (WatchLink) decides a run is over in a post of its own from onChatsChanged, and relies on
                         // this continuation having had its turn by then
-                        main.post(() -> leftover(ses, msg));
+                        main.post(() -> leftover(ses, msg, -1));
                     }
                 }
                 break;
@@ -1005,27 +1005,30 @@ final class ChatHub {
     private void sendLive(Sessions.Session ses, String text, boolean note) {
         if (!note) add(ses, Bubble.Kind.USER, text);
         ses.turnOver = false; // a turn is starting: later messages are updates to it
+        final int run = ses.runId; // a failed send must not be retried into this same run's closed input
         String forAgent = note ? "(Added while you were working; if it asks something, answer it:) " + text : text;
         try {
             Helper.run(app, code -> {
-                if (code != 0) main.post(() -> leftover(ses, text));
+                if (code != 0) main.post(() -> leftover(ses, text, run));
             }, "say", ses.id, forAgent);
         } catch (Exception e) {
-            leftover(ses, text);
+            leftover(ses, text, run);
         }
         changed();
     }
 
-    static final int LEFT_DROP = 0, LEFT_NOTES = 1, LEFT_UNSENT = 2, LEFT_SEND = 3;
+    static final int LEFT_DROP = 0, LEFT_NOTES = 1, LEFT_UNSENT = 2, LEFT_SEND = 3, LEFT_LIVE = 4;
 
     /**
      * Where text the agent never got goes, decided when this runs: LEFT_DROP (the chat is gone), LEFT_NOTES (a run is
-     * going: its next tool result, turn end or end takes it; done here), LEFT_UNSENT (stopped: back to the message
+     * going: its next tool result, turn end or end takes it; done here), LEFT_LIVE (a newer run than fromRun, whose
+     * turn is already over: the caller sends it live), LEFT_UNSENT (stopped: back to the message
      * box; done here) or LEFT_SEND (idle: the caller starts a run with it).
      */
-    static int placeLeftover(Sessions.Session ses, String text, boolean present) {
+    static int placeLeftover(Sessions.Session ses, String text, boolean present, int fromRun) {
         if (!present) return LEFT_DROP;
         if (ses.running) {
+            if (ses.runId != fromRun && liveInput(ses)) return LEFT_LIVE;
             synchronized (ses.notes) {
                 ses.notes.add(text);
             }
@@ -1039,13 +1042,15 @@ final class ChatHub {
     }
 
     /** Text the agent never got (a failed live send, or notes left when its run ended): delivered once, or back in the box. */
-    private void leftover(Sessions.Session ses, String text) {
-        int route = placeLeftover(ses, text, sessions.all.contains(ses));
+    private void leftover(Sessions.Session ses, String text, int fromRun) {
+        int route = placeLeftover(ses, text, sessions.all.contains(ses), fromRun);
         if (route == LEFT_UNSENT) {
             add(ses, Bubble.Kind.STEP, app.getString(R.string.hub_note_not_sent));
             changed();
         } else if (route == LEFT_SEND) {
             sendNoteAsMessage(ses, text);
+        } else if (route == LEFT_LIVE) {
+            sendLive(ses, text, true);
         }
     }
 

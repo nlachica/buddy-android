@@ -26,7 +26,7 @@ public class LeftoverTest {
         Hub(Sessions.Session ses) { this.ses = ses; }
 
         void leftover(String text) {
-            if (ChatHub.placeLeftover(ses, text, true) == ChatHub.LEFT_SEND) {
+            if (ChatHub.placeLeftover(ses, text, true, -1) == ChatHub.LEFT_SEND) {
                 sent.add(text);
                 ses.running = true;
             }
@@ -45,24 +45,24 @@ public class LeftoverTest {
 
     @Test public void routes() {
         Sessions.Session gone = s(true, null);
-        assertEquals(ChatHub.LEFT_DROP, ChatHub.placeLeftover(gone, "x", false));
+        assertEquals(ChatHub.LEFT_DROP, ChatHub.placeLeftover(gone, "x", false, -1));
         assertTrue(gone.notes.isEmpty());
         assertNull(gone.unsent);
 
         Sessions.Session running = s(true, null);
-        assertEquals(ChatHub.LEFT_NOTES, ChatHub.placeLeftover(running, "x", true));
+        assertEquals(ChatHub.LEFT_NOTES, ChatHub.placeLeftover(running, "x", true, -1));
         assertEquals("x", running.notes.get(0));
 
         Sessions.Session stopped = s(false, "stopped");
         stopped.unsent = "first";
-        assertEquals(ChatHub.LEFT_UNSENT, ChatHub.placeLeftover(stopped, "x", true));
+        assertEquals(ChatHub.LEFT_UNSENT, ChatHub.placeLeftover(stopped, "x", true, -1));
         assertEquals("first\nx", stopped.unsent);
         Sessions.Session fresh = s(false, "stopped");
-        ChatHub.placeLeftover(fresh, "x", true);
+        ChatHub.placeLeftover(fresh, "x", true, -1);
         assertEquals("x", fresh.unsent);
 
         Sessions.Session idle = s(false, null);
-        assertEquals(ChatHub.LEFT_SEND, ChatHub.placeLeftover(idle, "x", true));
+        assertEquals(ChatHub.LEFT_SEND, ChatHub.placeLeftover(idle, "x", true, -1));
         assertTrue(idle.notes.isEmpty());
         assertNull(idle.unsent);
     }
@@ -82,6 +82,24 @@ public class LeftoverTest {
             assertEquals(2, hub.sent.size());
             assertTrue(hub.ses.notes.isEmpty());
         }
+    }
+
+    // A's live send (from run 0) fails late; run 1 started meanwhile and its turn is over: A goes live, not into notes
+    @Test public void aLateFailedSendGoesLiveToAnIdleReplacementRun() {
+        Sessions.Session x = s(true, null);
+        x.runId = 1;
+        ChatHub.trackTurn(x, "result", "success");
+        assertEquals(ChatHub.LEFT_LIVE, ChatHub.placeLeftover(x, "A", true, 0));
+        assertTrue(x.notes.isEmpty());
+        // the same run's input is what failed: no retry there; and a replacement still mid-turn takes it as a note
+        assertEquals(ChatHub.LEFT_NOTES, ChatHub.placeLeftover(x, "A", true, 1));
+        Sessions.Session busy = s(true, null);
+        busy.runId = 1;
+        assertEquals(ChatHub.LEFT_NOTES, ChatHub.placeLeftover(busy, "A", true, 0));
+        // after Stop it is never live: notes, which buddy_done sends back to the box
+        x.notes.clear();
+        x.outcome = "stopped";
+        assertEquals(ChatHub.LEFT_NOTES, ChatHub.placeLeftover(x, "A", true, 0));
     }
 
     @Test public void afterStopNothingIsSentAndBothGoBack() {

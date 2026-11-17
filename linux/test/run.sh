@@ -190,6 +190,7 @@ waitev() { # <pattern> <count> [tenths of a second]: wait for that many events m
 }
 say() { HOME=$H bash ../buddy-run test say run "$1" >/dev/null 2>&1; }
 live_case() { # <fake>: start the wrapper on the stand-in, ready when its first text is out
+  rm -f "$H/go" "$H/go2" # earlier cases' released gates
   HOME=$H BUDDY_FAKE=$1 bash ../buddy-run test ask run claude 0 hi >"$H/out" 2>&1 &
   w=$!
   problem=""
@@ -213,7 +214,9 @@ live_end claude_queued
 # a job's notification held 7 s starts a job of its own; a line sent then still reaches the agent
 live_case notify
 waitev '"type":"result"' 1 || problem="${problem:-no first result}"
-touch "$H/go"; sleep 7; touch "$H/go2"
+touch "$H/go"; sleep 7
+[ "$(grep -c '"type":"result"' "$H/events")" = 1 ] || problem="${problem:-the notification turn ran before its gate was released}"
+touch "$H/go2"
 waitev '"type":"result"' 2 || problem="${problem:-no second result}"
 say ping || problem="${problem:-say ping failed}"
 waitev '"type":"result"' 3 || problem="${problem:-no third result}"
