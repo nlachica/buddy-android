@@ -152,7 +152,12 @@ The check compares sets, so it doesn't matter whether `completed` or the uuid's 
   - `startRun` and `buddy_done` also clear it.
 
 **4. Live delivery (ChatHub).**
-- **The branch.** In `addNote`, when `ses.running && ses.turnOver`, the message takes a new private
+- **One gate, `static boolean liveInput(ses)`:** `ses.running && ses.turnOver && !"stopped".equals(ses.outcome)`.
+  Every live send passes it: the branch below and the turn-end flush. After Stop nothing goes live. The text stays a
+  note, and `buddy_done` puts it back in the box as today (round 4 F1). `stop()` sets `outcome` on the main thread,
+  and events are handled there too (`BuddyService.java:548`), so a `result` handled after the tap always sees
+  "stopped".
+- **The branch.** In `addNote`, when `liveInput(ses)`, the message takes a new private
   `sendLive(ses, text, false)` instead of becoming a note.
   - Every message to a running chat reaches `addNote`: bubble dictation directly, and the rest through `send`'s
     running branch (`ChatHub.java:299-301`), which refuses attachments first. That covers the full chat, the watch
@@ -193,8 +198,9 @@ The check compares sets, so it doesn't matter whether `completed` or the uuid's 
     - Whichever runs first finds the chat idle and starts a run with its text. The other finds it running and goes
       into that run's notes.
     - Each message reaches the agent once. After a Stop, both go back to the box.
-- **Notes left at turn end.** In the `result` case, when `running`, notes the agent never took are joined, cleared
-  and passed to `sendLive(ses, joined, true)`.
+- **Notes left at turn end.** In the `result` case (after `trackTurn`), a static `turnEndNotes(ses)` takes the notes
+  the agent never took, joined and cleared, only when `liveInput(ses)`, else null; a non-null result goes to
+  `sendLive(ses, joined, true)`. After Stop it takes nothing, so no `say` is dispatched.
 
   This fixes the case where the user wrote during the agent's last non-phone steps and then waited an hour. For the
   other providers `say` exits 3. `leftover` then puts the notes back (the process still runs) and `buddy_done` sends
@@ -318,9 +324,10 @@ Alternatives considered:
 4. **App: live delivery** (`ChatHub.java`):
    - `static int placeLeftover(Sessions.Session, String, boolean present)` and `leftover`, replacing the inline
      handling in `buddy_done`;
+   - `static boolean liveInput(Sessions.Session)` and `static String turnEndNotes(Sessions.Session)`;
    - `sendLive`, falling back through `leftover`;
-   - the `addNote` branch (`send` unchanged);
-   - the notes flush in the `result` case.
+   - the `addNote` branch on `liveInput` (`send` unchanged);
+   - the notes flush in the `result` case, through `turnEndNotes`.
 
    No string changes needed. The bubble's "Got it: X will take it into account" toast fits both paths.
 
@@ -333,6 +340,13 @@ Alternatives considered:
      the text and sets `running`; at a run's end it clears `running` and drains `notes` through `placeLeftover`.
      Each of A and B is sent exactly once, and nothing is left.
    - the same with `outcome` "stopped": nothing is sent, and `unsent` holds both.
+   - Stop before the turn's end (round 4 F1). Running, mid-turn, B in `notes`; set `outcome` to "stopped" (as
+     `stop()` does); then `trackTurn(ses, "result", null)`. Checks:
+     - `turnEndNotes` returns null, and `notes` still holds B;
+     - `liveInput` is false;
+     - at the hub's `buddy_done` (running cleared, notes drained through `placeLeftover`), nothing is sent, and
+       `unsent` holds B once (`"X\nB"` after an earlier `"X"`).
+   - Control: the same without Stop. `liveInput` is true, and `turnEndNotes` returns B and empties `notes`.
 5. **Docs** (`linux/GUIDE.md:51`, fork sentence): "When the agent has answered but still waits on a background job
    (Linux tools), what you send goes to it right away as a new message."
 
@@ -342,7 +356,7 @@ Alternatives considered:
 |---|---|
 | 1. New turn within seconds | Four run.sh cases. `claude_queued`: a line that got in before a zero-task `result` waits 7 s with `idle` already sent, then runs; its turn lists a job, and a later `say` reaches the agent before that job ends. `claude_notify`: the same for a job's notification held 7 s, whose turn starts a job. `noinput`: a run that never lists a job closes its input at its first `idle` and ends. `legacy`: a Claude Code without the new events closes at its first `result`. Then the real-agent check below (step a), and on the phone in a Claude chat with Linux tools: ask it to start `sleep 300; echo done` with `run_in_background` and end its turn. Send "what's 2+2?" from the bubble, then from the full chat. Each gets an answer within ~5 s while the chat still shows working. |
 | 2. Updates mid-turn unchanged | `TurnTrackTest`: `turnOver` is false from `system/init` to `result`. Existing run.sh cases and unit tests pass. On the phone: during a turn that keeps using phone tools (e.g. "read the screen 4 times, 10 s apart"), send a note. The transcript JSONL shows it in a tool result after `[BUDDY_USER_UPDATE]`, and there is no new user turn. |
-| 3. No collision or loss | `claude_queued` and `claude_notify`: the input stays open while a line is not `completed`, a job is listed or a job's end is not yet followed by `idle`, whatever the gap, and closes at the last `idle` after every line reached the agent. `LeftoverTest`: a failed live send on either side of `buddy_done` is sent once, or back in the box after Stop. Real-agent check, steps a2 and b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered. The process then ends (`buddy_done`, chat idle). |
+| 3. No collision or loss | `claude_queued` and `claude_notify`: the input stays open while a line is not `completed`, a job is listed or a job's end is not yet followed by `idle`, whatever the gap, and closes at the last `idle` after every line reached the agent. `LeftoverTest`: a failed live send on either side of `buddy_done` is sent once, or back in the box after Stop; notes queued, then Stop, then `result` before `buddy_done`: nothing is taken for a live send, and the notes reach `unsent` once. Real-agent check, steps a2 and b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered. The process then ends (`buddy_done`, chat idle). |
 | Every provider | One Codex chat on the phone: a message sent right after its reply starts the next run at once (today's path, unchanged). The fallback is covered by `say` exiting 3 for a session with no FIFO (a run.sh assertion in step 2). |
 
 Real-agent check (Verifier, in Buddy's Linux, Haiku, events to a file):

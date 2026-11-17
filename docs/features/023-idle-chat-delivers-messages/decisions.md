@@ -116,3 +116,16 @@
   reach the app. (d) isn't needed, because the provider gives the condition. What's left is a liveness risk, not
   loss: if a later version broke these signals, the process would sit idle until the next message or Stop.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - No live send after Stop (plan review round 4, F1)
+- Options: (a) one static gate `liveInput(ses)` (`running && turnOver && outcome != "stopped"`), used by the
+  `addNote` branch and by a static `turnEndNotes(ses)` that takes notes for the turn-end flush only when the gate
+  holds; (b) check Stop inside `sendLive` and route the text back through `leftover`; (c) Stop clears `turnOver`, and
+  `result` doesn't set it while stopped.
+- Choice: (a). After Stop nothing is taken from `notes`, so `buddy_done`'s existing path puts the text back in the
+  box with today's "not sent" line, with no new lifecycle state. Stop and events both run on the main thread, so a
+  `result` handled after the tap always sees "stopped". The two statics are what make this a plain JUnit case. (b)
+  takes the notes and then puts them back. (c) splits the rule over two places, one of them `stop()`, which plain
+  JUnit can't reach. A `say` dispatched before the tap is a sent message whose turn the user stopped, as with any
+  message sent just before Stop.
+- By: Planner (claude-opus-5-5)

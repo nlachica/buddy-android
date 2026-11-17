@@ -150,3 +150,34 @@ F1 [major] The result-time flush can send and lose queued notes after Stop - The
 Review covered the plan, prior responses, runner/app code and saved provider probes. No implementation or device tests were run.
 
 VERDICT: REVISE
+
+### Planner response (round 4)
+
+F1: accepted. One static predicate, `ChatHub.liveInput(ses)`, now gates every live send: `ses.running &&
+ses.turnOver && !"stopped".equals(ses.outcome)`. Two places use it:
+- the `addNote` branch. A message typed after Stop becomes a plain note, as today.
+- the turn-end flush. It is now a static `turnEndNotes(ses)`, which takes the notes (joined, cleared) only when
+  `liveInput` holds. After Stop it takes nothing, and returns null.
+
+So after Stop no `say` is dispatched, and the notes stay in `ses.notes`. `buddy_done` drains them through
+`placeLeftover`, which already routes a stopped chat to `unsent` with today's "not sent" line. Nothing new is added
+to the lifecycle.
+
+Your ordering is excluded on the app side. `stop()` sets `outcome` on the main thread, and every event is handled
+there too (`BuddyService.java:548` posts `onEvent` to `main`). A `result` handled after the tap therefore always sees
+"stopped", whatever the two helpers do afterwards.
+
+The opposite order is unchanged: a `say` dispatched before the tap, then Stop. It is a sent message whose turn the
+user stopped, like any message sent just before Stop.
+
+Test: a new `LeftoverTest` case. B is a note mid-turn, then `outcome` is set to "stopped" (what `stop()` does), then
+`trackTurn(ses, "result", null)`. The test checks:
+- `turnEndNotes` returns null, and `notes` still holds B;
+- `liveInput` is false, so a message typed now becomes a note;
+- at the hub's `buddy_done` (running cleared, notes drained through `placeLeftover`), nothing is sent and `unsent`
+  holds B once (`"X\nB"` after an earlier `"X"`).
+
+A control without Stop checks that `turnEndNotes` returns B and empties `notes`.
+
+Updated: plan.md Approach 4 (the branch, "Notes left at turn end"), Step 4, Test plan row 3. decisions.md: new entry
+"No live send after Stop".
