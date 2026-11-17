@@ -1,5 +1,5 @@
-# Research: 017-live-voice-watch
-<!-- Researcher, 2026-11-17 (claude-sonnet-5-5). Sources: repo files read today at fork.8 (branch feat/017-live-voice-watch). -->
+# Research: 018-live-voice-watch
+<!-- Researcher, 2026-11-17 (claude-sonnet-5-5). Sources: repo files read today at fork.8 (branch feat/018-live-voice-watch). -->
 
 ## Summary
 - **Bug fix is one function.** `AudioRoute.want()` returns `""` for `watch` (`AudioRoute.java:191-194`), so `reconcile()` hits `drop()` (`:209-211`) → `clearCommunicationDevice()` (`:249`) while the WebView keeps `MODE_IN_COMMUNICATION` (`dropMode` skips it during live voice, `:256`) → earpiece (diagnosis.md). The poll runs `reconcile` every tick while `CodexLive.on()` (`:266-270`).

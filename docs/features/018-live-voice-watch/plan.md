@@ -1,4 +1,4 @@
-# Plan: 017-live-voice-watch
+# Plan: 018-live-voice-watch
 <!-- Planner (claude-opus-5-5), 2026-11-17. Sources: brief.md, diagnosis.md, research.md, code read at d1d3226
      (AudioRoute, CodexLive incl. PAGE, CodexSpeech.TAP_JS, WatchVoice, watchlink WatchVoiceLink/ReadStream/PcmOut/
      WatchCall, wear ReadAloud/Speaker, VoiceBar, SettingsTool, SetupActivity), 007/012/016 decisions, 007 verify.

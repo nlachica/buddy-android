@@ -1,10 +1,10 @@
 ---
 type: brief
-feature: 017-live-voice-watch
+feature: 018-live-voice-watch
 created: 2026-11-17
 skipped_stages: []   # e.g. [research, plan-review] for small tasks; never code-review or verify
 ---
-# Brief: 017-live-voice-watch
+# Brief: 018-live-voice-watch
 
 ## Ask (verbatim, never edit)
 Both (fix the earpiece bug, and build live calls on the watch). Context: audio_device=watch during a phone live voice call played in the earpiece; Watch only covers read-aloud.
