@@ -212,7 +212,32 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         bgp.topMargin = dp(this, 8);
         root.addView(backgroundPanel, bgp);
 
-        scroll = new ScrollView(this);
+        // 017: a focused reply (the user tapped it) must not scroll the chat by itself. Its cursor re-requests "show me"
+        // on every re-measure, and a resize reveals it. Both are dropped here; a moved cursor or selection (tap, handle,
+        // arrow keys), an `immediate` request (TalkBack) and focus changes (requestChildFocus, arrowScroll) still scroll.
+        scroll = new ScrollView(this) {
+            private TextView seen;
+            private int seenStart, seenEnd;
+
+            @Override
+            public boolean requestChildRectangleOnScreen(View child, android.graphics.Rect r, boolean immediate) {
+                View f = findFocus();
+                TextView t = f instanceof TextView ? (TextView) f : null;
+                boolean moved = t != null && (t != seen || t.getSelectionStart() != seenStart || t.getSelectionEnd() != seenEnd);
+                seen = t;
+                if (t != null) {
+                    seenStart = t.getSelectionStart();
+                    seenEnd = t.getSelectionEnd();
+                }
+                return (immediate || moved) && super.requestChildRectangleOnScreen(child, r, immediate);
+            }
+
+            @Override
+            protected void onSizeChanged(int w, int h, int ow, int oh) {
+                View f = findFocus();
+                if (f == null || f == this) super.onSizeChanged(w, h, ow, oh);
+            }
+        };
         messages = column(this);
         messages.setPaddingRelative(dp(this, 16), dp(this, 8), dp(this, 16), dp(this, 12));
         scroll.addView(messages);
@@ -653,9 +678,7 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
     @Override
     public void onMessage(Sessions.Session s, Sessions.Msg msg) {
         if (s == ses) {
-            View c = scroll.getChildAt(0); // where the user was, before the new message lays out
-            boolean follow = msg.kind == Bubble.Kind.USER || c == null
-                    || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(this, 48);
+            boolean follow = msg.kind == Bubble.Kind.USER || atEnd(); // where the user was, before the new message lays out
             if (ses.messages.size() == 1) { // drop the empty-chat hint
                 messages.removeAllViews();
                 hint = null;
@@ -2780,8 +2803,15 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         });
     }
 
+    /** Within 48dp of the end, by the last layout (true before the first one). */
+    private boolean atEnd() {
+        View c = scroll.getChildAt(0);
+        return c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(this, 48);
+    }
+
+    /** Not fullScroll: that also moves input focus to a reply, which then scrolls the chat by itself (017). */
     private void scrollToEnd() {
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> scroll.smoothScrollTo(0, messages.getBottom()));
     }
 
     /** Consecutive tool steps, grouped into one collapsible log. */
