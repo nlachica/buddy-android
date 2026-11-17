@@ -12,3 +12,67 @@ F3 [major] Microphone unmuting is timed from production, not watch playback - `p
 F4 [major] API 30 exposes Watch without the promised fallback fix - The app supports API 30 (`app/build.gradle.kts:22`), and Watch is offered independently of the API 31 communication-device choices (`app/src/main/java/app/buddy/assistant/AudioRoute.java:43-48`). Nevertheless, the entire new routing behavior remains behind `use()`'s API 31 guard (`:165-166`); `plan.md:245-246` explicitly leaves API 30 to Android's routing while enabling watch streaming there. Consequently an unavailable or dropped watch on a supported phone has no planned loudspeaker guarantee, and no test covers it. `brief.md:20` contains no platform exception. -> Include an API 30 fallback and teardown strategy with validation, or obtain an explicit supported-platform scope decision and make the exposed behavior and acceptance criteria consistent with it. Recording the unmet done-when item only as a risk is insufficient.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - in a phone call, a media headset being connected doesn't mean Android routes the call to it. With no
+communication device set, Android plays the call on a wired or USB headset by itself, but never on A2DP, and Bluetooth
+only gets the call over SCO, which Buddy has to select. So `liveDevice` now picks a headset's own communication device
+explicitly: the first wired, USB, BLE or hearing-aid communication device, or a SCO device whose name is that of a
+connected media headset (the buds' call link). The watch has no media output, so its SCO never matches. Otherwise it
+picks the built-in speaker, and never the earpiece. Picking the device isn't the same as using it, so two cases fall
+back to the speaker:
+- `setCommunicationDevice` refuses the device: reconcile runs again in the same tick, and the refused key is skipped.
+- Android's `getCommunicationDevice()` isn't the applied key 2 s after applying (the headset's call link failed): that
+  key counts as refused and the speaker is applied. The same check re-applies the speaker if Chromium picks the
+  earpiece again later. That was Risk 9, now closed.
+
+Buds without a call profile have no communication device, so they get the speaker. The rule now has unit tests:
+buds' SCO plus the watch's SCO → buds; the watch's SCO alone → speaker; refused → speaker; no headset → speaker; never
+the earpiece. Device check D8: buds plus the watch, Watch picked, the watch refuses → `dumpsys audio` shows the buds'
+SCO, the voice is in the buds, and disconnecting the buds moves it to the speaker. Old Risk 6 is gone. The
+"strict never-earpiece with a headset" alternative is now the design.
+
+F2: accepted - the forwarding decision no longer uses `target()`. The new pure `AudioRoute.livePick(saved, savedHere,
+connected, watch)` is `pick(saved, savedHere, headsetIn(null, connected) != NONE, watch)`: 016's media-headset types
+from `getDevices(OUTPUTS)` only, without the API 33 routed answer. `Out.watchWins()` uses it through
+`AudioRoute.liveTarget(app)`. 016's `target()`/`headsetNow()` stay as they are for normal mode. Tests: `livePick` with
+outputs `{SPEAKER, A2DP}` gives `""` for Auto (Speaker → Auto and Watch → Auto with buds: no watch), `{SPEAKER, SCO}`
+gives watch, and a picked Watch with A2DP still gives watch. `LiveWatchTest` (7) checks that `watchWins=false` after a
+change of the setting means no find. D6 adds Speaker → Auto mid-call with buds: no "watch: looking" line in live.log.
+
+F3: accepted - the mic decision moves from the page into Java and follows the watch's playback, not the page's
+production:
+- The call stream reports each block once it is actually written into the channel (an optional `sent` callback in
+  `PcmOut`, passed through `ReadStream`/`openCall`).
+- `LiveWatch` keeps a phone-side copy of the watch `Speaker`'s `audibleUntil`: a playhead advanced by each written
+  block at real-time rate (`until = max(now, until) + len/32 ms`), with the audible mark set by audible blocks.
+- `toWatch()` now returns 0 (the voice is on the phone), 1 (on the watch, mic open) or 2 (on the watch, mic closed).
+  The mic is closed while an audible block handed to the stream hasn't been written yet, or until `audibleUntil +
+  1 s` (the watch's 300 ms prebuffer, its track and the link, with margin).
+- One threshold, 0.01 (`Speaker.AUDIBLE`), now decides both what is forwarded and what keeps the mic closed. The page's
+  0.02 `voice` flag only drives the bar.
+
+Failure policy: the call's phone queue is now non-live with a 1-s cap (it replaces the 2-s drop-oldest queue, so
+`ReadStream` needs no `live` flag). If the watch falls more than the transport's buffers plus 1 s behind, the stream
+breaks, the voice moves to the phone loudspeaker and the mic opens. Audio held inside the Data Layer that never backs
+up to the phone is invisible to the phone. That residual is stated in Risk 1, with device check D2b, and its
+follow-up would be a watch-side signal (a watch update), which is out of scope.
+
+New unit cases:
+- a block between the two thresholds (peak 0.015) is forwarded and gives 2;
+- a block written 1.5 s late keeps 2 until its playhead plus the tail;
+- a backlog written at once extends it;
+- an overflow → fallback → 0;
+- `PcmOut`: `sent` comes in order and never for discarded audio, and the call cap overflow → broken.
+
+The no-watch-change constraint stays, because a watch update means `adb install` from a computer over Wi-Fi (README).
+
+F4: accepted (scope) - 001 already decided the platform scope for audio routing: "Android 12+ only; hidden on Android
+11 ... the legacy calls are deprecated and would be a second code path ... On API 30, Buddy behaves as today"
+(`001-audio-io-selector/decisions.md`). 017's live-call part follows it. `LiveWatch`'s static `begin` returns at once
+below API 31, so on API 30 no watch path is exposed without its fallback, `noEarpiece` stays false, and a phone live
+call is today's, where Watch is Auto, as 012 shipped. The Watch texts say live voice on the watch needs Android 12+.
+The plan's Goal states that done-when (a) and (b) are for Android 12+, and Open questions asks Nicholas to confirm.
+This isn't blocking: his phone (S21 FE) is API 31+, where the Verifier checks. A legacy `setSpeakerphoneOn` path was
+rejected again for 001's reasons, and it couldn't be checked on any device he has.

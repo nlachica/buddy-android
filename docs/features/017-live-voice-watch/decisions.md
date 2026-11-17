@@ -66,3 +66,47 @@
   and setting changes are the bug-prone parts, and they get tested. CodexLive only gains two hooks, a bridge method,
   the `pcm` branch and page JS.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - In a phone live call the rule picks a headset's own call device, confirmed, else the speaker (replaces the "headset (Android's routing) else the built-in speaker" entry above)
+- Options: a media headset connected → Android's routing (round 0); always the speaker; select the headset's own
+  communication device and check it took, else the speaker.
+- Choice: the third (plan review round 1 F1). In communication mode Android never plays a call on A2DP, and Bluetooth
+  gets it only over SCO that the app selects, so round 0's rule was the earpiece path with buds. `liveDevice` takes a
+  wired, USB, BLE or hearing-aid call device, or a SCO whose name matches a connected media headset output (the watch
+  has no media output, so its SCO never matches), else the speaker, never the earpiece. A refused device is skipped at
+  once. A device that isn't Android's communication device 2 s after applying (`slipped`) counts as refused, or is
+  applied again if it is the speaker, which also catches Chromium's later earpiece re-picks. All of it runs only
+  while `noEarpiece`, so 001/016 picks keep today's code. Cost: name matching is unverified on the device (D8).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Auto's watch decision in a call uses connected outputs only (`livePick`)
+- Options: `target()` as for read aloud (round 0); the same `pick` with `headsetIn(null, getDevices(OUTPUTS))`.
+- Choice: the second (round 1 F2). `target()`'s API 33 routed answer follows the device Buddy set in communication
+  mode and hides a connected headset, so a Speaker → Auto switch with buds would have sent the voice to the watch.
+  016's normal-mode `target()` is untouched.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The phone mic reopens from the watch's estimated playback, decided in Java; one 0.01 threshold (replaces the "Half-duplex ... (1-s tail)" entry's timing)
+- Options: the page's production time plus 1 s (round 0); a fixed worst-case tail (≈3 s, every turn waits); a
+  watch-side "audible" message (exact, needs a watch update over adb from a computer); a phone-side copy of the watch
+  `Speaker`'s `audibleUntil`, from each block as it is written into the channel.
+- Choice: the phone-side copy (round 1 F3). `toWatch()` returns 0/1/2, and the mic is closed while an audible block
+  isn't written yet, or until the playhead's last audible end plus 1 s. The gate, the playhead and the mic all use
+  0.01 (`Speaker.AUDIBLE`); the page's 0.02 only drives the bar. Half-duplex itself stays (entry above). Residual:
+  audio hidden in the Data Layer's buffers (Risk 1, D2b); the follow-up would be the watch-side signal.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The call's phone queue breaks past 1 s instead of dropping the oldest past 2 s (replaces that part of the "Bounded delay" entry above)
+- Options: live `PcmOut`, 2 s, drop-oldest (round 0); non-live, 1-s cap, overflow = broken.
+- Choice: the second. A watch that falls behind everything the transport buffers plus 1 s can't hold a conversation,
+  so the voice moves to the phone (the brief's fallback). It is today's non-live `PcmOut`, so `ReadStream` needs no
+  `live` flag, and the mic estimate has no dropped audio to account for. Cost: the voice is lost for ReadStream's 3-s
+  grace before the fallback.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The live-call part of Watch is Android 12+, as 001's routing
+- Options: a legacy `setSpeakerphoneOn`/`startBluetoothSco` path for API 30; the live part only on API 31+.
+- Choice: API 31+ (round 1 F4), the facade's `begin` returns below it. This follows 001's decision for the same
+  reasons: deprecated calls, a second code path, and the only target phone is API 31+. On Android 11 a phone live call
+  stays as today, and the Watch texts say "Android 12+". Nicholas may overrule it (plan Open questions).
+- By: Planner (claude-opus-5-5)
