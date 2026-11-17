@@ -20,3 +20,19 @@ F1: fixed in the commit "fix(022): review round 1". The reading place is capture
 F2: fixed in the same commit. `say(kind, text, voice, mirror)` sets `mirror` on the Line before `pump()`/`speak()` can add `talk_no_voice` or redraw; the two lines that set it afterwards are gone, watch-only errors stay unmarked. Not unit-tested: `Talk` needs a Context and TextToSpeech, and the wear module's JUnit covers only pure statics (decision "Unit tests in the wear module"); a speech failure on a received reply is a Verifier device check.
 
 Local `./gradlew :wear:testDebugUnitTest` still can't start here (JVM: "Failed to mark memory page as executable"), so the new test and the changes are unrun; CI is the check.
+
+## Round 2 - Code Reviewer (gpt-6-astra)
+
+No new findings. No blocker or major finding remains open.
+
+Round 1 F1 resolved in source: `TalkActivity.java:377-411` retains the original rows, visible-row index and offset while a restoration is pending. Each rebuild invalidates older callbacks, and the surviving callback computes its index against the current rows. The previous 30-to-seven-row case now either finds a retained row inside the current children or takes the top fallback. `aRetainedAnchorStaysInRangeWhenTheRowsShrink` checks both anchor results. It does not exercise Android callback scheduling; the burst/layout device check remains outstanding, as the Coder disclosed.
+
+Round 1 F2 resolved in source: `Talk.java:351,456-464` marks the actual reply line before adding it and starting speech. A synchronous speech failure at `:487-491` therefore appends an unmarked watch-only error, and `below()` suppresses the mirrored reply beside a snapshot while retaining the newer error. The speech-failure device check remains outstanding; the pure JVM tests do not drive TextToSpeech.
+
+Review scope: re-read the brief, plan, decisions, previous review and Coder response; reviewed `git diff main...HEAD` at `4a4871f7887b5e7c4f67caf8570467ee4387f073`, touched files and connected ChatHub, lifecycle, transport and speech paths. The implementation and planned pure tests cover bounded chronological history, registration ordering, snapshot ordering/filtering and anchor matching. New-chat registration, phone-started updates, fixed controls and scroll focus are wired as planned. No additional correctness, security/data, YAGNI or repository-fit issue found at the intended personal phone/watch scale.
+
+Validation: [CI run 44119219377](https://github.com/nlachica/buddy-android/actions/runs/44119219377) passed for this exact HEAD. Logs confirm `:app:testGithubDebugUnitTest`, `:wear:testDebugUnitTest` and all three release builds succeeded; helper tests, the F-Droid Google-code check and reproducibility check also passed. Local `./gradlew --no-daemon :app:testGithubDebugUnitTest :wear:testDebugUnitTest` again failed before tests could start because the JVM could not mark a memory page executable. `git diff --check main...HEAD` reports only the blank verification template's trailing space, omitted as a style nit.
+
+Not checked: same-release hardware behavior (round-screen readability, opening at the newest message, touch/bezel scrolling, mic/call operation, live updates and long-chat responsiveness), including the two regression scenarios above. These remain the Verifier's checks; this approval is of the code review, not completed device verification. Only this review file was changed.
+
+VERDICT: APPROVE
