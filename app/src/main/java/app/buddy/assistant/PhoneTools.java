@@ -525,7 +525,7 @@ final class PhoneTools {
     // ------------------------------------------------------------- location
 
     private String location() throws Exception {
-        String answer = svc.askConfirm(svc.getString(R.string.tools_card_location), false);
+        String answer = svc.askConfirm(svc.getString(R.string.tools_card_location), false, true); // 020: Bypass shares it without a card
         if (!answer.startsWith("APPROVED")) return "Not shared. " + answer;
         if (svc.checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED
                 && svc.checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != android.content.pm.PackageManager.PERMISSION_GRANTED) {

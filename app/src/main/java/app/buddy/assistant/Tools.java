@@ -515,9 +515,11 @@ final class Tools {
                             + "passwords, security settings), is in another app or the background browser, or is one "
                             + "they set to always ask.");
                 }
-                String answer = svc.askConfirm(summary, true);
-                // covers the next risky tap (after a rule's countdown or its "Don't ask", only a send)
-                if (answer.startsWith("APPROVED")) Guard.approved(a.getString("summary"), BuddyService.selfApproved(answer));
+                // 020: Bypass skips it unless it is about money (a payment app, a money word) or a secret
+                String answer = svc.askConfirm(summary, true, !Guard.moneyApp(svc, front) && !Bypass.secretOrMoney(summary));
+                // covers the next risky tap (after a rule's countdown or its "Don't ask", only a send). Not a skipped
+                // card (Bypass): a vague confirm would otherwise be spent on the next "Place order" tap
+                if (answer.startsWith("APPROVED") && !BuddyService.BYPASSED.equals(answer)) Guard.approved(a.getString("summary"), BuddyService.selfApproved(answer));
                 return text(answer);
             }
             case "ask": {
@@ -665,7 +667,7 @@ final class Tools {
         }
         int secs = Math.max(1, Math.min(300, a.optInt("timeout_s", 60)));
         if (Prefs.phoneShellAsk(svc) && !Guard.takeApproval(false, cmd)) {
-            String answer = svc.askConfirm(svc.getString(R.string.tools_card_shell, cmd), false);
+            String answer = svc.askConfirm(svc.getString(R.string.tools_card_shell, cmd), false, !Bypass.secretOrMoney(cmd)); // 020
             if (!answer.startsWith("APPROVED")) return "Not run. " + answer;
         }
         svc.showActivity(svc.getString(R.string.activity_shell), null);
@@ -1763,17 +1765,20 @@ final class Tools {
         // the run rule covers a button that only sends, and not one the user listed as always asking
         boolean byRule = !userAsks && Guard.sends(svc, target)
                 && (hit == null || Guard.riskyLabel(hit) == null || Guard.sends(svc, hit)) && Guard.runRule(svc, pkg);
+        // 020: Bypass keeps the card when the tap, its app or the draft names money or a secret, or the user listed it
+        boolean money = Bypass.tapMoney(Guard.moneyApp(svc, pkg), target, hit) || userAsks
+                || Bypass.secretOrMoney(draft == null ? null : draft.toString());
         if (ask) {
             boolean send = Guard.sends(svc, target) || (hit != null && Guard.sends(svc, hit));
             // what an OK given only for sending isn't spent on: a button whose own word pays, buys, deletes… Not a
             // "Send" in a money app (no send for a rule, but what the user's "Send 50 to Anna" was for), nor a
             // switch or a button on the user's list, which have no such word
             boolean other = !send && (Guard.otherRisk(target) || Guard.otherRisk(hit));
-            return guardAction(what, card, draft == null ? null : draft.toString(), send, byRule, other);
+            return guardAction(what, card, draft == null ? null : draft.toString(), send, byRule, other, money);
         }
         if (!"smart".equals(mode)) return null;
         return review(what, card, target, draft == null ? null : draft.toString(),
-                () -> Guard.runRule(svc, str(target.getPackageName())));
+                () -> Guard.runRule(svc, str(target.getPackageName())), money);
     }
 
     /**
@@ -1782,7 +1787,7 @@ final class Tools {
      * chat's run rule cover this step (asked only when the reviewer says "ask").
      */
     private String review(String what, java.util.function.Function<String, String> card, AccessibilityNodeInfo target,
-                          String draft, java.util.function.BooleanSupplier rule) throws InterruptedException {
+                          String draft, java.util.function.BooleanSupplier rule, boolean money) throws InterruptedException {
         String app = frontName();
         final String[][] ctx = new String[1][];
         final CountDownLatch got = new CountDownLatch(1);
@@ -1793,7 +1798,7 @@ final class Tools {
         got.await(2, TimeUnit.SECONDS);
         String[] cx = ctx[0];
         String harness = Reviewer.harness(svc, cx == null ? null : cx[0]);
-        if (harness == null) return guardAction(what, card, svc.getString(R.string.tools_card_no_reviewer), false, false);
+        if (harness == null) return guardAction(what, card, svc.getString(R.string.tools_card_no_reviewer), false, false, false, money);
         svc.runOnMain(() -> {
             if (svc.bubble() != null) svc.bubble().setStatus(svc.getString(R.string.tools_status_checking_tap));
         });
@@ -1806,7 +1811,7 @@ final class Tools {
         String why = svc.getString("block".equals(d.decision) ? R.string.tools_card_reviewer_block : R.string.tools_card_reviewer_ask,
                 d.by, d.reason);
         return guardAction(what, card, (draft == null || draft.isEmpty() ? "" : svc.getString(R.string.tools_card_quote, draft) + "\n") + why,
-                false, byRule);
+                false, byRule, false, money);
     }
 
     /** The card's line for a tap on label (null: a button without one) in the app named app (null: not known). */
@@ -1821,14 +1826,12 @@ final class Tools {
      * send: it sends a message, which a notification rule's countdown may approve. byRule: the chat's run rule covers
      * it (see Guard.runRule): it goes ahead without a card, and the chat says so.
      */
+    /**
+     * otherRisk: a risky button that doesn't send, which an approval given only for sending doesn't cover. money (020):
+     * the caller saw money or a secret in this step (see Bypass), so a Bypass chat still gets the card.
+     */
     private String guardAction(String what, java.util.function.Function<String, String> card, String detail, boolean send,
-                               boolean byRule) throws InterruptedException {
-        return guardAction(what, card, detail, send, byRule, false);
-    }
-
-    /** otherRisk: a risky button that doesn't send, which an approval given only for sending doesn't cover. */
-    private String guardAction(String what, java.util.function.Function<String, String> card, String detail, boolean send,
-                               boolean byRule, boolean otherRisk) throws InterruptedException {
+                               boolean byRule, boolean otherRisk, boolean money) throws InterruptedException {
         // a send's detail is the message itself: an approval for another text doesn't cover it (a card asks instead)
         if (Guard.takeApproval(send, send ? detail : null, otherRisk)) return null;
         String app = frontName();
@@ -1840,7 +1843,7 @@ final class Tools {
                 : svc.getString(R.string.tools_card_detail, card.apply(app), detail.contains("\n") || detail.startsWith("“")
                 ? detail.trim() : svc.getString(R.string.tools_card_quote, detail.trim()));
         CARD_SHOWN.set(true);
-        String answer = svc.askConfirm(summary, send);
+        String answer = svc.askConfirm(summary, send, !money && !Guard.moneyApp(svc, frontPkg()) && !Bypass.secretOrMoney(summary));
         if (answer.startsWith("APPROVED")) return null;
         if (answer.startsWith("CHANGES")) return "Not tapped: the user wants changes first. " + answer;
         return "BLOCKED by Buddy's safety rule: the user did not approve “" + what + "”. Don't retry it; "
@@ -1967,9 +1970,12 @@ final class Tools {
             final AccessibilityNodeInfo field = target;
             java.util.function.BooleanSupplier byRule = () -> send && !field.isPassword() && Guard.runRule(svc,
                     str(field.getPackageName()), web || Guard.browser(svc, field.getPackageName()));
+            // 020: Bypass keeps this card in a payment app, on a web page or in a browser, and for a draft that names a
+            // secret or money (the field's whole text, not only what was typed now)
+            boolean money = !send || web || Guard.browser(svc, target.getPackageName()) || Bypass.secretOrMoney(value);
             String blocked = search ? null
-                    : "hard".equals(mode) ? guardAction("Press Enter to send", card, text, send, byRule.getAsBoolean())
-                    : "smart".equals(mode) ? review("Press Enter to send", card, target, text, byRule) : null;
+                    : "hard".equals(mode) ? guardAction("Press Enter to send", card, text, send, byRule.getAsBoolean(), false, money)
+                    : "smart".equals(mode) ? review("Press Enter to send", card, target, text, byRule, money) : null;
             if (blocked != null) return result + " Not sent: " + blocked;
             Thread.sleep(150);
             boolean sent = target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.getId());
@@ -2352,7 +2358,7 @@ final class Tools {
         String note = skipUpstream ? "" : Updates.upstreamNote(Updates.upstreamVersion(), r.version);
         String text = Updates.report(BuildInfo.VERSION, r, note, install);
         if (text != null) return text;
-        String no = SettingsTool.approval(c -> svc.askConfirm(c, false),
+        String no = SettingsTool.approval(c -> svc.askConfirm(c, false, true), // 020: Bypass installs without a card
                 svc.getString(R.string.tools_card_update, r.version, BuildInfo.VERSION, r.notes));
         if (no != null) return "Not installed. " + no;
         svc.showStatus(svc.getString(R.string.tools_status_downloading, r.version));

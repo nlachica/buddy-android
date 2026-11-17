@@ -453,6 +453,8 @@
     <!-- Note in the chat when the countdown ran out. Keep the mark ✓ and the space after it. %1$s = what was approved (shortened). -->
     <string name="card_note_auto_approved">✓ Approved after the countdown: %1$s</string>
     <string name="card_note_rule_approved">✓ Approved by your rule, without asking: %1$s</string>
+    <!-- 020 (fork): a step a chat set to Bypass went ahead with, no card. %1$s: what it was -->
+    <string name="card_note_bypassed">✓ Approved by Bypass, without asking: %1$s</string>
     <!-- Note in the chat after the user tapped the countdown to stop it: the card now waits for them. -->
     <string name="card_note_countdown_stopped">Countdown stopped: waiting for your OK</string>
 
