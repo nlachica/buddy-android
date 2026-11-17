@@ -216,3 +216,9 @@
   the fork passes the Bypass flag to `askConfirm`. Kept both: `(phoneShellAsk || remote)` with
   `!remote && !Bypass.secretOrMoney(cmd)` (a remote computer never skips the card in Bypass). `HELPER_NO` keeps the fork's `buddy_settings` and gains upstream's `add_notification_rule`.
   By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: `add_notification_rule` follows Bypass
+- Review: the new tool's card used the 2-argument `askConfirm`, so a Bypass chat still carded it.
+- Choice: `askConfirm(card, false, !Bypass.secretOrMoney(card))`, the opt-in form every 020 site uses: Bypass adds the rule
+  unless the card (app, filters, instruction) names a secret or money, which keeps the card. The rule still starts on "ask".
+  By: Orchestrator (claude-sonnet-5-5)
