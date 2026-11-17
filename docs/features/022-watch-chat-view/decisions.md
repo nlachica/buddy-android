@@ -50,3 +50,6 @@
 - Options: keep `scrollY` (round 1); keep the distance from the end; anchor on the top-most visible row, found again by kind and text at or before its old index, else the top.
 - Choice: the anchor, because a full window loses rows at the top as rows arrive at the bottom, so neither pixel rule keeps the text in view; there are no row ids, and a wrong match between equal messages is a small jump.
 - By: Planner (claude-opus-5-5)
+
+## Orchestrator decision after plan round 3 (no APPROVE)
+Round 3 F1 accepted as stated, overriding plan.md where they conflict: the phone keeps the latest `view` per node in the existing registration state; it ignores any start or stop older than that, and remembers a stopped view so a delayed start can't revive it; a newer start always wins. Tests: start 2 → start 1 → stop 1 (view 2 still gets updates); stop 2 → delayed start 2 (stays stopped); newer start after a stop works. Why: small, contained, and no new transport, so another planning round isn't worth it.
