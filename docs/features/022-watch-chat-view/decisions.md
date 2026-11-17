@@ -59,3 +59,8 @@ Round 3 F1 accepted as stated, overriding plan.md where they conflict: the phone
 - The snapshot rule is a pure `TalkActivity.takes(...)`, next to `below()` and `anchor()`, so it is tested too. These three went into step 4 with their tests (tests that call them would not compile otherwise); step 5 is the view code only.
 - `mirror` is set on the last line right after `lines.add`/`say(...)` at `/buddy/heard` and `/buddy/reply` (one line each in `Talk.java`), instead of a new constructor argument or a `say` parameter. `Line.count` is package-private so the screen can read the newest `seq` for `mark`.
 - Under a snapshot the screen asks again (`catchUp`) when a mirror line is newer than `mark`; `Talk.fresh` clearing calls `request()` from `drawLive()`, the one place that sees the first YOU line.
+
+## 2026-11-17 - Coder: review round 1 (F1, F2)
+- Options: coalesce pending snapshots; keep the first anchor of a burst and run only the latest restoration; mark `mirror` after `say` (round 0) or in it.
+- Choice: keep the burst's first anchor with a ticket counter (no change to the listener or the redraw), and pass `mirror` into `say` so the line is marked before speech can add a line or redraw.
+- By: Coder (claude-sonnet-5-5)

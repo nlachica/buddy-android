@@ -96,4 +96,15 @@ public class TalkActivityTest {
     public void anAnchorThatLeftIsMinusOne() {
         assertEquals(-1, TalkActivity.anchor(rows("A", "B", "C"), 0, rows("B", "C", "D")));
     }
+
+    /** F1: a burst keeps the first snapshot's rows and index, and finds them in the newest (smaller) rows: in range, or -1. */
+    @Test
+    public void aRetainedAnchorStaysInRangeWhenTheRowsShrink() {
+        String[] big = new String[30];
+        for (int k = 0; k < big.length; k++) big[k] = "m" + k;
+        List<Talk.Line> old = rows(big);
+        List<Talk.Line> small = rows("m23", "m24", "m25", "m26", "m27", "m28", "m29");
+        assertEquals(-1, TalkActivity.anchor(old, 20, small)); // left: the top
+        assertEquals(1, TalkActivity.anchor(old, 24, small)); // still there, at its new index
+    }
 }

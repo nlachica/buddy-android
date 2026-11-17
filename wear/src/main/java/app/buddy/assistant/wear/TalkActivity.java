@@ -78,6 +78,13 @@ public class TalkActivity extends Activity {
     private int mark;
     /** The used snapshot's messages. */
     private final List<Talk.Line> rows = new ArrayList<>();
+    /**
+     * The reading place before the newest unfinished restoration, kept across a burst of snapshots: the views of a
+     * rebuilt, not yet laid out list say nothing. {@code restore} counts the restorations; only the last one runs.
+     */
+    private List<Talk.Line> placeRows;
+    private int placeTop, placeOffset, restore;
+    private boolean placeFollow, placePending;
     /** Why the phone's messages aren't here (no answer, can't reach it), shown under the conversation. */
     private String note = "";
     private final Runnable noAnswer = () -> {
@@ -366,7 +373,20 @@ public class TalkActivity extends Activity {
         main.removeCallbacks(catchUp);
         caughtUp = false;
         note = "";
-        List<Talk.Line> old = new ArrayList<>(rows);
+        // reading place: the end if the user is at it; otherwise the top-most row in view, found again in the new rows
+        if (!placePending) { // else the place of the first snapshot of the burst stays: the views are not laid out yet
+            placeRows = new ArrayList<>(rows);
+            placeFollow = !snapshot || atEnd();
+            placeTop = -1;
+            for (int k = 0; !placeFollow && k < history.getChildCount(); k++) {
+                View r = history.getChildAt(k);
+                if (history.getTop() + r.getBottom() > scroll.getScrollY()) {
+                    placeTop = k;
+                    placeOffset = history.getTop() + r.getTop() - scroll.getScrollY();
+                    break;
+                }
+            }
+        }
         rows.clear();
         JSONArray ms = in.optJSONArray("messages");
         for (int k = 0; ms != null && k < ms.length(); k++) {
@@ -376,27 +396,20 @@ public class TalkActivity extends Activity {
             rows.add(new Talk.Line("you".equals(kind) ? Talk.YOU : "error".equals(kind) ? Talk.ERROR : Talk.BUDDY, m.optString("text")));
         }
         mark = Talk.Line.count; // the watch's own lines made after this one are not in it
-        boolean first = !snapshot;
         snapshot = true;
-        // reading place: the end if the user is at it; otherwise the top-most row in view, found again in the new rows
-        final boolean follow = first || atEnd();
-        int top = -1, offset = 0;
-        for (int k = 0; !follow && k < history.getChildCount(); k++) {
-            View r = history.getChildAt(k);
-            if (history.getTop() + r.getBottom() > scroll.getScrollY()) {
-                top = k;
-                offset = history.getTop() + r.getTop() - scroll.getScrollY();
-                break;
-            }
-        }
         history.removeAllViews();
         for (Talk.Line l : rows) history.addView(line(l.kind, l.text));
-        final int at = top < 0 || top >= old.size() ? -1 : anchor(old, top, rows), keep = offset;
-        final boolean place = !follow && top >= 0;
         drawLive();
+        placePending = true;
+        final int mine = ++restore;
         scroll.post(() -> {
-            if (follow) scroll.fullScroll(View.FOCUS_DOWN);
-            else if (place) scroll.scrollTo(0, history.getTop() + (at < 0 ? 0 : history.getChildAt(at).getTop() - keep));
+            if (mine != restore) return; // a newer snapshot rebuilt the rows: its restoration runs
+            placePending = false;
+            if (placeFollow) scroll.fullScroll(View.FOCUS_DOWN);
+            else if (placeTop >= 0) {
+                int at = placeTop < placeRows.size() ? anchor(placeRows, placeTop, rows) : -1;
+                scroll.scrollTo(0, history.getTop() + (at < 0 ? 0 : history.getChildAt(at).getTop() - placeOffset));
+            }
         });
     }
 
