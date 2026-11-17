@@ -140,3 +140,10 @@
   that post, still before `changed()` returns to the watch link's own post.
 - Local checks: Gradle's JVM won't start here, so the app tests ran with a hand-made javac/JUnit script (`/tmp/buddy-build-023/check.sh`,
   copied from feature 017). `BypassTest.everyShortLabelOfATapReachesTheDecision` fails only there (it needs Gradle's mockable android.jar).
+
+## 2026-11-17 - Coder: a late failed live send (code review round 1, F1)
+- Options: (a) a new `LEFT_LIVE` route in `placeLeftover`, given the run the send went into; (b) `turnEndNotes`-style
+  flush of notes at the callback.
+- Choice: (a). The run id is the only extra state (`ses.runId` already exists); same-run failures still go to notes, so a
+  refused send isn't retried into the input that refused it, and a retry gets the new run's id, so it can't loop.
+- By: Coder (claude-sonnet-5-5)

@@ -17,3 +17,13 @@ Validation:
 - Real Claude, bubble/full-chat/watch interactions, and CI were not run; the plan's Verifier checks remain outstanding.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+F1: fixed in b54d814. `sendLive` remembers the run it sent into; the failure callback passes that run id to `placeLeftover`, which
+returns a new route `LEFT_LIVE` when a different run is going and `liveInput` holds (turn over, not stopped): `leftover` then
+calls `sendLive` again (as a note, already in the chat), into the new run. The same run, a replacement still mid-turn, and
+any run after Stop go to notes as before (Stop: `buddy_done` sends them back to the box). `buddy_done`'s own call passes -1.
+`LeftoverTest.aLateFailedSendGoesLiveToAnIdleReplacementRun` covers the callback-after-replacement-result order, the
+same-run and busy cases, and Stop. Not verified: the real helper/main-thread race; only the routing decision is tested.
+F2: fixed in b54d814. `live_case` removes `go`/`go2` before starting; the notify case asserts only one `result` exists after the
+7 s wait, before `go2` is released.
