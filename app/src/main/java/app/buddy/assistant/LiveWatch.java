@@ -129,10 +129,15 @@ final class LiveWatch {
             if (g != gen || !on) return;
             String s = out.saved();
             if (!s.equals(saved)) { // only a change of the setting decides again
+                out.log("setting " + show(saved) + " -> " + show(s));
                 saved = s;
                 decide();
             }
             out.after(POLL_MS, () -> poll(g));
+        }
+
+        private static String show(String v) {
+            return v.isEmpty() ? "auto" : v;
         }
 
         private void decide() {
