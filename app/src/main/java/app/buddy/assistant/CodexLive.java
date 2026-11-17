@@ -713,8 +713,17 @@ final class CodexLive {
             /** The next bit of the voice (16-bit mono, 16 kHz) as base64, for the watch. */
             @JavascriptInterface
             public void pcm(String b64) {
+                if (web != mine) return;
+                byte[] b = android.util.Base64.decode(b64, android.util.Base64.NO_WRAP);
                 Remote r = remote;
-                if (web == mine && r != null) r.pcm(android.util.Base64.decode(b64, android.util.Base64.NO_WRAP));
+                if (r != null) r.pcm(b);
+                else LiveWatch.pcm(b); // a phone call whose voice is on the watch (017)
+            }
+
+            /** 017, a phone call: bit 1 = the voice plays on the watch (mute here, tap it), bit 2 = the mic is closed. */
+            @JavascriptInterface
+            public int toWatch() {
+                return web == mine && remote == null ? LiveWatch.toWatch() : 0;
             }
 
             /** Loudness of the microphone or the voice (0..1), for the bar's waveform; voice: the voice is audible. */
@@ -889,9 +898,15 @@ final class CodexLive {
      * It logs its states and the data channel's events through Buddy.log.
      */
     private static final String PAGE = "<!doctype html><html><body><audio id=out autoplay></audio><script>\n"
-            + "let pc, ctx, mic, timer, stats;\n"
+            + "let pc, ctx, mic, timer, stats, sendTrack, voiceIn, rem = false, fwd = false, tapped = false;\n"
             + CodexSpeech.TAP_JS
             + "const L = s => { try { Buddy.log(s); } catch (e) {} };\n"
+            // 017: the voice plays on the watch (fwd): muted here and tapped for Java, added lazily so phone-only calls keep today's graph
+            + "function route(on) {\n"
+            + "  fwd = on; document.getElementById('out').muted = on;\n"
+            + "  if (on && voiceIn && !tapped) { tapped = true; tap(ctx, voiceIn, () => fwd); }\n"
+            + "  L('voice on the ' + (on ? 'watch' : 'phone'));\n"
+            + "}\n"
             + "function meter(stream) {\n"
             + "  const an = ctx.createAnalyser(); an.fftSize = 1024; ctx.createMediaStreamSource(stream).connect(an);\n"
             + "  const buf = new Float32Array(an.fftSize);\n"
@@ -925,8 +940,8 @@ final class CodexLive {
             + "  try {\n"
             + "    ctx = new AudioContext(); await ctx.resume().catch(() => {});\n"
             + "    L('audio context ' + ctx.state + ', ' + ctx.sampleRate + ' Hz');\n"
-            + "    let stream;\n"
-            + "    if (Buddy.remote()) { L('watch call: no microphone here'); stream = await ownTrack(); }\n"
+            + "    let stream; rem = Buddy.remote();\n"
+            + "    if (rem) { L('watch call: no microphone here'); stream = await ownTrack(); }\n"
             + "    else try {\n"
             + "      stream = mic = await navigator.mediaDevices.getUserMedia({audio: {echoCancellation: true, noiseSuppression: true, autoGainControl: true}});\n"
             + "      const t = stream.getAudioTracks()[0];\n"
@@ -936,7 +951,8 @@ final class CodexLive {
             + "    const heard = meter(stream);\n"
             + "    let said = () => 0, wasVoice = false;\n"
             + "    pc = new RTCPeerConnection();\n"
-            + "    pc.addTrack(stream.getAudioTracks()[0], stream);\n"
+            + "    sendTrack = stream.getAudioTracks()[0];\n"
+            + "    pc.addTrack(sendTrack, stream);\n"
             + "    const dc = pc.createDataChannel('oai-events');\n"
             + "    dc.onopen = () => { L('data channel open'); Buddy.connected(); }; dc.onclose = () => L('data channel closed');\n"
             + "    dc.onmessage = m => { try { const j = JSON.parse(m.data), ty = j.type || '?';\n"
@@ -951,14 +967,20 @@ final class CodexLive {
             + "      L('remote track ' + e.track.kind + ', muted ' + e.track.muted);\n"
             + "      e.track.onunmute = () => L('remote track unmuted'); e.track.onmute = () => L('remote track muted');\n"
             + "      const s = e.streams[0] || new MediaStream([e.track]);\n"
-            + "      const rem = Buddy.remote(), out = document.getElementById('out'); out.muted = rem; out.volume = 1; out.srcObject = s;\n"
+            + "      voiceIn = s; const out = document.getElementById('out'); out.muted = rem || fwd; out.volume = 1; out.srcObject = s;\n"
             + "      out.onplaying = () => L('audio element playing'); out.onpause = () => L('audio element paused');\n"
             + "      out.play().then(() => L('audio element play ok')).catch(err => L('audio element play failed: ' + err));\n"
             + "      said = meter(s);\n"
             + "      if (rem) { tap(ctx, s, () => true); L('voice tapped for the watch'); }\n"
+            + "      else if (fwd && !tapped) { tapped = true; tap(ctx, s, () => fwd); }\n"
             + "    };\n"
             + "    timer = setInterval(() => { const h = heard(), v = said(), voice = v > 0.02;\n"
-            + "      Buddy.level(Math.min(1, Math.max(h, v) * 3), voice); }, 70);\n"
+            + "      Buddy.level(Math.min(1, Math.max(h, v) * 3), voice);\n"
+            // half-duplex while the voice is on the watch: the phone mic would hear the watch speaker (Java says when it reopens)
+            + "      if (!rem) { const w = Buddy.toWatch(), on = (w & 1) !== 0, m = (w & 2) === 0;\n"
+            + "        if (on !== fwd) route(on);\n"
+            + "        if (sendTrack && sendTrack.enabled !== m) { sendTrack.enabled = m; L('mic ' + (m ? 'open' : 'closed')); } }\n"
+            + "    }, 70);\n"
             + "    let lastIn = 0, lastOut = 0;\n"
             + "    stats = setInterval(async () => { if (!pc) return; let a = '', b = '';\n"
             + "      (await pc.getStats()).forEach(r => { if (r.type === 'outbound-rtp' && r.kind === 'audio') a = 'sent ' + (r.bytesSent - lastOut) + ' B', lastOut = r.bytesSent;\n"
