@@ -749,17 +749,17 @@ final class SettingsTool {
     }
 
     /**
-     * A chat's approvals mode (Session.approvals, the screen's Approvals sheet): ask, routine or strict. get/set use the
-     * stored value ("", "routine", "strict"); get is null when the chat is gone. refusal: why it can't be set (null: it can).
+     * A chat's approvals mode (Session.approvals, the screen's Approvals sheet): ask, routine, strict or bypass. get/set
+     * use the stored value ("", "routine", "strict", "bypass"); get is null when the chat is gone. refusal: why it can't be set (null: it can).
      */
     static Scalar approvals(String chat, String title, String refusal, Supplier<String> get, Consumer<String> set) {
         return new Scalar("chat/" + chat + "/approvals", () -> {
             String s = get.get();
             return s == null ? null : approvalsChoice(s);
-        }, v -> set.accept(v.equals("ask") ? "" : v), " It applies from the chat's next step.", "ask", "routine", "strict") {
+        }, v -> set.accept(v.equals("ask") ? "" : v), " It applies from the chat's next step.", "ask", "routine", "strict", "bypass") {
             @Override
             String allowed() {
-                return "ask (Ask), routine (Routine allowed), strict (Always ask)";
+                return "ask (Ask), routine (Routine allowed), strict (Always ask), bypass (Bypass)";
             }
 
             @Override
@@ -782,7 +782,7 @@ final class SettingsTool {
     }
 
     private static String label(String choice) {
-        return choice.equals("ask") ? "Ask" : choice.equals("routine") ? "Routine allowed" : choice.equals("strict") ? "Always ask" : "?";
+        return choice.equals("ask") ? "Ask" : choice.equals("routine") ? "Routine allowed" : choice.equals("strict") ? "Always ask" : choice.equals(Bypass.MODE) ? "Bypass" : "?";
     }
 
     private static String effect(String choice) {
@@ -791,6 +791,11 @@ final class SettingsTool {
                 return "until it's changed, routine steps go ahead in every app without a card (sending a message, or a step the "
                         + "reviewer would ask about); paying, buying, deleting, installing, passwords and security settings still "
                         + "ask, and so does everything in banking and payment apps, Settings and app stores";
+            case "bypass":
+                return "no approval cards: the agent's steps, Buddy settings, phone commands and installs go ahead and each is "
+                        + "noted in the chat; paying, buying, money transfers, banking and payment apps, passwords, codes and "
+                        + "keys, reading the clipboard and always-ask buttons still ask, and so do changes to approvals modes, "
+                        + "Safety settings and a chat's allowed apps";
             case "strict":
                 return "also in apps set to Trust, Buddy asks before sending, posting, buying or deleting, and the chat's "
                         + "Allowed without asking list doesn't apply";
@@ -1494,7 +1499,7 @@ final class SettingsTool {
                         + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
                         + "page: agents and models (default agent and models, API key services' use, name and shown models, "
                         + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
-                        + "chat's approvals (Ask, Routine allowed, Always ask) and allowed apps. Keys are never shown. To set one (mcp/<id>/key, service/<id>/key, or a new "
+                        + "chat's approvals (Ask, Routine allowed, Always ask, Bypass) and allowed apps. Keys are never shown. To set one (mcp/<id>/key, service/<id>/key, or a new "
                         + "mcp/<id> with its address), put just the key in a file in Buddy's Linux, without printing it (from "
                         + "Bitwarden: the secret's value), and pass its path as key_file. An MCP server that wants its key in "
                         + "another header than Authorization: Bearer takes the line \"Header-Name: key\". On a /key name, value "
@@ -1534,8 +1539,19 @@ final class SettingsTool {
         }
         Setting s = onMain(main, () -> find(svc, name, file));
         if (s == null) return unknown(name);
+        final boolean keyFile = file != null;
         return change(s, a.optString("value"), svc.getString(R.string.tools_card_setting),
-                card -> svc.askConfirm(card, false), main);
+                card -> svc.askConfirm(card, false, !keepsCard(s.name, keyFile)), main);
+    }
+
+    /**
+     * 020: does a change of this setting keep its card in a Bypass chat? By name only, so no value needs reading:
+     * secrets (keys, key files), the approvals modes, and the settings that decide which money steps card (per-app
+     * modes, button rules, built-in risky words, a chat's allowed apps), whatever the new value.
+     */
+    static boolean keepsCard(String name, boolean keyFile) {
+        return keyFile || name.endsWith("/key") || name.equals("builtin_risky_words") || name.startsWith("app/")
+                || name.startsWith("button/") || name.matches("chat/[^/]+/(approvals|allowed/.+)");
     }
 
     private static String unknown(String name) {
@@ -1731,7 +1747,7 @@ final class SettingsTool {
             b.append("app/").append(e.getKey()).append(" = ").append(e.getValue()).append('\n');
         }
         b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off), "
-                + "chat/<id>/schedule (JSON), chat/<id>/approvals (ask, routine: Routine allowed, strict: Always ask) and "
+                + "chat/<id>/schedule (JSON), chat/<id>/approvals (ask, routine: Routine allowed, strict: Always ask, bypass: Bypass) and "
                 + "chat/<id>/allowed/<package> (on, off: apps allowed without asking):\n");
         chatLines(b, ChatHub.get(svc).sessions.all, here, ChatHub.get(svc)::approvalsEditable);
         b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
