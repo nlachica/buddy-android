@@ -45,7 +45,7 @@ If you use the microphone, your voice is turned into text by the engine you choo
 
 ## Watch
 
-If you use Buddy's watch app (GitHub version only), the chat titles, your words and Buddy's replies pass between your phone and your watch through Google Play services' Wear OS link: over Bluetooth, or, when the watch is out of range, through Google's servers, encrypted. The watch's speech recognizer turns your voice into text on the watch. During a live call from the watch, the watch's microphone audio goes to the phone over the same link and on to ChatGPT, exactly as the phone's own live voice does, and ChatGPT's voice comes back the same way; when ChatGPT's voice is the phone's engine, replies are also spoken that way (the reply text goes to ChatGPT to be read aloud, as the phone's read-aloud does). Buddy has no servers of its own and gets nothing from this.
+If you use Buddy's watch app (GitHub version only), the chat titles, your words and Buddy's replies, and the latest messages of a chat you open on the watch (also those typed on the phone while it is open), pass between your phone and your watch through Google Play services' Wear OS link: over Bluetooth, or, when the watch is out of range, through Google's servers, encrypted. The watch's speech recognizer turns your voice into text on the watch. During a live call from the watch, the watch's microphone audio goes to the phone over the same link and on to ChatGPT, exactly as the phone's own live voice does, and ChatGPT's voice comes back the same way; when ChatGPT's voice is the phone's engine, replies are also spoken that way (the reply text goes to ChatGPT to be read aloud, as the phone's read-aloud does). Buddy has no servers of its own and gets nothing from this.
 
 ## Data stored on your phone
 
