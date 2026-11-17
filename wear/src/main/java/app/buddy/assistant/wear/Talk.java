@@ -49,8 +49,14 @@ public class Talk extends Service {
     static final int YOU = 0, BUDDY = 1, ERROR = 2;
 
     static final class Line {
+        /** The seq of the newest line made so far. */
+        static int count;
         final int kind;
         final String text;
+        /** Goes up with every line, also across lines.clear(): TalkActivity tells which came after a snapshot of the chat. */
+        final int seq = ++count;
+        /** A message the phone's chat has as well (/buddy/heard, /buddy/reply), unlike the watch's own notes (022). */
+        boolean mirror;
 
         Line(int kind, String text) {
             this.kind = kind;
@@ -333,6 +339,7 @@ public class Talk extends Service {
                 ChatsActivity.remember(this, chat, title, accent); // words sent (009); for a New chat, now that the chat exists
                 h.removeCallbacks(noHeard);
                 lines.add(new Line(YOU, text));
+                lines.get(lines.size() - 1).mirror = true;
                 if (!queue.isEmpty()) next();
                 break;
             case Phone.STEP:
@@ -341,7 +348,7 @@ public class Talk extends Service {
             case Phone.REPLY:
                 status = "";
                 ChatsActivity.remember(this, chat, title, accent); // the default chat: the one that last answered
-                say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1));
+                say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1), true);
                 break;
             case Phone.DONE:
                 if ("stopped".equals(in.optString("outcome"))) say(ERROR, getString(R.string.talk_stopped));
@@ -442,12 +449,14 @@ public class Talk extends Service {
 
     /** Shows a line and says it (in order, once). End messages are said too: the user may not be looking. */
     private void say(int kind, String text) {
-        say(kind, text, -1);
+        say(kind, text, -1, false);
     }
 
-    /** voice: a reply id the phone streams in ChatGPT's voice (-1: the watch's TTS says it). */
-    private void say(int kind, String text, long voice) {
-        lines.add(new Line(kind, text));
+    /** voice: a reply id the phone streams in ChatGPT's voice (-1: the watch's TTS says it). mirror: the phone's chat has it too. */
+    private void say(int kind, String text, long voice, boolean mirror) {
+        Line line = new Line(kind, text);
+        line.mirror = mirror; // before speech can add a line of its own or redraw
+        lines.add(line);
         if (voice >= 0 && saidByWatch.remove(voice)) voice = -1; // the phone already gave up on its voice
         Log.i("BuddyTalk", "reply arrived" + (voice >= 0 ? " (voice " + voice + ")" : " (tts)"));
         if (voice < 0 && ttsFailed) return;
