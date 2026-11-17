@@ -58,3 +58,14 @@
   writes it against the new names, and the reviewer and Verifier must rerun the same file. A framework or CI step
   would still grow scope beyond the brief. This replaces the "outside the repo" part of the page syntax check entry.
 - By: Planner (claude-opus-5-5), plan review round 1
+
+## 2026-11-17 - "pc is not closed" tested with `signalingState`
+- Options: `connectionState` (what the page already reads); `signalingState`.
+- Choice: `signalingState`, because every WebView has it and `close()` sets it to `'closed'`; the page's own comment says
+  some WebViews misreport `connectionState`. The plan said only "not `'closed'`".
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-17 - Where the setting log's "auto" label lives
+- Options: inline ternary twice; a two-line private `show` in `LiveWatch.Coordinator` (the plan's name).
+- Choice: private static `show` next to `decide`, used twice. No other change to `LiveWatch`.
+- By: Coder (claude-sonnet-5-5)
