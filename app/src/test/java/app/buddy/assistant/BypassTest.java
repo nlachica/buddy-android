@@ -122,4 +122,54 @@ public class BypassTest {
         assertFalse(Bypass.secretOrMoney("!"));
         assertEquals(true, Bypass.secretOrMoney(sb + " Pay $20"));
     }
+
+    private static org.json.JSONObject j(String json) throws Exception {
+        return new org.json.JSONObject(json);
+    }
+
+    @Test
+    public void theBrowsersMoneyContextCountsBeforePresentation() throws Exception {
+        assertTrue(BrowserTools.money(j("{submitLabel:'Pay'}")));
+        assertTrue(BrowserTools.money(j("{ok:true,label:'Message',multiline:true,search:false,submitLabel:'Send',payForm:false,form:'/checkout'}")));
+        assertTrue(BrowserTools.money(j("{label:'→',title:'Pay now'}")));
+        assertTrue(BrowserTools.money(j("{label:'',ids:'add-to-cart-button'}")));
+        assertTrue(BrowserTools.money(j("{label:'Continue',payForm:true}")));
+        assertTrue(BrowserTools.money(j("{label:'Continue',form:'/checkout/step2'}")));
+        assertFalse(BrowserTools.money(j("{label:'Send'}")));
+        assertFalse(Bypass.secretOrMoney("https://mail.example/compose"));
+        assertFalse(BrowserTools.money(j("{submitLabel:'Search'}")));
+        assertFalse(BrowserTools.money(j("{ok:true,label:'Message',multiline:true,search:false,submitLabel:'Send',payForm:false,form:'/note'}")));
+        assertFalse(BrowserTools.money(j("{label:'Delete',title:'Delete draft'}")));
+    }
+
+    @Test
+    public void aBypassedTapDoesNotApproveAMoneyDialog() {
+        assertTrue(BrowserTools.dialogAsks(true, true, "Pay $20?"));
+        assertTrue(Bypass.secretOrMoney("Pay $20?")); // so it cards
+        assertTrue(BrowserTools.dialogAsks(true, true, "Delete this item?"));
+        assertFalse(Bypass.secretOrMoney("Delete this item?")); // so it is skipped and noted
+        assertFalse(BrowserTools.dialogAsks(true, false, "Pay $20?")); // upstream, unchanged
+        assertTrue(BrowserTools.dialogAsks(false, false, "Pay $20?"));
+        assertFalse(BrowserTools.dialogAsks(false, false, "Hello"));
+        // a money site keeps the card even when the dialog's own words are harmless
+        assertTrue(BrowserTools.dialogAsks(false, true, "Send now?"));
+        assertFalse(Bypass.secretOrMoney("Send now?"));
+        assertTrue(Bypass.secretOrMoney("https://bank.example/checkout"));
+        assertTrue(Guard.moneyApp(null, "bank.example"));
+    }
+
+    private static String asset(String name) throws Exception {
+        return new String(Files.readAllBytes(new File("src/main/assets/" + name).toPath()), StandardCharsets.UTF_8);
+    }
+
+    @Test
+    public void theBrowserScriptGivesEnterTheFormAndTheWholeDraft() throws Exception {
+        String js = asset("browser.js");
+        String focus = js.substring(js.indexOf("B.focus = function"), js.indexOf("B.choose = function"));
+        assertTrue(focus.contains("payForm:") && focus.contains("form:") && focus.contains("submitLabel:"));
+        String target = js.substring(js.indexOf("B.target = function"), js.indexOf("B.armClick"));
+        assertTrue(target.contains("draft: B.draft("));
+        String draft = js.substring(js.indexOf("B.draft = function"), js.indexOf("function payForm"));
+        assertFalse(draft.contains("300"));
+    }
 }
