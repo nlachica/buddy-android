@@ -27,3 +27,17 @@ with its error logged once, pause logs stop at 5, the `rtp` line has the new fie
 (Test plan, "Page check", parts 2-4). The Coder writes it first, and it must fail on the current page. To keep it
 small: plain Node, committed as `docs/features/020-watch-voice-fix/pagecheck.js`, not in CI, no production change for
 testability. Device checks still prove the audio itself.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+No new findings. Round 1 F1 and F2 are resolved in the revised plan.
+
+F1 resolution checked: Design 2 installs the initial log and state listener before a nonblocking `wake()`, with one in-flight resume and guard release on either outcome (`docs/features/020-watch-voice-fix/plan.md:41-53`). The planned pending-resume check covers continued setup, retry after rejection, and later suspension (`:151-154`). This addresses the ordering at `app/src/main/java/app/buddy/assistant/CodexLive.java:941-953`; it also matches the [Web Audio resume algorithm](https://webaudio.github.io/web-audio-api/#dom-audiocontext-resume), which retains promises when a context is not allowed to start. Device-policy failure remains explicitly unproven and is not claimed to be solved by retries.
+
+F2 resolution checked: the committed page check will exercise pause recovery, pending-play suppression, rejected-play retries, duplicate-error suppression, log capping, stats fields and hang-up (`docs/features/020-watch-voice-fix/plan.md:155-163`). The existing shutdown closes the peer before clearing the element's source and closing the context (`app/src/main/java/app/buddy/assistant/CodexLive.java:1003-1009`), matching the proposed recovery guards.
+
+The four done-when items have implementation steps and verification paths. The shared page serves both phone and watch calls; setting diagnostics use the existing `LiveWatch.poll` change branch and log sink; rotation stays in the existing serial logger. The plan retains actual phone/watch audio delivery and log rotation as after-switch checks with a PARTIAL verification verdict until demonstrated. No additional abstraction, permission or unrelated routing change is needed.
+
+Review checks: reread the brief, research placeholder, diagnosis, revised plan, decisions and round 1; inspected the page, logger, watch routing and setting test, shared speech tap, BuildInfo and build workflow. Reran the plan's syntax script successfully for both current pages. The proposed behaviour check is not implemented yet; no Android build, CI run or device audio test was performed in this review. Only this review file was changed.
+
+VERDICT: APPROVE
