@@ -65,3 +65,15 @@ F2: not a code change, for the orchestrator. I don't push, and `build.yml` runs 
 `feat/017-live-voice-watch` still returns `[]`. Push the head, dispatch `build.yml` on it and record the result (release builds, F-Droid
 isolation, reproducibility). Until then the Gradle build, lint and APKs are CI-only and unverified. Round 1 F1 stays fixed in 78e8f97
 (`heldEnded` cleared at `LiveWatch.java:291`, with its regression test). No source change; no checks rerun.
+
+## Round 4 - Code Reviewer (gpt-6-astra)
+
+Reviewed `git diff main...HEAD` at `80d042b`, the brief, plan, decisions, all earlier review rounds and coder responses, touched source/tests and connected routing/playback code. Since round 3's reviewed head (`4f5d93c`), only this review document changed. Round 1 F1 remains resolved by the held-audio end-marker fix and its regression test. The accepted failure-tail decision is unchanged. No new correctness, security/data, YAGNI or convention findings for the intended one-phone/paired-watch use.
+
+F2 [blocker] Required branch CI still has no run - `docs/features/017-live-voice-watch/brief.md:22` requires green CI; `.github/workflows/build.yml:63` runs the Gradle unit tests and GitHub/F-Droid/Wear release builds. Read-only queries in this round again show repository Actions enabled (`enabled: true`, `allowed_actions: all`), while `gh run list -R nlachica/buddy-android --branch feat/017-live-voice-watch -L 6 --json databaseId,headSha,status,conclusion,url,workflowName,createdAt` returns `[]`. The supplied HTTP 422 is historical; the current blocker is missing CI evidence, not a demonstrated source build failure. -> The orchestrator should push the reviewed head if needed, dispatch `build.yml` on this branch, and record a green run including the release builds, F-Droid Google-code isolation and reproducibility checks. A feature-branch push alone does not trigger this workflow. No source fix or further coder round is needed for F2.
+
+Validation: reran `/tmp/buddy-build-017/check.sh` for both flavors: GitHub **172 tests passed**, F-Droid **148 tests passed**, including the held-speech regression and the routing, playback acknowledgement and failure-tail cases. This harness compiles source copies with javac/JUnit, an API-35 Android jar, Wear stubs and an existing API-36 compatibility substitution; it does not establish a Gradle/APK build. The source and page JS are unchanged since round 3's syntax check, so that check was not repeated. `git diff --check main...HEAD` reports only the existing empty `verify.md` verdict's trailing whitespace, omitted as a style-only nit. Only this review document was modified in the repository.
+
+Not checked: real WebView/audio behavior, device checks D1-D8 (including D2b), Gradle release builds, lint and CI. `verify.md` still contains no device evidence; those checks remain with the Verifier under the plan's post-install procedure. The normal three-round review limit has already been exceeded; the remaining CI gate needs orchestrator action rather than another unchanged code-review loop.
+
+VERDICT: REVISE
