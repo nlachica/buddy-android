@@ -214,6 +214,20 @@ public class ChatApprovalsSettingTest {
     }
 
     @Test
+    public void removingAnAlwaysAskRuleKeepsItsCardAndItsRuleOnDenial() throws Exception {
+        AtomicInteger cards = new AtomicInteger(), writes = new AtomicInteger();
+        AtomicReference<String> rule = new AtomicReference<>("ask");
+        String d = bypassEdit(SettingsTool.button(null, "Continue", "", true, rule::get, v -> {
+            writes.incrementAndGet();
+            rule.set(v);
+        }), "", "bypass", false, false, cards, false);
+        assertTrue(d, d.startsWith("Not changed"));
+        assertEquals(1, cards.get());
+        assertEquals(0, writes.get());
+        assertEquals("ask", rule.get());
+    }
+
+    @Test
     public void otherModesAndRuleRunsSkipNoSettingCard() throws Exception {
         for (Object[] m : new Object[][]{{"routine", false}, {"", false}, {"strict", false}, {"bypass", true}}) {
             AtomicInteger cards = new AtomicInteger();

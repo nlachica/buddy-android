@@ -480,14 +480,19 @@ final class BrowserTools {
 
     /** 020: does this item, or the field's form, point at money: a payment form, or money in its form, title, label, ids? */
     static boolean money(JSONObject o) {
-        return o.optBoolean("payForm") || Bypass.secretOrMoney(o.optString("form"), o.optString("title"),
-                o.optString("label"), o.optString("ids"), o.optString("submitLabel"));
+        return o.optBoolean("payForm") || CHECKOUT.matcher(o.optString("form")).find() || Bypass.secretOrMoney(o.optString("form"),
+                o.optString("title"), o.optString("label"), o.optString("ids"), o.optString("submitLabel"));
     }
 
     /** 020: is the chat's page a money site: a bank or payment name for its host, or money in its address? */
     private boolean moneySite(String key) {
         String[] p = Browser.page(key);
-        return Guard.moneyApp(svc, host(key)) || Bypass.secretOrMoney(p == null ? null : p[0]);
+        return Guard.moneyApp(svc, host(key)) || moneyUrl(p == null ? "" : p[0]);
+    }
+
+    /** 020: does an address name money: a checkout page as riskyTap reads one, or a money word? */
+    static boolean moneyUrl(String url) {
+        return CHECKOUT.matcher(url).find() || Bypass.secretOrMoney(url);
     }
 
     /**

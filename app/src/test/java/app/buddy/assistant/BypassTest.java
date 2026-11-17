@@ -38,6 +38,17 @@ public class BypassTest {
         assertTrue(Bypass.secretOrMoney("hello", "Pay now"));
     }
 
+    /** The money labels and ids Guard's risky words and BrowserTools' ids card (send/delete words excluded). */
+    @Test
+    public void everyMoneyLabelOfTheAskRulesIsMoney() {
+        String[] money = {"Pedir", "Dodaj do koszyka", "Do koszyka", "addtocart", "add-to-cart", "add_to_cart", "Add to basket",
+                "Pay now", "Place order", "Passer la commande", "In den Warenkorb", "Zahlungspflichtig bestellen", "Toevoegen aan winkelwagen",
+                "Добавить в корзину", "Додати до кошика", "Sepete ekle", "Tambah ke keranjang", "カートに入れる", "加入购物车",
+                "Inscrever-se", "Iscriviti", "Adicionar ao carrinho", "Añadir al carrito", "Aggiungi al carrello"};
+        for (String s : money) assertTrue(s, Bypass.secretOrMoney(s));
+        assertFalse(Bypass.secretOrMoney("Kosztorys"));
+    }
+
     @Test
     public void noCardFrameDecidesByItself() throws Exception {
         String[] names = {"tools_card_tap", "tools_card_tap_in", "tools_card_tap_this", "tools_card_tap_this_in",
@@ -135,6 +146,13 @@ public class BypassTest {
         assertTrue(BrowserTools.money(j("{label:'',ids:'add-to-cart-button'}")));
         assertTrue(BrowserTools.money(j("{label:'Continue',payForm:true}")));
         assertTrue(BrowserTools.money(j("{label:'Continue',form:'/checkout/step2'}")));
+        // checkout evidence riskyTap reads (CHECKOUT) keeps its card too, as a form name or in the address
+        assertTrue(BrowserTools.money(j("{label:'Continue',submits:true,form:'/billing'}")));
+        assertTrue(BrowserTools.money(j("{label:'Continue',submits:true,form:'checkoutForm'}")));
+        assertTrue(BrowserTools.moneyUrl("https://shop.example/checkout-step2"));
+        assertTrue(BrowserTools.moneyUrl("https://shop.example/billing/address"));
+        assertFalse(BrowserTools.moneyUrl("https://shop.example/note"));
+        assertFalse(BrowserTools.money(j("{label:'Continue',submits:true,form:'/note'}")));
         assertFalse(BrowserTools.money(j("{label:'Send'}")));
         assertFalse(Bypass.secretOrMoney("https://mail.example/compose"));
         assertFalse(BrowserTools.money(j("{submitLabel:'Search'}")));
