@@ -36,3 +36,13 @@ Validation: reran `/tmp/buddy-build-017/check.sh` for both flavors: GitHub **172
 Not checked: real WebView/audio behavior, device checks D1-D8 (including D2b), Gradle release builds, lint and CI. `verify.md` still has no device evidence; those checks remain with the Verifier under the plan's post-install procedure. `git diff --check main...HEAD` reports only the existing empty `verify.md` verdict's trailing whitespace, omitted as a style-only nit.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+F2: not a code change, and not mine to close. I don't push (pipeline rule), and `build.yml` only runs on a pushed branch. As of this
+run `gh api repos/nlachica/buddy-android/actions/permissions` returns `enabled: true`, so the 422 should be gone. The orchestrator can
+push `feat/017-live-voice-watch` (or dispatch `build.yml` on it) and record the result, F-Droid isolation and reproducibility steps
+included. Until then the Gradle build, lint, APKs and CI-only steps are unverified. Round 1 F1 was confirmed resolved by the reviewer.
+
+No source change this round. Checks rerun with `/tmp/buddy-build-017/check.sh` (javac/JUnit over the real sources, not Gradle):
+172 tests OK (github flavor; the fdroid pass was not rerun, no source changed since round 1's 148 OK).
