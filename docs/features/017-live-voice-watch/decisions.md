@@ -136,3 +136,10 @@
   link only gains an `attached` callback. Costs: a channel and a 300 ms prebuffer per utterance after a pause, the
   watch's notification per reading, and lag inside one long utterance isn't bounded (it only delays the voice).
 - By: Planner (claude-opus-5-5)
+
+## Orchestrator decision after plan round 3 (no APPROVE)
+Round 3's only open finding (F1, `broken`/disconnect taken as proof of silence) is accepted with a bounded fix rather than another planning round:
+- Only an explicit watch answer (`played` code 2, or hush code 0 *while the channel is still attached*) counts as silence → mic reopens after TAIL (300 ms).
+- A locally synthesized `broken`, a disconnect, or the 30-s give-up are failures: the mic stays closed for FAIL_TAIL = 1500 ms (the watch Speaker's buffer is 1 s, `Speaker.java:28-29`, plus margin), then reopens. ReadStream gets the smallest change needed to tell the coder which case occurred (e.g. a flag on `closed`), if it can't be told apart otherwise.
+- Tests: LiveWatchTest covers a local `broken` with no answer, and a disconnect during the final drain after a mid-utterance setting change; both keep the mic closed ≥ FAIL_TAIL.
+Why: the residual risk is bounded by the watch's 1-s buffer; a receiver-stop ack would need a watch update, which costs more than it's worth here. This overrides plan.md where they conflict.
