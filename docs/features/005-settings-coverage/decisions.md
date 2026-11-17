@@ -169,3 +169,10 @@
   "Pause media while listening" (`pause_media_for_listening`, pref `listen_pause_media`). Registered as on/off scalars in
   `SettingsTool.scalars` so each takes the approval card with old and new value. The paired-computers list
   (`tailnet_devices`) is not registered: it holds pairing keys, and stays this phone's own (Backup `OWN`). By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: editing a rule keeps the fields the value leaves out (`chat`)
+- Review found `rule/<id>` rebuilt the rule from the value alone, so an edit dropped `chat` (the binding 2.3.12's
+  `add_notification_rule` sets) and reset every other omitted field to its default.
+- Choice: the value is laid over the rule's current JSON (`merged` in `SettingsTool.rule`), for both the check and the
+  write; `rule/new` is unchanged. `chat` is named in the setting's description. Merge, not replace, so a one-field edit works.
+  By: Orchestrator (claude-sonnet-5-5)
