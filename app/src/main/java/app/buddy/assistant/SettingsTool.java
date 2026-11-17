@@ -23,8 +23,7 @@ import java.util.function.Supplier;
  * The fork's buddy_settings tool (github flavor only): the agent reads Buddy's settings and changes one, including
  * those upstream keeps for the user alone. Every change goes through {@link #change}: the user approves it on a card
  * that names the setting with its old and new value, and nothing is written unless that card (and no other answer)
- * said yes and the setting is still as the card showed it. The one exception: in a chat set to Routine allowed, an
- * ORDINARY setting (voice, audio, appearance) is written with no card and noted in the chat. Keys, tokens and server addresses are never shown.
+ * said yes and the setting is still as the card showed it. Keys, tokens and server addresses are never shown.
  */
 final class SettingsTool {
     private static final java.util.regex.Pattern WHITE = java.util.regex.Pattern.compile("\\s");
@@ -791,8 +790,7 @@ final class SettingsTool {
             case "routine":
                 return "until it's changed, routine steps go ahead in every app without a card (sending a message, or a step the "
                         + "reviewer would ask about); paying, buying, deleting, installing, passwords and security settings still "
-                        + "ask, and so does everything in banking and payment apps, Settings and app stores. Ordinary Buddy "
-                        + "settings (voice, audio, appearance) change without a card too";
+                        + "ask, and so does everything in banking and payment apps, Settings and app stores";
             case "strict":
                 return "also in apps set to Trust, Buddy asks before sending, posting, buying or deleting, and the chat's "
                         + "Allowed without asking list doesn't apply";
@@ -1431,40 +1429,11 @@ final class SettingsTool {
     }
 
     /**
-     * The settings that only change how Buddy looks and sounds. In a Routine allowed chat these skip the card; every
-     * other name (keys, permissions, safety, Linux tools, MCP, agents, and any setting added later) still asks.
-     */
-    static final java.util.Set<String> ORDINARY = new java.util.HashSet<>(java.util.Arrays.asList(
-            "chat_bubble", "tap_action", "panel_size", "theme", "accent", "surface", "face",
-            "read_aloud", "voice_input", "voice_output", "chatgpt_voice", "audio_device", "voice_languages",
-            "assist_mode", "live_continue", "pause_media", "update_notices"));
-
-    static boolean sensitive(String name) {
-        return !ORDINARY.contains(name);
-    }
-
-    /** Routine allowed as upstream's Guard.runRule reads it: the chat's mode, and not a rule's run. */
-    static boolean routineChat(String approvals, boolean ruleRun) {
-        return "routine".equals(approvals) && !ruleRun;
-    }
-
-    private static final String ROUTINE_NOTE = " (Routine allowed: no card, noted in the chat)";
-
-    /**
      * Changes a setting: check, snapshot, card, then, only if the user approved and nothing changed meanwhile, write.
      * cardFormat: R.string.tools_card_setting (name, now, new). main runs the snapshot and the write on the main
      * thread, where the settings screens write too, so the compare-and-write can't interleave with them.
      */
     static String change(Setting s, String value, String cardFormat, Asker asker, Executor main) throws Exception {
-        return change(s, value, cardFormat, asker, main, null);
-    }
-
-    /**
-     * The same, with routine: null cards every change; else an ordinary setting skips the card (a Routine allowed
-     * chat) and routine gets the card's text once the write succeeded, for the note in the chat.
-     */
-    static String change(Setting s, String value, String cardFormat, Asker asker, Executor main,
-            Consumer<String> routine) throws Exception {
         if (value.length() > MAX) return "Not changed: the value is over " + MAX + " characters.";
         String v, old;
         String[] nn;
@@ -1476,12 +1445,8 @@ final class SettingsTool {
         } catch (IllegalArgumentException | IllegalStateException e) {
             return "Not changed: " + e.getMessage();
         }
-        String card = String.format(cardFormat, s.name, nn[0], nn[1]);
-        boolean skip = routine != null && !sensitive(s.name);
-        if (!skip) {
-            String no = approval(asker, card);
-            if (no != null) return "Not changed. " + no;
-        }
+        String no = approval(asker, String.format(cardFormat, s.name, nn[0], nn[1]));
+        if (no != null) return "Not changed. " + no;
         try {
             s.prepare(v);
             return onMain(main, () -> {
@@ -1491,10 +1456,7 @@ final class SettingsTool {
                         return "Not changed: " + s.name + " changed while the card was open (now: " + s.view(now)
                                 + "). Ask again.";
                     }
-                    String done = "Changed " + s.name + ": " + nn[0] + " → " + nn[1] + s.set(v);
-                    if (!skip) return done;
-                    routine.accept(card);
-                    return done + ROUTINE_NOTE;
+                    return "Changed " + s.name + ": " + nn[0] + " → " + nn[1] + s.set(v);
                 }
             });
         } catch (InterruptedException e) {
@@ -1528,9 +1490,7 @@ final class SettingsTool {
                 "Read and change Buddy's own settings: this is how to do it, not by tapping Buddy's screens. With no "
                         + "arguments, lists every setting with its value and what it accepts. With name, shows that one in full. "
                         + "With name and value, changes it. Buddy shows the user an approval card for each change itself, so "
-                        + "don't call confirm first; if they deny it, nothing changes. In a chat set to Routine allowed, ordinary "
-                        + "settings (voice, audio, appearance) change without a card and are noted in the chat; keys, permissions, "
-                        + "safety and approvals, Linux tools, MCP servers and the other sensitive ones still ask. value \"\" deletes an item (rule, "
+                        + "don't call confirm first; if they deny it, nothing changes. value \"\" deletes an item (rule, "
                         + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
                         + "page: agents and models (default agent and models, API key services' use, name and shown models, "
                         + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
@@ -1574,14 +1534,8 @@ final class SettingsTool {
         }
         Setting s = onMain(main, () -> find(svc, name, file));
         if (s == null) return unknown(name);
-        // Routine allowed chats skip the card for ordinary settings; the note says what changed. null: card everything.
-        Consumer<String> routine = !routineChat(ChatHub.get(svc).approvalsFor(here), Triggers.ruleRun(here)) ? null
-                : card -> svc.runOnMain(() -> {
-                    Sessions.Session c = chat(svc, here);
-                    if (c != null) ChatHub.get(svc).note(c, Bubble.Kind.STEP, svc.getString(R.string.run_rule_approved, card));
-                });
         return change(s, a.optString("value"), svc.getString(R.string.tools_card_setting),
-                card -> svc.askConfirm(card, false), main, routine);
+                card -> svc.askConfirm(card, false), main);
     }
 
     private static String unknown(String name) {
