@@ -88,3 +88,37 @@
 - Choice: `ChatScrollTest` asserts no `fullScroll(` in either file, `FOCUS_BLOCK_DESCENDANTS` in Bubble, and
   `computeScrollDeltaToGetChildRectOnScreen` in ChatActivity (replaces the hint/`onSizeChanged` tokens).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Full chat: close only the automatic reveals (supersedes "one override, computeScrollDelta… returns 0")
+- Options: the blanket `computeScrollDeltaToGetChildRectOnScreen` override; non-focusable replies or
+  `FOCUS_BLOCK_DESCENDANTS` (the orchestrator's direction); two narrow overrides.
+- Choice: two overrides on the full chat's ScrollView. `requestChildRectangleOnScreen` passes only `immediate` requests
+  or those made while the focused reply has a selection. `onSizeChanged` skips super while a descendant holds focus
+  (View's is empty, so only ScrollView's reveal goes). Together with no `fullScroll`, nothing focuses a reply on its
+  own, and a touched reply's cursor or a resize never scrolls the chat. The blanket override also dropped TalkBack's
+  show-on-screen, arrow-key reveal and selection-handle drags (plan review round 2 F3). Blocking focus breaks selection
+  and link taps, which the orchestrator asked to keep. `requestChildFocus` (tap or key focus) and `arrowScroll` stay.
+- By: Planner (claude-opus-5-5), plan review F3
+
+## 2026-11-17 - Tool logs: one guarded fold for every automatic close (amends "Tool logs don't fold under a reader")
+- Options: guard only `finish()`; guard `setLive(false)` and `finish()` through one `fold()`.
+- Choice: `fold()` in both log classes, called by `setLive` when going idle and by `finish()`. `setLive(false)` folded
+  before `finish()`'s guard ran, and Bubble's `updateHeader()` calls `setLive` directly (plan review round 2 F2).
+- By: Planner (claude-opus-5-5), plan review F2
+
+## 2026-11-17 - A panel jump left on fork.9 fails 017
+- Choice: no speculative panel fix now (no confirmed mechanism), but a reproduced panel jump after the fix fails
+  verification. The logging plan runs on the panel, and the evidence goes back into this feature's pipeline. The
+  brief names both screens.
+- By: Planner (claude-opus-5-5), plan review F1
+
+## 2026-11-17 - backToChat repaints the header
+- Choice: `backToChat()` calls `updateHeader()` after restoring chat mode, replacing what `renderCurrent()` →
+  `refreshStatus()` did. `closePicker()`'s own extra `updateHeader()` goes.
+- By: Planner (claude-opus-5-5), plan review F4
+
+## 2026-11-17 - Guard test token for the full chat
+- Choice: `ChatScrollTest` checks `requestChildRectangleOnScreen` in ChatActivity (replaces
+  `computeScrollDeltaToGetChildRectOnScreen`). `onSizeChanged` already occurs elsewhere in ChatActivity (:808), so
+  it is no use as a token.
+- By: Planner (claude-opus-5-5)

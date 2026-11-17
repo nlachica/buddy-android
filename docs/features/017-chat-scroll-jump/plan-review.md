@@ -58,3 +58,49 @@ F3 [major] The new blanket reveal override removes existing explicit navigation 
 F4 [minor] Reusing Bubble views must still restore the chat header - The specified `backToChat()` sequence (`plan.md:88-95`) omits the header/status refresh previously supplied by `renderCurrent()` → `refreshStatus()` → `updateHeader()` (`app/src/main/java/app/buddy/assistant/Bubble.java:2118,2793`). For a chat-list row, `hub.select(ses)` notifies listeners before `showingList = false` (`Bubble.java:2014-2017`; `ChatHub.java:221-224,1120`), so that refresh still paints list mode. The same-chat branch then skips `renderCurrent`; `showListMode()` only restores list/chat/composer visibility (`Bubble.java:1812-1819`). The header can remain "Chats", with the model chip, helpers and running strip hidden (`:2133-2151`). `closePicker()` already has an extra `updateHeader()`, but the list-row and pill paths do not. -> Refresh the header after restoring chat mode in the shared return helper, preserving the existing message views. Extend the same-chat return check to cover title/model chip and running status visibility.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted. If the panel still jumps on fork.9, 017 is not done. The Bubble rows fail in verify.md, research.md's
+logging plan runs on the panel (a diagnostic build is fine), and what it finds goes back to the Researcher and Planner
+inside 017. No speculative panel fix before that. Risk 2 and the Test plan now say this. The "follow-up" wording is gone.
+
+F2: accepted. Both log classes get one `fold()`: `if (!userToggled && !(view.isLaidOut() && !atEnd())) setOpen(false)`.
+`setLive(false)` and `finish()` both call it, so the automatic close at the live-to-done step is guarded too, and so is
+Bubble's `updateHeader()` → `log.setLive(ses.running)`. `setLive` still repaints the marks every time, auto-open while
+live is unchanged, and a header tap still folds or opens. New device rows, both screens: a run ending with a reply, and a
+run ending with no reply (status/header refresh only), each while reading inside a tall open log. The paused full-chat
+case stays.
+
+F3: accepted. The blanket `computeScrollDeltaToGetChildRectOnScreen` override is gone. The full chat's ScrollView now
+closes only the two automatic paths:
+- `requestChildRectangleOnScreen(child, r, immediate)` passes the request on only if `immediate`, or if the focused view
+  is a TextView with a selection (`hasSelection()`). Otherwise it returns false. That drops the cursor's request on
+  re-measure (the far jump, TextView.java:8474 → :11604) and keeps TalkBack's show-on-screen (`requestRectangleOnScreen(r,
+  true)`, View.java:15256-15260). It also keeps selection-handle drags scrolling the chat. That goes through the same
+  cursor request (`spanChange` → pre-draw, TextView.java:12484-12491), which the round-1 override also blocked. Returning
+  false stops only this level, because `View.requestRectangleOnScreen` keeps its own coordinates for the parents
+  (View.java:8100-8128).
+- `onSizeChanged` calls super only when nothing inside holds focus. `View.onSizeChanged` is empty (View.java:17766), and
+  FrameLayout and ViewGroup don't override it. So with a focused reply this skips just ScrollView's reveal
+  (ScrollView.java:1794-1808).
+`arrowScroll` (ScrollView.java:1291-1305) and `requestChildFocus` are untouched, so arrow keys and Tab focus moves still
+reveal. Added device checks: TalkBack swiping past the screen's bottom, and a selection handle dragged to the edge. Both
+must still scroll. The TalkBack question for Nicholas is withdrawn.
+
+F4: accepted. `backToChat()` calls `updateHeader()` after `showListMode()` (title, model chip, helpers, strip and log
+state from chat mode). Row (g) now also checks the title, model chip and running strip.
+
+Orchestrator direction ("message views never take focus"): the Bubble gets it as asked (`FOCUS_BLOCK_DESCENDANTS`).
+Nothing there needs focus, and TalkBack's accessibility focus is separate from input focus. In the full chat, both
+long-press selection (`Editor.checkField` → `requestFocus`, Editor.java:2554-2555) and link taps in selectable text
+(`touchIsFinished … && isFocused()`) need input focus, so blocking it would break both. There it means: nothing gives a
+reply focus on its own (no `fullScroll`), and a reply the user touched never scrolls the chat by itself.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+Reviewed the round-2 revision and planner response, including the updates that arrived during this review. Round 2 F1, F2 and F4 are resolved in the plan: a continuing panel jump fails verification, both automatic log-close paths use the guard, and same-chat return refreshes the header. The blanket reveal override is also removed; the remaining issue is in its replacement. Root-cause reproduction and phone verification remain pending, as the revised plan requires.
+
+F1 [major] Selection state does not distinguish an explicit reveal from an automatic jump - `plan.md:69-70` allows every rectangle request whenever the focused TextView `hasSelection()`. That remains true after the user releases the selection handle. A later re-measure still calls `onPreDraw` → `bringPointIntoView(selectionEnd)` → `requestRectangleOnScreen`, so the new exception permits the same automatic jump while a range remains selected. `plan.md:172-175` explicitly accepts this resize-driven move because the user previously touched the reply; that is not an explicit request to move now and does not meet the brief's goal. AOSP evidence: [TextView.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/widget/TextView.java#8452), lines 8452-8474, 11019-11022, 11591-11604 and 11806-11824. The inverse also matters: plain arrow-key movement inside a selectable reply changes a collapsed cursor, so `hasSelection()` is false. [ArrowKeyMovementMethod.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/text/method/ArrowKeyMovementMethod.java#109), lines 109-118, handles Down with `Selection.moveDown`; TextView's selection-change callback then schedules the same non-immediate rectangle request (TextView.java:12484-12491). Leaving ScrollView's `arrowScroll` unchanged does not preserve that child-handled navigation. -> Permit reveals for actual selection/cursor movement or active user navigation, rather than for the lifetime of a nonempty selection; continue suppressing unchanged-selection requests caused by layout. Keep immediate accessibility requests and handle dragging working. Add two focused checks: leave a range selected, release the handle, then change the chat height without touching the reply (no unsolicited move); and use ordinary arrow keys within a reply longer than the viewport (the cursor stays visible). These are consequences of the new predicate, not a request to restore the blanket override.
+
+VERDICT: REVISE
