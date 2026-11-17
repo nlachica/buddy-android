@@ -1454,6 +1454,15 @@ final class SettingsTool {
      * thread, where the settings screens write too, so the compare-and-write can't interleave with them.
      */
     static String change(Setting s, String value, String cardFormat, Asker asker, Executor main) throws Exception {
+        return change(s, value, cardFormat, asker, main, null);
+    }
+
+    /**
+     * The same, with routine: null cards every change; else an ordinary setting skips the card (a Routine allowed
+     * chat) and routine gets the card's text once the write succeeded, for the note in the chat.
+     */
+    static String change(Setting s, String value, String cardFormat, Asker asker, Executor main,
+            Consumer<String> routine) throws Exception {
         if (value.length() > MAX) return "Not changed: the value is over " + MAX + " characters.";
         String v, old;
         String[] nn;
@@ -1465,8 +1474,12 @@ final class SettingsTool {
         } catch (IllegalArgumentException | IllegalStateException e) {
             return "Not changed: " + e.getMessage();
         }
-        String no = approval(asker, String.format(cardFormat, s.name, nn[0], nn[1]));
-        if (no != null) return "Not changed. " + no;
+        String card = String.format(cardFormat, s.name, nn[0], nn[1]);
+        boolean skip = routine != null && !sensitive(s.name);
+        if (!skip) {
+            String no = approval(asker, card);
+            if (no != null) return "Not changed. " + no;
+        }
         try {
             s.prepare(v);
             return onMain(main, () -> {
@@ -1476,7 +1489,10 @@ final class SettingsTool {
                         return "Not changed: " + s.name + " changed while the card was open (now: " + s.view(now)
                                 + "). Ask again.";
                     }
-                    return "Changed " + s.name + ": " + nn[0] + " → " + nn[1] + s.set(v);
+                    String done = "Changed " + s.name + ": " + nn[0] + " → " + nn[1] + s.set(v);
+                    if (!skip) return done;
+                    routine.accept(card);
+                    return done + ROUTINE_NOTE;
                 }
             });
         } catch (InterruptedException e) {
