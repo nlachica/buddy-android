@@ -13,7 +13,7 @@ H=$(mktemp -d)
 trap 'rm -rf "$H"' EXIT
 # buddy-run sets its own PATH (Alpine's), which has $HOME/bin first: the tools it uses go there, wherever they are here
 mkdir -p "$H/bin"
-for t in jq cat sed sort paste find rm mv mkdir tail head grep awk pgrep wc tee ln basename readlink env timeout sleep; do
+for t in jq cat sed sort paste find rm mv mkdir tail head grep awk pgrep wc tee ln basename readlink env timeout sleep flock mkfifo; do
   p=$(command -v "$t") && ln -s "$p" "$H/bin/$t"
 done
 # Stand-in for the run cases (the cases of feature 002): one agent under all five names that dies the way $BUDDY_FAKE says.
@@ -25,7 +25,27 @@ case ${1:-} in inspect|--version) exit 0 ;; esac
 echo $$ >>"$BUDDY_FAKE_DIR/pids"
 echo '{"type":"system","session_id":"abc"}'
 bg() { sleep 60 & echo $! >>"$BUDDY_FAKE_DIR/pids"; }
+# Claude Code's streaming input (feature 023): reads its lines from stdin, reports states and lifecycles as the real one does
+J1='[{"id":"j1"}]'
+st() { echo '{"type":"system","subtype":"session_state_changed","state":"'$1'"}'; }
+lc() { echo '{"type":"command_lifecycle","command_uuid":"'$2'","state":"'$1'"}'; }
+txt() { jq -cn --arg t "$1" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'; }
+res() { echo '{"type":"result","subtype":"success","result":"ok"}'; }
+tasks() { echo '{"type":"system","subtype":"background_tasks_changed","tasks":'$1'}'; }
+jobend() { echo '{"type":"system","subtype":"task_notification"}'; tasks '[]'; }
+rd() { IFS= read -r L || exit 0; U=$(jq -r .uuid <<<"$L"); T=$(jq -r .message.content <<<"$L"); lc queued $U; lc started $U; }
+turn() { st running; echo '{"type":"system","subtype":"init"}'; txt "$1"; eval "${3:-:}"; res; [ -n "${2:-}" ] && lc completed $2; st idle; }
+waitf() { local i; for i in $(seq 300); do [ -e "$BUDDY_FAKE_DIR/$1" ] && return; sleep 0.1; done; }
 case $BUDDY_FAKE in
+  noinput) rd; turn "$T" $U; cat >/dev/null ;;
+  legacy) rd; echo '{"type":"system","subtype":"init"}'; txt "$T"; res; cat >/dev/null ;;
+  queued) rd; st running; echo '{"type":"system","subtype":"init"}'; txt "$T"; waitf go; res; lc completed $U; st idle
+    waitf go2; rd; turn "$T" $U 'tasks "$J1"'
+    rd; turn "$T" $U; jobend; turn notified
+    cat >/dev/null ;;
+  notify) rd; turn "$T" $U 'tasks "$J1"'; waitf go; jobend; waitf go2; turn notified "" 'tasks "$J1"'
+    rd; turn "$T" $U jobend
+    cat >/dev/null ;;
   orphan) bg ;;
   killed) bg; kill -9 $$ ;;
   error) echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Rate limited"}'; exit 1 ;;
@@ -160,6 +180,10 @@ rc=$?
 [ "$rc" != 75 ] && [ "$rc" != 124 ] && problem="exit status $rc, not 75"
 kill -9 "$busy" 2>/dev/null
 finish claude_busy "$problem"
+
+# a run that never lists a job closes its input at its first idle; a Claude Code without the state events at its first result
+run_case claude_noinput noinput claude
+run_case claude_legacy legacy claude
 
 echo "$n fixtures and runs, $failed failed"
 [ "$n" -gt 0 ] && [ "$failed" -eq 0 ]

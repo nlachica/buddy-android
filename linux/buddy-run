@@ -14,7 +14,7 @@
 #   buddy-run <token> transcript <claude|codex> <file>   last messages of a session (buddy_transcript)
 #   buddy-run <token> adopt <session> <claude|codex> <agent-session-id>  continue that session as a Buddy chat
 # Every event sent to the bubble carries "buddy_session" so the app can route it.
-HELPER_VERSION=32
+HELPER_VERSION=33
 set -u
 export PATH=$HOME/.local/bin:$HOME/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 # The claude launcher sets BUN_OPTIONS with a path relative to its folder; never inherit a stale one.
@@ -225,7 +225,7 @@ case "$CMD" in
     P=$D/sessions/$SID/pid
     if [ -f "$P" ]; then
       kill_tree "$(cat "$P")"
-      rm -f "$P"
+      rm -f "$P" "$D/sessions/$SID/in" "$D/sessions/$SID/in.sent" "$D/sessions/$SID/in.done"
       jq -cn --arg s "$SID" '{type:"buddy_stopped",buddy_session:$s}' | post
     fi
     exit 0 ;;
@@ -416,7 +416,9 @@ run_claude() {
   local deny=(--disallowedTools "Agent" "Task")
   [ "$DEV" = rule ] && deny=(--disallowedTools "Agent" "Task" "Bash" "WebFetch" "WebSearch" "Write" "Edit" "NotebookEdit" "Skill")
   [ "$DEV" = 1 ] && tools+=("Bash" "Read" "Write" "Edit" "Glob" "Grep" "Skill")
-  local args=(-p "$MSG" --output-format stream-json --verbose
+  # the message comes on stdin (the FIFO $S/in, see stream_claude), so a later one can follow while jobs are pending
+  export CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
+  local args=(-p --input-format stream-json --output-format stream-json --verbose
     --mcp-config "$mcp" --strict-mcp-config
     --allowedTools "${tools[@]}" "${deny[@]}"
     --append-system-prompt "$SYSTEM")
@@ -437,14 +439,53 @@ run_claude() {
   cd "$W" && "${keyenv[@]}" claude "${args[@]}" 2>"$S/last-error.log"
 }
 
+# Claude Code reads its messages from the FIFO $S/in (fd 3 here, the only writer besides `say`), so a message can reach it
+# after its turn ended while a background job keeps it alive. The input is closed, and Claude Code exits, only when it
+# says nothing is pending: idle, no job listed, and every line written to it reported completed. $S/in.sent lists the
+# uuids written, $S/in.done the completed ones. The lock $S/in.lock makes a close and a `say` exclusive.
+user_line() { jq -cn --arg t "$1" --arg u "$2" '{type:"user",uuid:$u,message:{role:"user",content:$t}}'; }
+fifo_reset() { rm -f "$S/in" "$S/in.sent" "$S/in.done" "$S/in.lock"; }
 stream_claude() {
+  trap '' PIPE
+  local line type sub state ntask cu sid u idle=0 bg=0 st=0 cl=0 gated=0 open=0 skip=0
+  if [ -p "$S/in" ]; then
+    : > "$S/in.sent"; : > "$S/in.done"
+    exec 3>"$S/in"; open=1
+    u=$(cat /proc/sys/kernel/random/uuid)
+    echo "$u" >> "$S/in.sent"
+    user_line "$MSG" "$u" >&3 2>/dev/null
+  fi
+  close_input() { # [force]: close unless a line is still pending
+    exec 9>"$S/in.lock"
+    if timeout 5 flock 9 || [ -n "${1:-}" ]; then
+      if [ -n "${1:-}" ] || ! grep -vxF -f "$S/in.done" "$S/in.sent" | grep -q .; then
+        rm -f "$S/in"; exec 3>&-; open=0
+      fi
+    fi
+    exec 9>&-
+  }
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     [ "$line" = "$AGENT_END" ] && break
-    printf '%s' "$line" | tag | post
-    sid=$(printf '%s' "$line" | jq -r 'select(.session_id != null) | .session_id' 2>/dev/null)
-    [ -n "$sid" ] && printf '%s' "$sid" > "$S/claude-session"
+    IFS='|' read -r type sub state ntask cu sid < <(printf '%s' "$line" | jq -r '[.type // "", .subtype // "", .state // "",
+      (if .subtype == "background_tasks_changed" then (.tasks | length | tostring) else "" end), .command_uuid // "",
+      .session_id // ""] | join("|")' 2>/dev/null)
+    case "$type/$sub" in
+      system/session_state_changed) st=1; skip=1; [ "$state" = idle ] && idle=1 || idle=0 ;;
+      command_lifecycle/*) cl=1; skip=1; [ "$state" = completed ] && echo "$cu" >> "$S/in.done" ;;
+      system/task_notification) idle=0 ;;
+      system/background_tasks_changed) idle=0; bg=$ntask ;;
+      result/*) # a Claude Code without the state events: close now, as before
+        if [ "$gated" = 0 ]; then gated=1; [ "$st$cl" != 11 ] && [ "$open" = 1 ] && close_input force; fi ;;
+    esac
+    if [ "$skip" = 0 ]; then # (the state events are only for this loop)
+      printf '%s' "$line" | tag | post
+      [ -n "$sid" ] && printf '%s' "$sid" > "$S/claude-session"
+    fi
+    skip=0
+    [ "$open" = 1 ] && [ "$idle" = 1 ] && [ "${bg:-0}" = 0 ] && close_input
   done
+  [ "$open" = 1 ] && close_input force
 }
 
 # ---------------------------------------------------------------------- Codex
@@ -1028,11 +1069,13 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Codex
   else
     if ! have claude; then event buddy_error "Claude Code isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    ended run_claude | stream_claude
+    fifo_reset; mkfifo "$S/in"
+    ended run_claude <"$S/in" | stream_claude
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && grep -q -i 'no conversation found' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/claude-session"   # old session is gone; retry as a new conversation
-      ended run_claude | stream_claude
+      fifo_reset; mkfifo "$S/in"
+      ended run_claude <"$S/in" | stream_claude
       status=${PIPESTATUS[0]}
     fi
     name="Claude Code"
