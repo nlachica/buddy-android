@@ -25,3 +25,26 @@ F2 [major] A New chat never starts history updates after it becomes a real chat 
 F3 [minor] Keeping the pixel offset does not keep the reading position when the history window rolls - `plan.md:54,76-87` replaces the last-30/60-KB window on every snapshot and says to keep the position when scrolled up, but does not account for rows removed from its beginning. At the cap, a new reply removes old content above the viewport; preserving `scrollY` then moves the reader to different text, despite the hold-position check in `plan.md:112`. -> Define preservation relative to a retained visible row and its offset (or adjust for the removed rows' measured height), with a simple fallback if that row has left the bounded window. Extend the scroll check to a full window with unequal-height messages and byte-budget eviction.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+F1: accepted - snapshots are now the only source of the chat's messages once one is used, and they are used in phone
+order: each carries `n` (a phone counter that only goes up), and the watch drops one whose `n` isn't above the last it
+used. `Talk.Line` gets `mirror` (true for `/buddy/heard` and `/buddy/reply` lines, which always stand for a message the
+phone added and then pushes). A mirror line is never drawn beside a snapshot, so a reply shows once (from the snapshot)
+whether its line or its snapshot comes first, and a late older snapshot is refused instead of erasing it. `seq > mark`
+remains only for the watch's own lines (no answer, refusal, stopped, no voice), which are never in a snapshot, so it
+infers nothing about a snapshot's contents. Recovery: a mirror line newer than the used snapshot with no snapshot
+within 8 s makes the screen ask again (new `view`), once per used snapshot; a lost push of a phone-started message, or a
+reordered-then-lost one, waits for the next message or a reopen (Risks). Deterministic checks: a minimal JUnit setup in
+the wear module (test-only, `:wear:testDebugUnitTest` in CI) testing the pure `below()` and the snapshot rule with
+snapshot-before-line, line-before-snapshot, line-before-older-snapshot, a delayed older snapshot after a newer one,
+another `view`, watch-own errors and no snapshot. The phone's posted push stays, now only to coalesce.
+F2: accepted - one `request()`: `onStart` calls it unless `fresh`, and `draw()` calls it at the moment it clears
+`fresh` while the screen is started (same `view`, timeout, catch-up and stop cleanup). Manual check (d) added: New chat
+on the watch, first reply, then type on the phone with the screen still open; the words and reply appear without
+reopening.
+F3: accepted - the place is kept by a row: before a history rebuild that doesn't follow the end, the screen notes the
+top-most visible row (index and offset); after layout the pure `anchor(old, i, now)` finds it (same kind and text at an
+index <= i, nearest first, since rows only leave from the top) and restores the offset; if it left the window, the
+screen goes to the top. JVM tests for `anchor()` (not full, rolled by one and by three, duplicate text, gone) and the
+device check now uses a full window of unequal lengths where the 60 KB budget evicts.

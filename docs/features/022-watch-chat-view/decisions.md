@@ -35,3 +35,18 @@
 - Options: add a unit-test setup to the wear module; test the pure phone-side `history()` in the existing JVM tests and check the watch by hand.
 - Choice: the latter, because the bounds and filtering live in `history()` and the watch screen is view code that needs the device anyway (research "Build and test").
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Snapshots and Talk's live lines (replaces "One source of truth on the watch screen")
+- Options: receive-time watermark `seq > mark` for all lines (round 1); phone message ids on lines and rows; snapshots authoritative, used in phone order (`n`), live lines from the phone (`mirror`) not drawn beside one, plus a catch-up request.
+- Choice: the last, because MessageClient promises queueing, not order (plan review round 2 F1), so the watermark can erase or double a reply; `Msg` has no id, and ids would change Talk and both relay paths. `mark` stays only for the watch's own lines, which are never in a snapshot. A mirror line with no snapshot within 8 s triggers one new request.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Unit tests in the wear module (replaces "Tests")
+- Options: device checks only; a minimal JUnit setup in wear for pure statics.
+- Choice: the latter, because the reconciliation and the reading-place rules depend on message order and window rolls a device can't be made to produce on demand; JUnit only, test-only, `:wear:testDebugUnitTest` in CI. The view code stays device-checked.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Keeping the reading place when a snapshot replaces the window
+- Options: keep `scrollY` (round 1); keep the distance from the end; anchor on the top-most visible row, found again by kind and text at or before its old index, else the top.
+- Choice: the anchor, because a full window loses rows at the top as rows arrive at the bottom, so neither pixel rule keeps the text in view; there are no row ids, and a wrong match between equal messages is a small jump.
+- By: Planner (claude-opus-5-5)
