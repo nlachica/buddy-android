@@ -181,3 +181,13 @@ A control without Stop checks that `turnEndNotes` returns B and empties `notes`.
 
 Updated: plan.md Approach 4 (the branch, "Notes left at turn end"), Step 4, Test plan row 3. decisions.md: new entry
 "No live send after Stop".
+
+## Round 5 - Plan Reviewer (gpt-6-astra)
+
+Round 4 F1 is resolved. The shared `liveInput` predicate excludes stopped sessions at both live-dispatch sites, and `turnEndNotes` leaves their notes untouched (`plan.md:155-159`, `:201-203`). This matches the existing ordering: `stop()` sets `outcome` before returning (`app/src/main/java/app/buddy/assistant/ChatHub.java:699-708`), and events are posted to the main thread (`app/src/main/java/app/buddy/assistant/BuddyService.java:548`). The added Stop-before-result test checks retention and exactly-once restoration, with a non-stopped control (`plan.md:343-349`).
+
+Earlier findings remain resolved. The input-close rule waits for completed input UUIDs, authoritative idle and no background tasks; the saved h/i probes corroborate those events, including resume. The delayed queued-input and notification cases exercise the earlier closure failures. Failed-send continuations retain their text through the shared leftover route. The three done-when items have explicit shell, app and real-agent/device checks (`plan.md:355-375`), and the rule-routing explanation remains supported by the trigger guards.
+
+No blocker or major findings remain. Review covered the revised plan, decisions, prior rounds, relevant code and saved provider probes. No implementation, CI or device tests were run; those remain the Coder/Verifier's checks.
+
+VERDICT: APPROVE
