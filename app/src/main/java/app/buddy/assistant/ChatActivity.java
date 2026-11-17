@@ -573,10 +573,16 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
             liveHint.setVisibility(View.VISIBLE);
             liveHint.postDelayed(() -> liveHint.setVisibility(View.GONE), 10_000);
         }
-        if (lastMsg() != lastShown) showAll(); // messages came in while this screen was hidden
+        // 017: reading back stays put; messages that came while hidden are added below, as onMessage would have
+        boolean end = atEnd();
+        int at = lastShown == null ? -1 : ses.messages.lastIndexOf(lastShown);
+        if (!end && at >= 0) {
+            for (Sessions.Msg m : new java.util.ArrayList<>(ses.messages.subList(at + 1, ses.messages.size()))) show(m);
+            lastShown = lastMsg();
+        } else if (lastMsg() != lastShown) showAll(); // messages came in while this screen was hidden
         refresh();
         if (found != null && foundView != null) showFound(); // opened from Search: at the message, not the end
-        else scrollToEnd();
+        else if (end || at < 0) scrollToEnd();
     }
 
     @Override
