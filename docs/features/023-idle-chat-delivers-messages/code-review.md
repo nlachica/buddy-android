@@ -27,3 +27,19 @@ any run after Stop go to notes as before (Stop: `buddy_done` sends them back to 
 same-run and busy cases, and Stop. Not verified: the real helper/main-thread race; only the routing decision is tested.
 F2: fixed in b54d814. `live_case` removes `go`/`go2` before starting; the notify case asserts only one `result` exists after the
 7 s wait, before `go2` is released.
+
+## Round 2 - Code Reviewer (gpt-6-astra)
+
+Round 1 F1 is resolved. `sendLive` captures the originating `runId` (`app/src/main/java/app/buddy/assistant/ChatHub.java:1008`), and its failed-send callback passes that id into `placeLeftover`. An already-idle replacement run now returns `LEFT_LIVE` (`:1031`), which `leftover` dispatches through `sendLive` (`:1052`). Same-run failures stay in notes, avoiding a retry against the input that refused them; busy replacement runs and stopped runs retain their existing routes. `LeftoverTest.aLateFailedSendGoesLiveToAnIdleReplacementRun` covers the late callback, same-run refusal, busy replacement and Stop cases.
+
+Round 1 F2 is resolved. `live_case` removes both gate files before each case (`linux/test/run.sh:193`), and the notification case requires exactly one result before releasing its delayed notification turn (`:218`). The corrected case passed, including delivery of ping before the second background job ends.
+
+No new findings. Reviewed `git diff main...HEAD`, the touched code and tests, the brief, plan, decisions, earlier review rounds, and connected helper/event/note-delivery paths. The implementation preserves the in-progress phone-tool update path and the Stop guard, and the input-close logic retains pending user commands and task notifications. No additional security, data, YAGNI or convention issues found.
+
+Validation:
+- `bash linux/test/run.sh`: 35 fixtures and runs passed, including both delayed-work cases and the no-input/legacy fallbacks.
+- `sh /tmp/buddy-build-023/check.sh github app.buddy.assistant.TurnTrackTest app.buddy.assistant.LeftoverTest`: compiled the app and tests; all 9 focused tests passed. This temporary harness uses Android shims and is not equivalent to Gradle/CI.
+- `./gradlew testGithubDebugUnitTest --offline --no-daemon`: blocked during JVM initialization (`Failed to mark memory page as executable`); no Gradle tests ran.
+- Real Claude, phone bubble/full-chat/watch interactions, and CI were not run. The plan's real-agent/device checks and required CI checks remain for the Verifier; this approval is the code-review verdict, not completed end-to-end verification.
+
+VERDICT: APPROVE
