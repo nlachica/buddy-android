@@ -55,7 +55,7 @@ public class WatchVoiceLink implements WatchVoice.Link {
     }
 
     @Override
-    public ReadQueue.Stream open(Context c, String node, ReadQueue.Events e) {
+    public ReadQueue.Stream open(Context c, String node, ReadQueue.Events e, Runnable attached) {
         final Context app = c.getApplicationContext();
         final String path = PATH + ++seq;
         final ReadStream s = new ReadStream(e, main()::post, (ms, r) -> main().postDelayed(r, ms), READ_CAP, ABANDON_MS,
@@ -77,6 +77,7 @@ public class WatchVoiceLink implements WatchVoice.Link {
         cc.openChannel(node, path).addOnSuccessListener(ch -> cc.getOutputStream(ch).addOnSuccessListener(o -> {
             main().removeCallbacks(late);
             s.attached(o, () -> cc.close(ch));
+            if (attached != null) attached.run();
         }).addOnFailureListener(x -> {
             cc.close(ch);
             s.openTimedOut();

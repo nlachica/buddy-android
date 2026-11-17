@@ -21,8 +21,12 @@ final class WatchVoice {
         /** The node id of a reachable watch whose app can play readings, or null (main thread, within a few seconds). */
         void find(Context c, Consumer<String> node);
 
-        /** One reading's audio stream to that watch. */
-        ReadQueue.Stream open(Context c, String node, ReadQueue.Events e);
+        /** One reading's audio stream to that watch. attached (or null) runs on the main thread when its channel is open. */
+        ReadQueue.Stream open(Context c, String node, ReadQueue.Events e, Runnable attached);
+
+        default ReadQueue.Stream open(Context c, String node, ReadQueue.Events e) {
+            return open(c, node, e, null);
+        }
     }
 
     private static Link link;
