@@ -2926,12 +2926,21 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
             live = on;
             paintLast();
             paintHead();
-            if (!userToggled) setOpen(on);
+            if (on) {
+                if (!userToggled) setOpen(true);
+            } else {
+                fold();
+            }
         }
 
         void finish() {
             setLive(false);
-            if (!userToggled) setOpen(false);
+            fold();
+        }
+
+        /** Every automatic close: not under a reader (a laid-out log above the end), or the text below it would move (017). */
+        private void fold() {
+            if (!userToggled && !(view.isLaidOut() && !atEnd())) setOpen(false);
         }
 
         void setOpen(boolean o) {
