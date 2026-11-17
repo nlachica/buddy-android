@@ -52,3 +52,8 @@
 - Choice: title row, × `topMargin` 9dp / `bottomMargin` -4dp, so it sits on the title text's centre and the row stays as high as the old label (45dp). Steps 1 and 2 went in one commit (the test needs only step 1, but both are two small edits).
 - Not run: Java does not start on this device (JVM "Failed to mark memory page as executable") and there is no Android SDK, so `HelpersBoxTest` and the build are CI-only. Whether `Sessions.Session` loads on the JVM (plan Risks) is unchecked.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.11 sync: × and fold together
+- Conflict in `ChatActivity` (helpers head row): upstream made the title row fold the cards (chevron, `helpersFolded`,
+  issue #49). Kept both: upstream's tappable title row with chevron, and the fork's × at the row's end (its own click
+  consumes the tap, so × doesn't fold). GUIDE.md sentence carries both. By: Orchestrator (claude-sonnet-5-5)

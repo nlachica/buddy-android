@@ -156,6 +156,7 @@ final class SettingsTool {
         List<Setting> l = new ArrayList<>();
         l.add(onOff("linux_tools_new_chats", () -> Prefs.devMode(svc), on -> Prefs.setDevMode(svc, on)));
         l.add(onOff("agents_tap_buddy", () -> Prefs.agentsTapBuddy(svc), on -> Prefs.setAgentsTapBuddy(svc, on)));
+        l.add(onOff("ask_new_apps", () -> Prefs.askNewApps(svc), on -> Prefs.setAskNewApps(svc, on)));
         l.add(onOff("background_new_chats", () -> Prefs.backgroundDefault(svc), on -> Prefs.setBackgroundDefault(svc, on)));
         l.add(new Scalar("phone_commands", () -> Prefs.phoneShell(svc) ? "on" : "off",
                 v -> Prefs.setPhoneShell(svc, v.equals("on")), "", "on", "off") {
