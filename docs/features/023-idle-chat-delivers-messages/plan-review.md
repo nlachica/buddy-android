@@ -140,3 +140,13 @@ Nothing goes back to the orchestrator: the provider gives the condition.
 Updated: plan.md Facts, Approach 1 and 2, "Why this meets the brief", Alternatives, Steps 1-2, Test plan rows 1 and 3,
 the real-agent check, Risks and Open questions. decisions.md: new entry "The input closes on Claude Code's own word
 that nothing is pending".
+
+## Round 4 - Plan Reviewer (gpt-6-astra)
+
+Round 3 F1 is addressed: the close now requires completed input UUIDs and an authoritative idle event, with task events invalidating idle. The saved probes corroborate the proposed signals: `/tmp/t023h/h/ev.log` shows both user commands completing before idle and the background notification running before the final idle; `/tmp/t023h/i/ev.log` confirms the lifecycle events on resume. The delayed queued-input and notification tests cover the earlier counterexamples. Round 1's findings remain resolved.
+
+F1 [major] The result-time flush can send and lose queued notes after Stop - The plan drains notes and calls `sendLive` at every `result` while `ses.running`, without checking Stop (`plan.md:196-197`); a successful `say` has no restoration path (`plan.md:167-173`). Stop deliberately sets `ses.outcome = "stopped"` immediately but leaves `ses.running` true until shutdown completes (`app/src/main/java/app/buddy/assistant/ChatHub.java:699-708`). Concrete ordering: B is an untaken note; the user taps Stop; an already-in-flight result arrives; the proposed flush removes B and launches `say`; that helper writes successfully before the stop helper kills the agent, which has not yet processed B. The helpers run concurrently on a cached thread pool (`app/src/main/java/app/buddy/assistant/Helper.java:36`, `:78-84`), so invoking Stop first does not exclude this ordering. At `buddy_done`, B is absent from notes and cannot be restored to `unsent`, whereas today's handler restores it (`app/src/main/java/app/buddy/assistant/ChatHub.java:885-894`). The proposed Stop test begins after `buddy_done` and exercises only failed sends (`plan.md:331-335`), so it misses this regression. -> Suppress live dispatch once the session's outcome is stopped, including the automatic result flush; leave those notes owned by the existing shutdown/restoration path. Add a deterministic app case with notes queued, Stop requested, then result before `buddy_done`: no `say` is dispatched, and the notes return to `unsent` exactly once. No new lifecycle abstraction is needed for this guard.
+
+Review covered the plan, prior responses, runner/app code and saved provider probes. No implementation or device tests were run.
+
+VERDICT: REVISE
