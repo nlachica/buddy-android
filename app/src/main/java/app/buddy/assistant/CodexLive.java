@@ -240,6 +240,7 @@ final class CodexLive {
                 }
             };
             app.registerReceiver(screenOff, new IntentFilter(Intent.ACTION_SCREEN_OFF));
+            LiveWatch.begin(app); // 017: the audio device Watch in a phone call
         }
         notifyLive();
         main.postDelayed(watchdog, 250);
@@ -255,6 +256,7 @@ final class CodexLive {
     static void end(String why) {
         final Sessions.Session s = ses;
         if (s == null) return;
+        LiveWatch.end();
         log("end: " + (why == null ? "End" : why));
         final Remote r = remote;
         remote = null;

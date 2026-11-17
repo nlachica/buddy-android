@@ -643,6 +643,7 @@
     <string name="live_ended_why">Live voice ended: %1$s</string>
     <string name="live_ended_screen_off">the screen went off</string>
     <string name="live_ended_paused">Buddy was paused</string>
+    <string name="live_ended_no_speaker">the phone speaker couldn\'t be used</string>
     <string name="live_ended_idle">nothing was said for 5 minutes</string>
     <string name="live_notification_title">Live voice with %1$s</string>
     <string name="live_mic_busy">Live voice is using the microphone. End it first.</string>
