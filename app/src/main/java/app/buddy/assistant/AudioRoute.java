@@ -8,10 +8,14 @@ import android.media.AudioManager;
 import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.function.Consumer;
+import java.util.function.IntPredicate;
 
 /**
  * Which audio device Buddy's voice uses: Auto or one of the devices Android offers for calls (speaker, earpiece, a
@@ -20,18 +24,21 @@ import java.util.function.Consumer;
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
  * and puts everything back, so no end of voice needs a hook. Android 12+ (setCommunicationDevice); below, only Auto.
- * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice).
+ * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice),
+ * except in a phone live call (017, Android 12+): a headset's call device, else the speaker, never the earpiece.
  * A picked device that is away is Auto until it is back.
  * All state lives on the main thread.
  */
 final class AudioRoute {
-    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000;
+    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000;
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     private static Context app;
-    private static boolean on, other, ownMode, dirty, sawLive, heard;
+    private static boolean on, other, ownMode, dirty, sawLive, heard, stuck;
     private static String applied, refused;
-    private static long began, quietSince;
+    private static long began, quietSince, appliedAt;
+    /** 017: devices a phone live call couldn't use; kept until use() so each is tried once. */
+    private static final Set<String> liveRefused = new HashSet<>();
 
     private AudioRoute() {
     }
@@ -115,6 +122,21 @@ final class AudioRoute {
         return pick(saved, indexOf(choices(c), saved) >= 0, headsetNow(c) != null, WatchVoice.link() != null);
     }
 
+    /**
+     * 017: pick() for a phone live call, from the connected media outputs only: in communication mode Android's routed
+     * answer (target()) follows the device Buddy set and hides a connected headset.
+     */
+    static String livePick(String saved, boolean savedHere, int[] connected, boolean watch) {
+        return pick(saved, savedHere, headsetIn(null, connected) != NONE, watch);
+    }
+
+    static String liveTarget(Context c) {
+        String saved = Prefs.audioDevice(c);
+        AudioManager am = c.getSystemService(AudioManager.class);
+        return livePick(saved, indexOf(choices(c), saved) >= 0,
+                types(java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))), WatchVoice.link() != null);
+    }
+
     /** 016: what Android's routing uses now, as a label. */
     static String androidNow(Context c) {
         String h = headsetNow(c);
@@ -139,7 +161,52 @@ final class AudioRoute {
 
     // the id changes on reconnect and a Bluetooth address can be hidden from apps: type and name are stable
     private static String key(AudioDeviceInfo d) {
-        return d.getType() + ":" + d.getProductName();
+        return key(d.getType(), String.valueOf(d.getProductName()));
+    }
+
+    private static String key(int type, String name) {
+        return type + ":" + name;
+    }
+
+    /**
+     * 017: the communication device a phone live call uses while Watch is picked: a headset's own call device (wired,
+     * USB, BLE, hearing aid, or the SCO of a connected media headset: same product name as its A2DP output; the watch
+     * has no media output, so its SCO never matches), else the built-in speaker. Never the earpiece. comm: the
+     * devices of getAvailableCommunicationDevices(), out: those of getDevices(OUTPUTS). Returns an index in comm, or
+     * NONE. Devices in refused (keys) are skipped.
+     */
+    static int liveDevice(int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused) {
+        int speaker = NONE;
+        for (int i = 0; i < comm.length; i++) {
+            if (refused.contains(key(comm[i], commName[i]))) continue;
+            if (comm[i] == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ? mediaHeadset(commName[i], out, outName) : headset(comm[i])) {
+                return i;
+            }
+            if (comm[i] == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER && speaker == NONE) speaker = i;
+        }
+        return speaker;
+    }
+
+    private static boolean mediaHeadset(String name, int[] out, String[] outName) {
+        for (int j = 0; j < out.length; j++) if (headset(out[j]) && outName[j].equals(name)) return true;
+        return false;
+    }
+
+    /**
+     * 017: liveDevice, then apply it; a device apply refuses goes into refused and the next is tried, so this ends
+     * (headset, speaker, NONE at worst). Returns the index applied, or NONE.
+     */
+    static int liveAttempt(int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused, IntPredicate apply) {
+        for (;;) {
+            int i = liveDevice(comm, commName, out, outName, refused);
+            if (i == NONE || apply.test(i)) return i;
+            refused.add(key(comm[i], commName[i]));
+        }
+    }
+
+    /** 017: the device applied isn't Android's communication device any more, after the time it needs to take. */
+    static boolean slipped(String applied, String actual, long sinceMs) {
+        return applied != null && sinceMs >= CONFIRM_MS && !applied.equals(actual);
     }
 
     private static String label(Context c, AudioDeviceInfo d) {
@@ -176,8 +243,10 @@ final class AudioRoute {
             heard = false;
             quietSince = 0;
             // a device choice is forced to apply again; Auto keeps `applied` so reconcile's drop() releases it
-            if (!want(a).isEmpty()) applied = null;
+            if (!want(a).isEmpty() || LiveWatch.noEarpiece(Prefs.audioDevice(a))) applied = null;
             refused = null;
+            liveRefused.clear();
+            stuck = false;
             try {
                 reconcile();
             } catch (Exception ignored) {
@@ -205,6 +274,11 @@ final class AudioRoute {
         boolean live = CodexLive.on();
         afterLive(mode);
         sawLive |= live;
+        if (!other && (mode == AudioManager.MODE_NORMAL || mode == AudioManager.MODE_IN_COMMUNICATION)
+                && LiveWatch.noEarpiece(Prefs.audioDevice(app))) {
+            live(am);
+            return;
+        }
         String want = want(app);
         if (want.isEmpty()) {
             drop(am);
@@ -235,12 +309,62 @@ final class AudioRoute {
         }
     }
 
+    /**
+     * 017: a phone live call with Watch as the device: the headset's call device or the speaker, never the earpiece
+     * and never drop() (that is Android's routing, the earpiece). The WebView owns the mode, so this never sets it.
+     */
+    @TargetApi(31)
+    private static void live(AudioManager am) {
+        final long now = SystemClock.elapsedRealtime();
+        AudioDeviceInfo cur = am.getCommunicationDevice();
+        if (slipped(applied, cur == null ? null : key(cur), now - appliedAt)) {
+            // a headset's call link that failed; the speaker, or Chromium's earpiece pick over it, is applied again
+            if (!applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")) liveRefused.add(applied);
+            CodexLive.log("route: slipped from " + applied + " to " + (cur == null ? "none" : key(cur)));
+            applied = null;
+        }
+        final List<AudioDeviceInfo> comm = am.getAvailableCommunicationDevices();
+        int n = comm.size();
+        int[] ct = new int[n];
+        String[] cn = new String[n];
+        for (int i = 0; i < n; i++) {
+            ct[i] = comm.get(i).getType();
+            cn[i] = String.valueOf(comm.get(i).getProductName());
+        }
+        AudioDeviceInfo[] outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
+        int[] ot = new int[outs.length];
+        String[] outNames = new String[outs.length];
+        for (int i = 0; i < outs.length; i++) {
+            ot[i] = outs[i].getType();
+            outNames[i] = String.valueOf(outs[i].getProductName());
+        }
+        int i = liveAttempt(ct, cn, ot, outNames, liveRefused, j -> {
+            String k = key(ct[j], cn[j]);
+            if (k.equals(applied)) return true;
+            boolean ok = am.setCommunicationDevice(comm.get(j));
+            CodexLive.log("route: " + k + (ok ? " applied" : " refused"));
+            if (ok) {
+                applied = k;
+                appliedAt = now;
+                dirty = true;
+            }
+            return ok;
+        });
+        if (i == NONE && !stuck) {
+            stuck = true;
+            CodexLive.log("route: no safe device");
+            CodexLive.end(app.getString(R.string.live_ended_no_speaker));
+        }
+    }
+
     // The WebView's teardown (after a live call ends) clears the device, then sets MODE_NORMAL: once Buddy sees
     // NORMAL, it has nothing left to undo and the choice is applied again for dictation or read aloud already going
     private static void afterLive(int mode) {
         if (sawLive && !CodexLive.on() && mode == AudioManager.MODE_NORMAL) {
             sawLive = false;
             applied = refused = null;
+            liveRefused.clear();
+            stuck = false;
         }
     }
 
@@ -248,6 +372,8 @@ final class AudioRoute {
     private static void drop(AudioManager am) {
         if (applied != null) am.clearCommunicationDevice();
         applied = refused = null;
+        liveRefused.clear();
+        stuck = false;
         dropMode(am);
     }
 
@@ -291,7 +417,8 @@ final class AudioRoute {
             dropMode(am);
         } catch (Exception ignored) {
         }
-        on = other = ownMode = dirty = sawLive = false;
+        on = other = ownMode = dirty = sawLive = stuck = false;
         applied = refused = null;
+        liveRefused.clear();
     }
 }

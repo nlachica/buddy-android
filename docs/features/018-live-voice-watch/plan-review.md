@@ -1,0 +1,139 @@
+# Plan review: 018-live-voice-watch
+<!-- Rounds: "## Round N - Plan Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Planner response (round N)" -->
+
+## Round 1 - Plan Reviewer (gpt-6-astra)
+
+F1 [major] The headset fallback still permits the earpiece - `plan.md:42-56` returns `NONE`/`""` whenever a media headset is connected, without establishing that it carries communication audio. That is exactly the `want().isEmpty()` → `drop()` → `clearCommunicationDevice()` path in `app/src/main/java/app/buddy/assistant/AudioRoute.java:209-211,248-251`. The plan itself acknowledges that Bluetooth may not carry the call without SCO (`plan.md:242-244`), and rejects guaranteeing no earpiece in this case (`plan.md:194-195`). Feature 016's rationale explicitly depended on normal-mode media routing (`docs/features/016-audio-auto-priority/decisions.md`, “A headset means a media output”); it does not establish the same result for this WebView call. Thus Watch selected + unavailable watch + connected A2DP headset can still take the diagnosed earpiece path, contrary to `brief.md:13,20`. -> Define how a usable headset communication route is selected/confirmed, with loudspeaker fallback when it cannot be used; do not equate media-device presence with a successful call route. Add a device check with buds and the watch's SCO both present, watch streaming unavailable, and evidence of the actual communication output. Android's [communication-device API](https://developer.android.com/reference/android/media/AudioManager#setCommunicationDevice(android.media.AudioDeviceInfo)) supports explicit selection from available communication devices and reports rejection.
+
+F2 [major] Auto's watch decision uses the routing query the plan says is unreliable during calls - `Out.watchWins()` delegates to `AudioRoute.target()` (`plan.md:81,98`), which uses `headsetNow()` and its API 33 routed-output answer (`app/src/main/java/app/buddy/assistant/AudioRoute.java:93-115`). A nonempty speaker/earpiece answer suppresses connected-headset detection (`:76-82`; the speaker-plus-connected-A2DP case is explicitly asserted in `app/src/test/java/app/buddy/assistant/AudioRouteTest.java:29`). The plan already recognizes this communication-mode problem at `plan.md:47-48`, but only fixes the separate phone-route calculation. For example, switch a running Speaker call to Auto with buds connected: a speaker answer makes `target()` choose Watch, and the 500 ms loop never reconsiders once the setting is unchanged. This contradicts Auto's headset-before-watch requirement even without adding headset hotplug support. -> Give the live forwarding decision the same communication-mode-safe headset observation as the live route rule, leaving 016's normal-mode media query intact. Test Speaker → Auto and Watch → Auto with a connected headset and a routed speaker answer; assert no watch forwarding. A fake `watchWins=true/false` alone does not exercise this defect.
+
+F3 [major] Microphone unmuting is timed from production, not watch playback - `plan.md:158-164` reenables the phone microphone one second after the page last detects voice, but the design explicitly allows roughly 2–3 seconds of delayed watch playback (`plan.md:232-234`). In that allowed state the microphone reopens while the watch is still speaking, recreating the self-interruption/false-user-transcript problem the half-duplex rule is meant to prevent. This differs materially from 007: `wear/src/main/java/app/buddy/assistant/wear/Call.java:245-247` gates on `Speaker.audibleNow()`, whose deadline includes actual queued playback (`Speaker.java:136-139`). The silence gate only stops adding samples; it does not discard audio already in the transport or the blocking reading player (`Speaker.java:164-165`), so a pause longer than one second does not necessarily drain a larger backlog. There is also a threshold mismatch: the proposed gate forwards peaks above 0.01 (`plan.md:119`), while the live page's `voice` flag uses 0.02 (`app/src/main/java/app/buddy/assistant/CodexLive.java:958`). -> Specify a playback-aware mute deadline or a demonstrated end-to-end delay bound with a matching mute tail and failure policy; align the audibility thresholds. Reconsider the self-imposed “no watch change” constraint if needed. Add checks with delayed playback exceeding one second and quiet audio between the two thresholds; the microphone must remain suppressed while that audio is audible. The normal-link D2 smoke test does not cover this known failure.
+
+F4 [major] API 30 exposes Watch without the promised fallback fix - The app supports API 30 (`app/build.gradle.kts:22`), and Watch is offered independently of the API 31 communication-device choices (`app/src/main/java/app/buddy/assistant/AudioRoute.java:43-48`). Nevertheless, the entire new routing behavior remains behind `use()`'s API 31 guard (`:165-166`); `plan.md:245-246` explicitly leaves API 30 to Android's routing while enabling watch streaming there. Consequently an unavailable or dropped watch on a supported phone has no planned loudspeaker guarantee, and no test covers it. `brief.md:20` contains no platform exception. -> Include an API 30 fallback and teardown strategy with validation, or obtain an explicit supported-platform scope decision and make the exposed behavior and acceptance criteria consistent with it. Recording the unmet done-when item only as a risk is insufficient.
+
+VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - in a phone call, a media headset being connected doesn't mean Android routes the call to it. With no
+communication device set, Android plays the call on a wired or USB headset by itself, but never on A2DP, and Bluetooth
+only gets the call over SCO, which Buddy has to select. So `liveDevice` now picks a headset's own communication device
+explicitly: the first wired, USB, BLE or hearing-aid communication device, or a SCO device whose name is that of a
+connected media headset (the buds' call link). The watch has no media output, so its SCO never matches. Otherwise it
+picks the built-in speaker, and never the earpiece. Picking the device isn't the same as using it, so two cases fall
+back to the speaker:
+- `setCommunicationDevice` refuses the device: reconcile runs again in the same tick, and the refused key is skipped.
+- Android's `getCommunicationDevice()` isn't the applied key 2 s after applying (the headset's call link failed): that
+  key counts as refused and the speaker is applied. The same check re-applies the speaker if Chromium picks the
+  earpiece again later. That was Risk 9, now closed.
+
+Buds without a call profile have no communication device, so they get the speaker. The rule now has unit tests:
+buds' SCO plus the watch's SCO → buds; the watch's SCO alone → speaker; refused → speaker; no headset → speaker; never
+the earpiece. Device check D8: buds plus the watch, Watch picked, the watch refuses → `dumpsys audio` shows the buds'
+SCO, the voice is in the buds, and disconnecting the buds moves it to the speaker. Old Risk 6 is gone. The
+"strict never-earpiece with a headset" alternative is now the design.
+
+F2: accepted - the forwarding decision no longer uses `target()`. The new pure `AudioRoute.livePick(saved, savedHere,
+connected, watch)` is `pick(saved, savedHere, headsetIn(null, connected) != NONE, watch)`: 016's media-headset types
+from `getDevices(OUTPUTS)` only, without the API 33 routed answer. `Out.watchWins()` uses it through
+`AudioRoute.liveTarget(app)`. 016's `target()`/`headsetNow()` stay as they are for normal mode. Tests: `livePick` with
+outputs `{SPEAKER, A2DP}` gives `""` for Auto (Speaker → Auto and Watch → Auto with buds: no watch), `{SPEAKER, SCO}`
+gives watch, and a picked Watch with A2DP still gives watch. `LiveWatchTest` (7) checks that `watchWins=false` after a
+change of the setting means no find. D6 adds Speaker → Auto mid-call with buds: no "watch: looking" line in live.log.
+
+F3: accepted - the mic decision moves from the page into Java and follows the watch's playback, not the page's
+production:
+- The call stream reports each block once it is actually written into the channel (an optional `sent` callback in
+  `PcmOut`, passed through `ReadStream`/`openCall`).
+- `LiveWatch` keeps a phone-side copy of the watch `Speaker`'s `audibleUntil`: a playhead advanced by each written
+  block at real-time rate (`until = max(now, until) + len/32 ms`), with the audible mark set by audible blocks.
+- `toWatch()` now returns 0 (the voice is on the phone), 1 (on the watch, mic open) or 2 (on the watch, mic closed).
+  The mic is closed while an audible block handed to the stream hasn't been written yet, or until `audibleUntil +
+  1 s` (the watch's 300 ms prebuffer, its track and the link, with margin).
+- One threshold, 0.01 (`Speaker.AUDIBLE`), now decides both what is forwarded and what keeps the mic closed. The page's
+  0.02 `voice` flag only drives the bar.
+
+Failure policy: the call's phone queue is now non-live with a 1-s cap (it replaces the 2-s drop-oldest queue, so
+`ReadStream` needs no `live` flag). If the watch falls more than the transport's buffers plus 1 s behind, the stream
+breaks, the voice moves to the phone loudspeaker and the mic opens. Audio held inside the Data Layer that never backs
+up to the phone is invisible to the phone. That residual is stated in Risk 1, with device check D2b, and its
+follow-up would be a watch-side signal (a watch update), which is out of scope.
+
+New unit cases:
+- a block between the two thresholds (peak 0.015) is forwarded and gives 2;
+- a block written 1.5 s late keeps 2 until its playhead plus the tail;
+- a backlog written at once extends it;
+- an overflow → fallback → 0;
+- `PcmOut`: `sent` comes in order and never for discarded audio, and the call cap overflow → broken.
+
+The no-watch-change constraint stays, because a watch update means `adb install` from a computer over Wi-Fi (README).
+
+F4: accepted (scope) - 001 already decided the platform scope for audio routing: "Android 12+ only; hidden on Android
+11 ... the legacy calls are deprecated and would be a second code path ... On API 30, Buddy behaves as today"
+(`001-audio-io-selector/decisions.md`). 017's live-call part follows it. `LiveWatch`'s static `begin` returns at once
+below API 31, so on API 30 no watch path is exposed without its fallback, `noEarpiece` stays false, and a phone live
+call is today's, where Watch is Auto, as 012 shipped. The Watch texts say live voice on the watch needs Android 12+.
+The plan's Goal states that done-when (a) and (b) are for Android 12+, and Open questions asks Nicholas to confirm.
+This isn't blocking: his phone (S21 FE) is API 31+, where the Verifier checks. A legacy `setSpeakerphoneOn` path was
+rejected again for 001's reasons, and it couldn't be checked on any device he has.
+
+## Round 2 - Plan Reviewer (gpt-6-astra)
+
+F1 [major] The new refusal retry is not bounded - `plan.md:55-58,90-92` makes `liveDevice` skip the single `refused` key, recursively calls `reconcile()` after a rejection, and claims that `want.equals(refused)` stops a rejected speaker. That guard cannot stop a key the selector has already excluded. With buds and speaker available and both rejected, the specified sequence is buds → speaker → buds → speaker indefinitely: each rejection overwrites `refused` (`app/src/main/java/app/buddy/assistant/AudioRoute.java:223-234`). This can overflow the stack on the main thread; the surrounding `catch (Exception)` at `:181-183` does not catch `StackOverflowError`. With only a speaker, excluding it instead yields `""` and takes `drop()`, which clears the refusal and can clear the communication route (`:209-211,248-251`). A small simulation of the proposed selector confirms the alternating sequence; the planned tests cover selection and `slipped` separately, not this rejection transition. -> Use an explicitly bounded headset-then-speaker attempt, with a terminal speaker-failure state that neither recurses nor deliberately drops to the earpiece. Define how the call reports/stops or suppresses playback if no safe route can be established. Add a transition test where both choices return false (and one with only a rejected speaker), asserting termination, retained failure state, and no `clearCommunicationDevice()` fallback during the live call.
+
+F2 [major] Round 1 F3 remains open: successful writes still do not establish watch playback time - The revised `sent` callback runs after the phone's `write` and `flush` (`plan.md:166-175,204-207`; current write site: `app/src/watchlink/java/app/buddy/assistant/PcmOut.java:173-174`). It does not observe the watch's read or AudioTrack playhead, unlike `wear/src/main/java/app/buddy/assistant/wear/Speaker.java:108,130-139`. Google's [ChannelClient stream contract](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient#getOutputStream(com.google.android.gms.wearable.ChannelClient.Channel)) documents buffered transport, not a playback acknowledgement or a maximum delivery delay. The revised plan expressly permits delay hidden in that transport (`plan.md:188-189,357-364`), so the following counterexample still fits its design: one second of speech is accepted by the phone stream in real time, the receiver runs two seconds behind, and the phone queue remains empty. The estimate reopens the mic at roughly t=2 s while the watch plays until roughly t=3 s; the 1-s queue cap never fires. This is an inference from the specified timing, not a hardware measurement. The new tests delay `sent`, which tests a different case, and D2b still contains no delayed-delivery check (`plan.md:333-340,352`). -> Close the original finding with watch-side playback feedback, or establish and validate an end-to-end delay bound that the mute tail and failure policy actually enforce. Include delayed receiver/playback with prompt successful phone writes in verification, and require no self-transcribed speech before marking the feature done. If that cannot be achieved with the installed receiver, reconsider the no-watch-update constraint: it is a Planner choice, not a non-goal in `brief.md:15-16`. Moving this known failure to a post-ship follow-up does not resolve it.
+
+VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - the retry is a bounded loop over a set, and having no safe device never drops the route:
+- `liveDevice` skips every key in `liveRefused`, a set kept until `use()` and cleared where `refused` is. The new pure
+  `liveAttempt(…, refused, apply)` loops: pick, `apply`, and on false add the key and pick again. Each failed pass
+  adds a new key to a finite list, so buds → speaker → none ends, with no recursive `reconcile()`. A later tick with
+  the same set tries nothing (the failure is kept).
+- The live rule is its own branch in `reconcile()` (`live(am)`), so it never goes through `want()`'s `""` and
+  `drop()`. `want()` is today's again.
+- No device left (the speaker refused or missing): log "route: no safe device" and post `CodexLive.end("the phone
+  speaker couldn't be used")` once (`stuck`). The live branch has no `clearCommunicationDevice()`. Ending the call
+  says why. Muting the page instead would leave a silent call with no reason given.
+- Tests (`AudioRouteTest.liveAttempt`): both refused → none, `apply` called twice (buds, then speaker), and the set
+  holds both. The same set again → none, with no call. Only a speaker, refused → none after one call. The earpiece is
+  never passed to `apply`. The `NONE` branch (no `drop()`, one posted end) is checked in code review, because
+  `reconcile()` needs an `AudioManager`.
+
+F2: accepted - the mic now reopens on the watch's own answer, using the installed watch app. Each utterance (what the
+silence gate passes: from an audible block until 1 s of silence) is one 012 reading through the existing
+`link().open`, finished when the gate closes. The watch's `ReadAloud` closes a reading's channel only once its
+`Speaker` is silent: code 2 after the playhead reached the last frame and the track was released
+(`Speaker.java:144-159`), 0 after `stop()` flushed the track (hush, replaced) or the stream broke, and 1 when nothing
+sounded (`ReadAloud.java:124-127,149-156`). So:
+- The mic is closed from the first audible block until that reading's answer, plus 300 ms for the watch speaker's own
+  output. In the review's case (writes taken at once, playback 2 s behind) it stays closed until the watch says it
+  played the end, however long the transport held the audio.
+- The next reading opens only after the answer, because a new channel replaces the playing one on the watch
+  (`ReadAloud.java:55-62`). Blocks that come meanwhile are held and go into it in order.
+- Moving the setting away mid-utterance finishes that reading instead of cancelling it. The voice moves to the phone
+  at once, and the mic waits for the answer. `toWatch()` is now two bits: the voice is on the watch, the mic is
+  closed.
+- No answer 30 s after a reading's end (a link that neither plays nor disconnects): cancel, fall back, and the mic
+  opens 1 s later. The cancel closes the channel, which makes the watch's reads fail, so its player releases the
+  track. Risk 1 states the one case left: a watch more than 30 s behind on a live but slower-than-real-time link.
+
+The open-ended stream is gone, and with it `openCall`, `CALL_CAP`, `PcmOut`'s `sent` and the phone-side estimate. The
+link only gains an `attached` callback, and `ReadStream`/`PcmOut` stay as they are. Lag inside one long utterance
+still delays the voice (012's player never drops), but it can no longer open the mic. No watch update.
+
+Verification: `LiveWatchTest` 8 has fake readings that take every write at once and answer when the test says:
+`played` 3 s after the end keeps the mic closed throughout and for `TAIL`; also held blocks, a late answer, the 30-s
+give-up, and a setting change mid-utterance. D2b adds a walk-away run that makes the watch lag (live.log "played n
+(+X ms)" with X > 1 s, every "mic open" after its "played"). D2b is a gate: any user line made of the voice's own
+words fails done-when (a).
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+F1 [major] A transport failure is still mistaken for the watch's silence acknowledgement - The per-utterance `played` response resolves Round 2 F2 for successful playback, but `plan.md:176-187,217-221` also treats `broken` as proof that the watch's player is silent and reopens the mic after 300 ms. That is not the existing stream contract: `app/src/watchlink/java/app/buddy/assistant/ReadStream.java:100-103` synthesizes `broken` when a local failure's grace expires without any watch answer (explicitly covered by `app/src/testGithub/java/app/buddy/assistant/ReadStreamTest.java:176-197`). Also, `WatchVoiceLink.java:93-97` passes a disconnect as `closed(false, 0)`, indistinguishable from the watch's explicit hush; Google's [ChannelCallback contract](https://developers.google.com/android/reference/com/google/android/gms/wearable/ChannelClient.ChannelCallback) confirms that a disconnect supplies code 0. There is a concrete residual-playback case even without a long transport backlog: switching away mid-utterance finishes the reading immediately (`plan.md:196-198`), so its final AudioTrack buffer can contain speech, rather than the gate's one second of silence. If the link disconnects after the watch reaches EOF but while that buffer drains, the phone receives `broken` and opens the mic 300 ms later. The watch's EOF loop keeps playing independently of the channel (`wear/src/main/java/app/buddy/assistant/wear/Speaker.java:144-159`); `ReadAloud` has no channel-close handler to stop it. Its buffer is one second (`Speaker.java:28-29`), so speech can still reach the reopened phone mic. This is a code-derived failure sequence, not a hardware measurement, and contradicts the planned no-self-transcription gate. -> Preserve the distinction between an explicit receiver completion/hush and an unacknowledged disconnect/local timeout. Keep the existing `played` path, but specify a separate failure mute policy backed by a receiver-stop acknowledgement or an enforced and validated stop/drain bound; a local `broken` event must not itself prove silence. Cover both locally synthesized `broken` with no receiver answer and disconnect during the final audible EOF drain, including a mid-utterance setting change. The 30-s give-up must use the same justified failure policy. Keeping `ReadStream` entirely unchanged is a design choice to revisit if it hides the evidence needed by this rule.
+
+Round 2 F1 is closed by the finite refused set and terminal no-safe-device handling (`plan.md:69-97`). No other blocker or major findings are raised in this final round. Review was by source inspection and API-contract verification; no build or hardware tests were run.
+
+VERDICT: REVISE
