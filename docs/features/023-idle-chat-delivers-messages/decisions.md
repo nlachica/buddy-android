@@ -59,3 +59,26 @@
   Antigravity and Grok get no live input: their process ends with their turn, so the existing path already delivers
   within seconds.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Text the agent never got has one owner until it lands (plan review round 1, F1)
+- Options: (a) keep today's posted continuation, which skips the text if another run has started; (b) one
+  `leftover(ses, text)` that decides when it runs, through a static `placeLeftover`: deleted chat, dropped; running,
+  back into that run's notes; stopped, back to the box; else a new message; (c) track unacknowledged live messages
+  by run id until a turn starts.
+- Choice: (b). A failed live `say` and the notes `buddy_done` drains can then arrive in either order: the first
+  starts a run, and the second joins its notes, so each is delivered once. It also closes today's small hole where a
+  run started between `buddy_done` and its post. (a) loses a message in the reviewer's ordering. (c) adds per-run
+  state for the same outcome. A failed live send passes its raw text, so the "Added while you were working" prefix
+  isn't added twice. `sendLive` sets no status: `system/init` sets "Thinking…", so a failed `say` leaves no stale
+  status.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - No rule carve-out on the live path (revises "Scope of the live path"; plan review round 1, F2)
+- Options: (a) tag notes by source and keep rule notes off the live path and the turn-end flush; (b) no carve-out:
+  every note takes the same path.
+- Choice: (b). A rule run never reaches a running chat. Triggers starts one only when no chat is running
+  (`Triggers.java:366`), picks a new chat if the rule's chat is running (`:541`), and offers "Check again" only on an
+  idle chat (`canRecheck`, `:717`). So every note is the user's own, and `send` needs no `prompt == null` branch. (a)
+  adds state for a case that doesn't occur. The rest of the scope entry stands: attachments are still refused, and
+  only Claude Code gets live input.
+- By: Planner (claude-opus-5-5)

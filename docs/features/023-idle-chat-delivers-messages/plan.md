@@ -19,7 +19,8 @@ Non-goals:
   the watch's run-over check and schedules still follow the process (`ses.running`). Stop must still be able to end a
   background job.
 - Attachments sent while the process is alive: still refused with today's "still working" message.
-- Notification-rule runs (`sendFromRule`, `sendRecheck`) into a busy chat: they keep today's note behaviour.
+- Notification-rule runs. They never reach a running chat, so nothing changes for them (see "Rule runs" in
+  Approach 4).
 - Live input for Codex, OpenCode, Antigravity and Grok. Their processes end with their turn (see Facts), so they need
   no channel.
 - Timers, status text or a new indicator for the "turn over, jobs pending" state.
@@ -107,34 +108,60 @@ The lock makes "close" and "say" exclusive:
   - `startRun` and `buddy_done` also clear it.
 
 **4. Live delivery (ChatHub).**
-- `addNote` (bubble dictation, and `send`'s running branch for the user's own messages, `prompt == null`): when
-  `ses.running && ses.turnOver` and no files are attached, the message takes a new private `sendLive(ses, text,
-  shown=false)`. That covers the bubble, full chat, watch (`WatchLink.deliver` → `send`) and live voice
-  (`CodexLive` → `send`).
-- `sendLive` does this:
-  - shows the USER bubble (unless already shown);
-  - clears `turnOver` (a turn is starting: later messages are updates to it, as in done-when 2);
-  - sets the status to "Thinking…";
-  - runs `Helper.run(app, gone, "say", ses.id, text)`.
-- On an exit status other than 0, on the main thread:
-  - still `running`: the text goes back into `ses.notes`, today's note path, with its "gets it at its next step" line;
-  - not running: today's `buddy_done` leftover handling for that text. Stopped: back to the message box. Otherwise
-    `sendNoteAsMessage`.
+- **The branch.** In `addNote`, when `ses.running && ses.turnOver`, the message takes a new private
+  `sendLive(ses, text, false)` instead of becoming a note.
+  - Every message to a running chat reaches `addNote`: bubble dictation directly, and the rest through `send`'s
+    running branch (`ChatHub.java:299-301`), which refuses attachments first. That covers the full chat, the watch
+    (`WatchLink.deliver` → `send`) and live voice (`CodexLive` → `send`).
+  - `send` itself is unchanged.
+- **Rule runs** never reach that branch:
+  - Triggers starts a rule run only when no chat is running (`Triggers.java:366`);
+  - it picks a new chat if the rule's chat is running (`:541`);
+  - "Check again" shows only on an idle chat (`canRecheck`, `:717`).
 
-  That leftover handling is extracted from the `buddy_done` case into one method that both use.
+  So notes have one source, the user, and there is no rule case to keep apart.
+- **`sendLive(ses, text, note)`**:
+  - shows the USER bubble, unless `note` (a note is already shown);
+  - clears `turnOver` (a turn is starting: later messages are updates to it, as in done-when 2);
+  - runs `Helper.run(app, gone, "say", ses.id, forAgent)`. `forAgent` is `text`; for a note it gets today's prefix,
+    "(Added while you were working; if it asks something, answer it:) ";
+  - on an exit status other than 0, or when `Helper.run` throws, it calls `leftover(ses, text)` on the main thread,
+    with the raw text, so a later `sendNoteAsMessage` doesn't add the prefix twice;
+  - sets no status: the new turn's `system/init` sets "Thinking…" (`ChatHub.java:749-750`), so a failed `say`
+    leaves no stale status.
+- **`leftover(ses, text)`, one owner for text the agent never got** (main thread).
+  - Used by `sendLive`'s failure and by `buddy_done`. In `buddy_done` it replaces the inline Stop/continuation code
+    (`ChatHub.java:885-902`): the notes are drained as today, and the post (still before `changed()`, for WatchLink)
+    calls `leftover`.
+  - It decides when it runs, not when the text was taken, through a static `placeLeftover(ses, text, present)`
+    that returns a route and makes the state change:
+    - chat deleted (`present` is `sessions.all.contains(ses)`): dropped, as a deleted chat's notes are today;
+    - `ses.running` (another run started meanwhile, or this one still goes): back into `ses.notes`. The next phone
+      tool result, the next turn-end flush or that run's `buddy_done` takes it;
+    - stopped (`"stopped".equals(ses.outcome)`): appended to `ses.unsent`, and `leftover` adds today's "not sent"
+      line;
+    - otherwise: `leftover` calls `sendNoteAsMessage`, which starts the run at once.
+  - Today's `if (!ses.running)` skip is gone. It dropped the text when another run had started first; that text now
+    joins the run's notes.
+  - The reviewer's ordering (round 1 F1):
+    - A is sent live; B becomes a note; `buddy_done` drains B and posts its `leftover`; A's failure arrives on
+      either side of it.
+    - Whichever runs first finds the chat idle and starts a run with its text. The other finds it running and goes
+      into that run's notes.
+    - Each message reaches the agent once. After a Stop, both go back to the box.
 - **Notes left at turn end.** In the `result` case, when `running`, notes the agent never took are joined, cleared
-  and sent live with today's "(Added while you were working; if it asks something, answer it:) " prefix (already
-  shown).
+  and passed to `sendLive(ses, joined, true)`.
 
   This fixes the case where the user wrote during the agent's last non-phone steps and then waited an hour. For the
-  other providers `say` exits 3, and the same fallback hands the notes to the `buddy_done` path they use today.
+  other providers `say` exits 3. `leftover` then puts the notes back (the process still runs) and `buddy_done` sends
+  them, as today.
 
 Why this meets the brief:
 - Done-when 1: the agent gets the message within a proot exec, about a second.
 - Done-when 2: nothing changes while `turnOver` is false.
 - Done-when 3: Buddy never starts a second process for the chat. Claude Code's own queue orders user lines and task
   notifications (`queue-operation` enqueue/dequeue in the transcript), and the input stays open until a turn ends
-  with no jobs pending.
+  with no jobs pending. A live send that fails stays with `leftover` until it is delivered or back in the box.
 - Every provider: the app logic has no backend check. Claude Code gets the live path. The others fall back to the
   existing path, which already delivers right after their turn, because their process ends with it.
 
@@ -197,13 +224,23 @@ Alternatives considered:
    - `system/background_tasks_changed`, `system/task_notification`, `system/model`, `rate_limit_event` and
      `buddy_context` leave it.
 4. **App: live delivery** (`ChatHub.java`):
-   - `sendLive`, and its fallback through the leftover handler extracted from `buddy_done` (same behaviour: stopped
-     goes back to the box, otherwise `sendNoteAsMessage`);
-   - the `addNote` branch;
-   - in `send`'s running branch, `prompt == null` takes `addNote`, and rule runs keep the plain note;
+   - `static int placeLeftover(Sessions.Session, String, boolean present)` and `leftover`, replacing the inline
+     handling in `buddy_done`;
+   - `sendLive`, falling back through `leftover`;
+   - the `addNote` branch (`send` unchanged);
    - the notes flush in the `result` case.
 
    No string changes needed. The bubble's "Got it: X will take it into account" toast fits both paths.
+
+   Test: `app/src/test/java/app/buddy/assistant/LeftoverTest.java`, plain JUnit (`ChatHub` statics already load
+   there: `BypassTest` calls `ChatHub.clip`):
+   - routes: deleted, nothing changes; running, text in `notes`; idle and stopped, text appended to `unsent`
+     (`"\n"`-joined after an earlier one); idle, send.
+   - the F1 ordering, both ways. Start from a session just after `buddy_done`: idle, B drained, A's live send failed.
+     Call `placeLeftover` for A then B, and again for B then A. The test plays the hub's part: on "send" it records
+     the text and sets `running`; at a run's end it clears `running` and drains `notes` through `placeLeftover`.
+     Each of A and B is sent exactly once, and nothing is left.
+   - the same with `outcome` "stopped": nothing is sent, and `unsent` holds both.
 5. **Docs** (`linux/GUIDE.md:51`, fork sentence): "When the agent has answered but still waits on a background job
    (Linux tools), what you send goes to it right away as a new message."
 
@@ -213,7 +250,7 @@ Alternatives considered:
 |---|---|
 | 1. New turn within seconds | Two run.sh cases. `claude_live`: `say` while a task is listed reaches the agent, and the stand-in echoes "ping". `noinput`: a no-jobs `result` closes the input and the run ends. Then the real-agent check below (step a), and on the phone in a Claude chat with Linux tools: ask it to start `sleep 300; echo done` with `run_in_background` and end its turn. Send "what's 2+2?" from the bubble, then from the full chat. Each gets an answer within ~5 s while the chat still shows working. |
 | 2. Updates mid-turn unchanged | `TurnTrackTest`: `turnOver` is false from `system/init` to `result`. Existing run.sh cases and unit tests pass. On the phone: during a turn that keeps using phone tools (e.g. "read the screen 4 times, 10 s apart"), send a note. The transcript JSONL shows it in a tool result after `[BUDDY_USER_UPDATE]`, and there is no new user turn. |
-| 3. No collision or loss | `claude_live`: the input stays open while a task is listed and closes only after the `result` with `[]`. Real-agent check, step b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered in its own turn. The process then ends (`buddy_done`, chat idle). |
+| 3. No collision or loss | `claude_live`: the input stays open while a task is listed and closes only after the `result` with `[]`. `LeftoverTest`: a failed live send on either side of `buddy_done` is sent once, or back in the box after Stop. Real-agent check, step b. On the phone: with `sleep 60` in the background, send a message at about 55 s and another while the notification turn runs. The transcript shows each user line and the `<task-notification>` enqueued and dequeued once, each answered in its own turn. The process then ends (`buddy_done`, chat idle). |
 | Every provider | One Codex chat on the phone: a message sent right after its reply starts the next run at once (today's path, unchanged). The fallback is covered by `say` exiting 3 for a session with no FIFO (a run.sh assertion in step 2). |
 
 Real-agent check (Verifier, in Buddy's Linux, Haiku, events to a file):
@@ -245,4 +282,5 @@ CI: `bash linux/test/run.sh` and `./gradlew testGithubDebugUnitTest` (both in `b
 ## Open questions
 
 None blocking. The design choices that could have gone to Nicholas have recommended answers recorded in
-`decisions.md`: the "working" UI stays tied to the process, rule runs keep notes, and attachments are still refused.
+`decisions.md`: the "working" UI stays tied to the process, and attachments are still refused. Rule runs never reach
+a running chat, so they need no choice.
