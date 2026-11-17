@@ -184,3 +184,12 @@
   computer (it needs the computer itself), and `tailnet_devices` stays unregistered in Backup. Not a `keepsCard` name:
   removing only reduces access.
   By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: Stop's 20-second give-up is an upstream issue, left as is
+- Review: `ChatHub.stop` marks a chat stopped after `STOP_GIVE_UP_MS` (20 s) when no `buddy_stopped` came, and `buddy-run stop`
+  (linux/buddy-run, `stop)`) says nothing when `sessions/<id>/pid` doesn't exist yet. A Stop pressed in that window is not
+  remembered: the run then writes its PID file and goes on while the chat shows "Stopped".
+- Origin: pure upstream (2.3.12's "Stopping fix"; the fork's only buddy-run changes are the `AGY_PHONE_TOOLS` entry and the
+  002 end-of-run check). Not fixed: it needs a stop marker that `buddy-run` honours at start and expires, which is not a
+  safe ~15-line change without a test of the shell script's start-up. Report upstream.
+  By: Orchestrator (claude-sonnet-5-5)
