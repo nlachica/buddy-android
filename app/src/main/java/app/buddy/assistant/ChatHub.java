@@ -722,11 +722,18 @@ final class ChatHub {
         for (Sessions.Session s : sessions.all) if (s.running) s.lastEventAt = SystemClock.elapsedRealtime();
     }
 
+    /** A result ends the agent's turn (while the run goes on); a new turn (system/init, assistant) starts the next one. */
+    static void trackTurn(Sessions.Session ses, String type, String subtype) {
+        if ("result".equals(type)) ses.turnOver = ses.running;
+        else if ("assistant".equals(type) || ("system".equals(type) && "init".equals(subtype))) ses.turnOver = false;
+    }
+
     void onEvent(JSONObject ev) {
         Sessions.Session ses = sessions.find(ev.optString("buddy_session", null));
         if (ses == null) return; // unknown chat (deleted, or started outside Buddy)
         ses.lastEventAt = SystemClock.elapsedRealtime();
         String type = ev.optString("type");
+        trackTurn(ses, type, ev.optString("subtype"));
         if (!ses.running && (("system".equals(type) && !"model".equals(ev.optString("subtype"))) || "assistant".equals(type))) startRun(ses);
         switch (type) {
             case "system":
@@ -876,6 +883,7 @@ final class ChatHub {
             case "buddy_done":
                 if (ses.running) {
                     ses.running = false;
+                    ses.turnOver = false;
                     ses.status = "";
                     runEnded(ses);
                     if (!ses.lastReply.isEmpty()) {
@@ -1091,6 +1099,7 @@ final class ChatHub {
 
     private void startRun(Sessions.Session ses) {
         ses.running = true;
+        ses.turnOver = false;
         ses.outcome = null;
         ses.gotText = false;
         ses.lastReply = "";
