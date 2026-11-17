@@ -689,7 +689,7 @@ final class Tools {
         int secs = Math.max(1, Math.min(300, a.optInt("timeout_s", 60)));
         // from another computer (Phone tools on Tailscale) every command asks, whatever the switch says
         boolean remote = McpServer.CALLER_REMOTE.get() != null;
-        if ((Prefs.phoneShellAsk(svc) || remote) && !Guard.takeApproval(false, cmd)) {
+        if (remote || Prefs.phoneShellAsk(svc) && !Guard.takeApproval(false, cmd)) { // remote: a standing approval never covers it
             String answer = svc.askConfirm(svc.getString(R.string.tools_card_shell, cmd), false, !remote && !Bypass.secretOrMoney(cmd)); // 020
             if (!answer.startsWith("APPROVED")) return "Not run. " + answer;
         }

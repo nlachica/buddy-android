@@ -222,3 +222,10 @@
 - Choice: `askConfirm(card, false, !Bypass.secretOrMoney(card))`, the opt-in form every 020 site uses: Bypass adds the rule
   unless the card (app, filters, instruction) names a secret or money, which keeps the card. The rule still starts on "ask".
   By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: a standing approval never covers a remote shell command
+- Review: upstream's `(phoneShellAsk || remote) && !Guard.takeApproval(false, cmd)` let a prior confirm skip the card for a
+  command from another computer (Phone tools on Tailscale), against its own comment "every command asks".
+- Choice: `remote || phoneShellAsk && !takeApproval(...)`: a remote command always cards (and spends no approval). One line in
+  upstream code, safe. Local behaviour unchanged.
+  By: Orchestrator (claude-sonnet-5-5)
