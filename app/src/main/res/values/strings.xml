@@ -1348,12 +1348,12 @@
     <string name="setup_voice_sample">Bonjour ! Hi, I\'m Buddy. This is how I sound.</string>
     <string name="setup_audio_device">Audio device</string>
     <string name="setup_audio_device_info">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else the phone.</string>
-    <string name="setup_audio_device_info_watch">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else your watch for read aloud, else the phone.</string>
+    <string name="setup_audio_device_info_watch">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else your watch for read aloud and live voice (Android 12+), else the phone.</string>
     <!-- %1$s = what Auto uses right now: a headset name, Watch or Speaker. -->
     <string name="setup_audio_device_now">Auto is using %1$s now.</string>
     <!-- %1$s = the device's name. -->
     <string name="setup_audio_device_missing">%1$s isn\'t connected: Auto until it is.</string>
-    <string name="setup_audio_device_watch">Watch: read aloud plays on your Galaxy Watch (it needs the watch app from the same version). If the watch can\'t play it, the phone reads it instead.</string>
+    <string name="setup_audio_device_watch">Watch: read aloud, and on Android 12+ live voice calls, play on your Galaxy Watch (it needs the watch app from the same version; in a call the phone\'s mic still listens). If the watch can\'t play it, the phone reads it instead, and a call\'s voice moves to a headset or the phone speaker.</string>
     <string name="setup_audio_device_watch_away">No watch found: the phone reads replies aloud until it\'s back.</string>
     <!-- Audio device choices. Keep short. -->
     <string name="audio_auto">Auto</string>

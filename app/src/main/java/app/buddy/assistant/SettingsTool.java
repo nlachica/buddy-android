@@ -352,7 +352,9 @@ final class SettingsTool {
             @Override
             String allowed() {
                 return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can"
-                        + "; auto uses a connected headset (the latest), else the watch for read aloud, else the phone speaker";
+                        + "; on Android 12+ it also plays a phone live voice call's voice on the watch (a headset or the phone speaker"
+                        + " when it can't, never the earpiece)"
+                        + "; auto uses a connected headset (the latest), else the watch for read aloud and live voice, else the phone speaker";
             }
 
             @Override
