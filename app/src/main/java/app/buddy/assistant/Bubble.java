@@ -988,7 +988,7 @@ final class Bubble implements ChatHub.Listener {
         if (s == null || (s == sessions.current && !showingList)) return;
         showingList = false;
         if (s != sessions.current) hub.select(s);
-        else renderCurrent();
+        else backToChat();
     }
 
     void expand() {
@@ -1842,10 +1842,25 @@ final class Bubble implements ChatHub.Listener {
     }
 
     private void closePicker() {
-        pickingModel = false;
+        backToChat();
+    }
+
+    /**
+     * Leave the list or picker for the current chat. It only hid `scroll`, and onMessage kept adding to it, so the same
+     * chat keeps its views and the reader's place (end: caught up to the end). Another chat is drawn at its end.
+     */
+    private void backToChat() {
         showingList = false;
-        renderCurrent();
+        if (renderedFor != sessions.current) {
+            renderCurrent();
+            return;
+        }
+        boolean end = atEnd(); // a hidden view keeps its last layout
+        picking = pickingModel = false;
+        showListMode();
+        updateViewing();
         updateHeader();
+        if (end) scrollToEnd();
     }
 
     private void renderModelPicker() {
@@ -2016,8 +2031,7 @@ final class Bubble implements ChatHub.Listener {
         r.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         r.setOnClickListener(v -> {
             hub.select(ses);
-            showingList = false;
-            renderCurrent();
+            backToChat();
         });
         // long-press to delete, as in the app (asked right in the row: the bubble can't show a dialog)
         r.setOnLongClickListener(v -> {
@@ -3389,8 +3403,10 @@ final class Bubble implements ChatHub.Listener {
         }
         copyOnLongPress(v, text);
         messages.addView(v, p);
-        while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0);
-        if (kind == Kind.USER) scrollToEnd(); else followEnd();
+        if (kind == Kind.USER || atEnd()) { // reading back: the oldest views stay until the next message at the end
+            while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0);
+            scrollToEnd();
+        }
     }
 
     /** A reply's text (or the text between its tables): Markdown, links tappable, a long press copies it. */
