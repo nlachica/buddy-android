@@ -32,6 +32,8 @@ public class WatchLink extends WearableListenerService {
     /** MessageClient carries 100 KB; stop adding chats before the list itself can fail (about 900 chats). */
     private static final int LIST_MAX_BYTES = 90_000;
     private static final int SPOKEN_MAX = 3000;
+    /** A chat's snapshot for the watch's talk screen: its latest messages, cut by count and by serialized size. */
+    static final int HISTORY_MAX = 30, HISTORY_MAX_BYTES = 60_000;
     private static final long WAKE_MS = 15 * 60_000L;
     /** A reply's voice (ChatGPT's, through CodexSpeech): its channel path is VOICE + id, the phone's "the watch says it" is SAY. */
     private static final String VOICE = "/buddy/voice/", SAY = "/buddy/say";
@@ -138,6 +140,33 @@ public class WatchLink extends WearableListenerService {
                 hub.addListener(relay);
             }
         }
+    }
+
+    /**
+     * A chat's latest USER/BUDDY/ERROR messages for the watch, oldest first, as [{kind, text}]: `text` turns a message
+     * into what the watch shows (empty ones are left out); each is cut to SPOKEN_MAX like a live reply.
+     */
+    static JSONArray history(List<Sessions.Msg> all, java.util.function.Function<Sessions.Msg, String> text) {
+        List<JSONObject> rows = new ArrayList<>();
+        int bytes = 0;
+        for (int i = all.size() - 1; i >= 0 && rows.size() < HISTORY_MAX; i--) {
+            Sessions.Msg m = all.get(i);
+            if (m.kind != Bubble.Kind.USER && m.kind != Bubble.Kind.BUDDY && m.kind != Bubble.Kind.ERROR) continue;
+            String t = text.apply(m);
+            if (t.isEmpty()) continue;
+            if (t.length() > SPOKEN_MAX) {
+                int end = SPOKEN_MAX;
+                if (Character.isHighSurrogate(t.charAt(end - 1))) end--;
+                t = t.substring(0, end) + "…";
+            }
+            JSONObject row = json("kind", m.kind == Bubble.Kind.USER ? "you" : m.kind == Bubble.Kind.BUDDY ? "buddy" : "error", "text", t);
+            bytes += row.toString().getBytes(StandardCharsets.UTF_8).length + 1;
+            if (bytes > HISTORY_MAX_BYTES) break;
+            rows.add(row);
+        }
+        JSONArray out = new JSONArray();
+        for (int i = rows.size() - 1; i >= 0; i--) out.put(rows.get(i));
+        return out;
     }
 
     /** The phone's own id format (ChatHub.pruneLinux needs it; the id is also a file name). */
