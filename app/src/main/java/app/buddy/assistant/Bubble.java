@@ -22,6 +22,7 @@ import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
 import android.view.View;
+import android.view.ViewGroup;
 import android.view.ViewConfiguration;
 import android.view.WindowInsets;
 import android.view.WindowManager;
@@ -428,6 +429,8 @@ final class Bubble implements ChatHub.Listener {
         messages = new LinearLayout(svc);
         messages.setOrientation(LinearLayout.VERTICAL);
         messages.setPaddingRelative(0, dp(8), 0, dp(8));
+        // 017: nothing here needs input focus, and a focused message makes the ScrollView scroll to it on its own.
+        messages.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
         scroll.addView(messages);
         helpersList = new LinearLayout(svc);
         helpersList.setOrientation(LinearLayout.VERTICAL);
@@ -985,7 +988,7 @@ final class Bubble implements ChatHub.Listener {
         if (s == null || (s == sessions.current && !showingList)) return;
         showingList = false;
         if (s != sessions.current) hub.select(s);
-        else renderCurrent();
+        else backToChat();
     }
 
     void expand() {
@@ -1839,10 +1842,25 @@ final class Bubble implements ChatHub.Listener {
     }
 
     private void closePicker() {
-        pickingModel = false;
+        backToChat();
+    }
+
+    /**
+     * Leave the list or picker for the current chat. It only hid `scroll`, and onMessage kept adding to it, so the same
+     * chat keeps its views and the reader's place (end: caught up to the end). Another chat is drawn at its end.
+     */
+    private void backToChat() {
         showingList = false;
-        renderCurrent();
+        if (renderedFor != sessions.current) {
+            renderCurrent();
+            return;
+        }
+        boolean end = atEnd(); // a hidden view keeps its last layout
+        picking = pickingModel = false;
+        showListMode();
+        updateViewing();
         updateHeader();
+        if (end) scrollToEnd();
     }
 
     private void renderModelPicker() {
@@ -2013,8 +2031,7 @@ final class Bubble implements ChatHub.Listener {
         r.addView(col, new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1));
         r.setOnClickListener(v -> {
             hub.select(ses);
-            showingList = false;
-            renderCurrent();
+            backToChat();
         });
         // long-press to delete, as in the app (asked right in the row: the bubble can't show a dialog)
         r.setOnLongClickListener(v -> {
@@ -3386,8 +3403,10 @@ final class Bubble implements ChatHub.Listener {
         }
         copyOnLongPress(v, text);
         messages.addView(v, p);
-        while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0);
-        if (kind == Kind.USER) scrollToEnd(); else followEnd();
+        if (kind == Kind.USER || atEnd()) { // reading back: the oldest views stay until the next message at the end
+            while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0);
+            scrollToEnd();
+        }
     }
 
     /** A reply's text (or the text between its tables): Markdown, links tappable, a long press copies it. */
@@ -3551,12 +3570,21 @@ final class Bubble implements ChatHub.Listener {
             live = on;
             if (lastMark != null) mark(lastMark, on);
             mark(headMark, on);
-            if (!userToggled) setOpen(on);
+            if (on) {
+                if (!userToggled) setOpen(true);
+            } else {
+                fold();
+            }
         }
 
         void finish() {
             setLive(false);
-            if (!userToggled) setOpen(false);
+            fold();
+        }
+
+        /** Every automatic close: not under a reader (a laid-out log above the end), or the text below it would move (017). */
+        private void fold() {
+            if (!userToggled && !(view.isLaidOut() && !atEnd())) setOpen(false);
         }
 
         void setOpen(boolean o) {
@@ -3568,12 +3596,17 @@ final class Bubble implements ChatHub.Listener {
 
     /** New agent output: follow it only if the user is already at the end (or near it), so scrolling back to read isn't yanked. Call before the layout pass. */
     private void followEnd() {
-        View c = scroll.getChildAt(0);
-        if (c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(48)) scrollToEnd();
+        if (atEnd()) scrollToEnd();
     }
 
+    private boolean atEnd() {
+        View c = scroll.getChildAt(0);
+        return c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(48);
+    }
+
+    /** Not fullScroll: that also moves input focus to a message, which then scrolls the chat by itself (017). */
     private void scrollToEnd() {
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> scroll.smoothScrollTo(0, messages.getBottom()));
     }
 
     private TextView subtitle, stripText;

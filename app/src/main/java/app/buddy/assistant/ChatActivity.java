@@ -212,7 +212,32 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         bgp.topMargin = dp(this, 8);
         root.addView(backgroundPanel, bgp);
 
-        scroll = new ScrollView(this);
+        // 017: a focused reply (the user tapped it) must not scroll the chat by itself. Its cursor re-requests "show me"
+        // on every re-measure, and a resize reveals it. Both are dropped here; a moved cursor or selection (tap, handle,
+        // arrow keys), an `immediate` request (TalkBack) and focus changes (requestChildFocus, arrowScroll) still scroll.
+        scroll = new ScrollView(this) {
+            private TextView seen;
+            private int seenStart, seenEnd;
+
+            @Override
+            public boolean requestChildRectangleOnScreen(View child, android.graphics.Rect r, boolean immediate) {
+                View f = findFocus();
+                TextView t = f instanceof TextView ? (TextView) f : null;
+                boolean moved = t != null && (t != seen || t.getSelectionStart() != seenStart || t.getSelectionEnd() != seenEnd);
+                seen = t;
+                if (t != null) {
+                    seenStart = t.getSelectionStart();
+                    seenEnd = t.getSelectionEnd();
+                }
+                return (immediate || moved) && super.requestChildRectangleOnScreen(child, r, immediate);
+            }
+
+            @Override
+            protected void onSizeChanged(int w, int h, int ow, int oh) {
+                View f = findFocus();
+                if (f == null || f == this) super.onSizeChanged(w, h, ow, oh);
+            }
+        };
         messages = column(this);
         messages.setPaddingRelative(dp(this, 16), dp(this, 8), dp(this, 16), dp(this, 12));
         scroll.addView(messages);
@@ -548,10 +573,16 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
             liveHint.setVisibility(View.VISIBLE);
             liveHint.postDelayed(() -> liveHint.setVisibility(View.GONE), 10_000);
         }
-        if (lastMsg() != lastShown) showAll(); // messages came in while this screen was hidden
+        // 017: reading back stays put; messages that came while hidden are added below, as onMessage would have
+        boolean end = atEnd();
+        int at = lastShown == null ? -1 : ses.messages.lastIndexOf(lastShown);
+        if (!end && at >= 0) {
+            for (Sessions.Msg m : new java.util.ArrayList<>(ses.messages.subList(at + 1, ses.messages.size()))) show(m);
+            lastShown = lastMsg();
+        } else if (lastMsg() != lastShown) showAll(); // messages came in while this screen was hidden
         refresh();
         if (found != null && foundView != null) showFound(); // opened from Search: at the message, not the end
-        else scrollToEnd();
+        else if (end || at < 0) scrollToEnd();
     }
 
     @Override
@@ -653,9 +684,7 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
     @Override
     public void onMessage(Sessions.Session s, Sessions.Msg msg) {
         if (s == ses) {
-            View c = scroll.getChildAt(0); // where the user was, before the new message lays out
-            boolean follow = msg.kind == Bubble.Kind.USER || c == null
-                    || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(this, 48);
+            boolean follow = msg.kind == Bubble.Kind.USER || atEnd(); // where the user was, before the new message lays out
             if (ses.messages.size() == 1) { // drop the empty-chat hint
                 messages.removeAllViews();
                 hint = null;
@@ -2780,8 +2809,15 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
         });
     }
 
+    /** Within 48dp of the end, by the last layout (true before the first one). */
+    private boolean atEnd() {
+        View c = scroll.getChildAt(0);
+        return c == null || c.getBottom() - scroll.getScrollY() - scroll.getHeight() < dp(this, 48);
+    }
+
+    /** Not fullScroll: that also moves input focus to a reply, which then scrolls the chat by itself (017). */
     private void scrollToEnd() {
-        scroll.post(() -> scroll.fullScroll(View.FOCUS_DOWN));
+        scroll.post(() -> scroll.smoothScrollTo(0, messages.getBottom()));
     }
 
     /** Consecutive tool steps, grouped into one collapsible log. */
@@ -2890,12 +2926,21 @@ public class ChatActivity extends Screen implements ChatHub.Listener, Browser.Li
             live = on;
             paintLast();
             paintHead();
-            if (!userToggled) setOpen(on);
+            if (on) {
+                if (!userToggled) setOpen(true);
+            } else {
+                fold();
+            }
         }
 
         void finish() {
             setLive(false);
-            if (!userToggled) setOpen(false);
+            fold();
+        }
+
+        /** Every automatic close: not under a reader (a laid-out log above the end), or the text below it would move (017). */
+        private void fold() {
+            if (!userToggled && !(view.isLaidOut() && !atEnd())) setOpen(false);
         }
 
         void setOpen(boolean o) {

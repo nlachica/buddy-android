@@ -1,0 +1,48 @@
+# Research: 017-chat-scroll-jump
+<!-- Researcher, 2026-11-17. Sources: repo at feat/017-chat-scroll-jump (= main 4834d77 + docs); AOSP android14-release (googlesource) read via curl. -->
+
+## Summary
+- **No code path in the repo writes a scrollY of 0 / "top" on its own.** The only `scrollTo`s in the chat are `ChatActivity.java:427` (after "Show earlier": y + height delta), `:478` (search hit). Everything else is `fullScroll(FOCUS_DOWN)` (`ChatActivity.java:2680`, `Bubble.java:3569`), i.e. toward the END. Code alone does not prove the root cause; a debug-log run is needed (plan below).
+- **Rebuild suspect (1) in the brief is mostly refuted.** `showAll()`/`renderCurrent()` do `removeAllViews()` and re-add in the same UI message, so no layout pass runs on the empty view and ScrollView never clamps scrollY to 0 (clamping happens in `ScrollView.onLayout`, not in removeAllViews). Every caller then ends at the END: `renderCurrent` ends `scrollToEnd()` (`Bubble.java:2119`), `ChatActivity.onResume` always `scrollToEnd()` unless a search hit (`ChatActivity.java:530-534`). Rebuilds therefore land at the end, not the top. Exception: `earlier.onClick` restores y arithmetic (`:421-427`), which is correct only if `messages.getHeight()` is current (it is called before `showAll`, read after `post`; plausible, unverified on device).
+- **Strongest evidenced mechanism: `fullScroll(FOCUS_DOWN)` moves FOCUS to a reply TextView, and ScrollView later scrolls to the focused view.** `ScrollView.scrollAndFocus` picks a focusable view in the last page and calls `newFocused.requestFocus(direction)` (AOSP ScrollView.java:1259-1282). Reply TextViews are focusable: ChatActivity `replyText` uses `setTextIsSelectable(true)` (`ChatActivity.java:2655`); Bubble's `replyText` gets a `LinkMovementMethod` via `Ui.linkifyForService` (`Bubble.java:3387-3395`, `Ui.java:670`) when it has links, which makes it focusable (framework `setMovementMethod` -> `fixFocusableAndClickableSettings`, unverified here). Once a reply holds focus, ScrollView re-reveals it on: `requestChildFocus` -> `scrollToDescendant` (ScrollView.java:1683-1693) and **every size change of the ScrollView** -> `onSizeChanged` `doScrollY` to bring the focused view on screen if it was within one screen of the old viewport (ScrollView.java:1794-1810). Size changes happen when the area above/below changes: helpers cards (`renderHelpers`, `ChatActivity.java:839`; Bubble `renderHelpers`, `helpersList` GONE<->VISIBLE `Bubble.java:3057-3060`), the running strip (`ChatActivity.java:2066`), approval/later/interrupted cards, keyboard. Result: a scroll toward the focused reply, which moves the user off the end by up to that reply's height. Fits "scrolled to the bottom, then shoots back up", idle, both screens. Does not by itself explain "the very top" unless the focused reply is far up (unverified).
+- Selectable text (ChatActivity only): `ArrowKeyMovementMethod.onTakeFocus` with `FOCUS_DOWN` leaves the selection alone (AOSP ArrowKeyMovementMethod.java:367-376), so no cursor scroll from there; `LinkMovementMethod.onTakeFocus` removes the selection (LinkMovementMethod.java:265-273). `TextView.bringPointIntoView` -> `requestRectangleOnScreen` only runs for a cursor (TextView.java:8474, 11307, 12437), so text-cursor scroll is a weak suspect.
+- **ToolLog suspect (2) is weak in ChatActivity:** the log starts collapsed (`setOpen(false)` at construction, `ChatActivity.java:2722`), rows are GONE, so `add()` and `finish()` (`:2792-2795`) change no height unless the user opened it (`userToggled`). Bubble `StepLog`: not read (unverified).
+- **helpersBox tick (3):** `helperTick` runs relayout above the ScrollView; only harmful through the size-change/focus path above (ScrollView height change), not by itself.
+- **Page trimming in Bubble:** `while (messages.getChildCount() > Sessions.PAGE) messages.removeViewAt(0)` (`Bubble.java:3382`) shifts content up under an unchanged scrollY when the user is not at the end (a drift/jump of the removed child's height, toward the END, not the top). Called after each new non-step message.
+- ChatActivity has no onSaveInstanceState/scroll restore (grep: no hits), Bubble neither, so no restored-scroll path.
+
+## Repo map
+- Chat screen: `ChatActivity.java` -- `scroll` ScrollView `:195-198`; `showAll()` `:404-470` (rebuild); `onResume` `:511-535` (`showAll` if `lastMsg()!=lastShown`, `refresh()`, `scrollToEnd()`); `onMessage` `:633-647` (follow only within 48dp of end); `show(Msg)` `:2308-2366`, `show(kind,text)` `:2545-2650`; `replyText` `:2653-2662`; `links` `:2665-2668`; `scrollToEnd` `:2679`; `ToolLog` `:2683-2802`; `refresh()` `:2044-2079` (calls `log.finish()` when not running, `renderHelpers()`, approval/later/interrupted renders).
+- Bubble panel: `Bubble.java` -- `scroll` ScrollView subclass `:421-428`; `renderCurrent()` `:2097-2121`; callers `:988, 1077, 1802, 1807, 1844, 2017, 2178 (onChatsChanged when renderedFor != current), 3193 (applyFace)`; `showMessage` `:3280-3385`; `followEnd` `:3563-3566`; `scrollToEnd` `:3568`; `renderHelpers` `:3050+`.
+- Shared: `Ui.linkifyForService` `Ui.java:655-672`, `Ui.copyWithLinks` `:991`.
+- Existing 012 work: `followEnd` / `onMessage` 48dp gate (fork.7).
+- Build/test: see repo `AGENTS.md`/`README` (not re-verified here).
+
+## Prior art
+- AOSP ScrollView (android14-release, `https://android.googlesource.com/platform/frameworks/base/+/refs/heads/android14-release/core/java/android/widget/ScrollView.java`): `fullScroll` -> `scrollAndFocus` grabs focus; `requestChildFocus`/`onSizeChanged` reveal the focused view. Known pitfall class: ScrollView "jumps to focused child" when a focusable child (TextView with links/selectable) exists. Standard fix: make message views non-focusable (`setFocusable(false)`/`setFocusableInTouchMode(false)` for reply text), or `setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS)` on `messages`, and scroll with `scrollTo(0, child.getBottom())`/`smoothScrollTo` instead of `fullScroll` (which moves focus). `setRevealOnFocusHint(false)` (API 28+) on the focused views also stops `requestChildFocus` revealing (the field is read at ScrollView.java:1684). Caveat: non-focusable selectable text still needs `setTextIsSelectable(true)` (which re-sets focusable; call `setFocusable(false)` after, but then selection handles may not work: unverified).
+- Not searched: upstream `ghorbelhamdi/buddy-android` issues (not needed for the diagnosis; can `gh issue list -R ghorbelhamdi/buddy-android -S scroll` if wanted).
+
+## Constraints and risks
+- Selection/copy: ChatActivity relies on selectable replies (`ChatActivity.java:2655`); blocking focus may break text selection or link clicks (links tap via touch, should not need focus; unverified).
+- Bubble panel is a Service overlay window: IME/focus behavior differs (`keyboardVisible()` `Bubble.java:424`); input focus handled by `input.requestFocus()` `:1029, 2240`.
+- Can't run the app here (no device in this shell); root cause needs an on-device repro with logs.
+
+## Debug-logging plan (proof by device)
+Add a debug-only (guarded by a pref/BuildConfig-free flag, removed before merge) logger in both ScrollViews:
+1. Subclass hook `onScrollChanged(l,t,oldl,oldt)`: when `t==0 || abs(t-oldt) > height/2`, log `t, oldt, content height, child count, scroll height, findFocus() class+id+top`, plus `new Throwable().getStackTrace()` (top ~12 frames). The stack names the caller (`doScrollY` from `onSizeChanged`, `scrollToDescendant` from `requestChildFocus`, `scrollAndFocus`, `fullScroll`, or `scrollTo` from our code).
+2. Log every call to `showAll`, `renderCurrent`, `scrollToEnd`, `followEnd`, `removeViewAt(0)`, `log.finish()` with scrollY and `isResumed/ses.running`.
+3. Log `scroll.addOnLayoutChangeListener` size changes (old/new height) next to `helpersBox`/strip/approval visibility changes.
+4. Repro on the phone: open a chat with long replies, scroll to the end, leave idle, keep the helpers/strip changing (a running agent, then idle), `adb logcat -s BuddyScroll` (or the in-app log file). The first offending entry's stack decides between: (a) focus reveal (`onSizeChanged`/`requestChildFocus` with a focused reply), (b) a rebuild (`showAll`/`renderCurrent` frame), (c) trim (`removeViewAt`).
+5. Quick A/B without logging: set `messages.setDescendantFocusability(FOCUS_BLOCK_DESCENDANTS)` in both screens and see if the jump stops.
+
+## Answers to open questions
+None (plan.md has none).
+
+## Device evidence (orchestrator, 2026-11-17 19:45, fork.7+ on his phone)
+read_screen of the full chat (ChatActivity) mid-run: an older reply TextView ("Feature 017 has started...") is
+`{focused}` although nobody touched it, while newer replies sit below it. That confirms the focus mechanism: a
+reply grabs focus (fullScroll/scrollAndFocus or selectable text), and later ScrollView size changes
+(helpers/strip/keyboard, `onSizeChanged`) or `requestChildFocus` scroll back to that reply. As more output arrives
+the focused reply is far above the end, so the jump goes "all the way up". Root cause accepted: focusable message
+views + fullScroll moving focus. Fix direction: no message view may take focus (keep tap links and long-press copy),
+and scroll to the end without moving focus (scrollTo the content bottom, not fullScroll), in both screens.
