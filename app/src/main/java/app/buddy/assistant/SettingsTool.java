@@ -1429,6 +1429,26 @@ final class SettingsTool {
     }
 
     /**
+     * The settings that only change how Buddy looks and sounds. In a Routine allowed chat these skip the card; every
+     * other name (keys, permissions, safety, Linux tools, MCP, agents, and any setting added later) still asks.
+     */
+    static final java.util.Set<String> ORDINARY = new java.util.HashSet<>(java.util.Arrays.asList(
+            "chat_bubble", "tap_action", "panel_size", "theme", "accent", "surface", "face",
+            "read_aloud", "voice_input", "voice_output", "chatgpt_voice", "audio_device", "voice_languages",
+            "assist_mode", "live_continue", "pause_media", "update_notices"));
+
+    static boolean sensitive(String name) {
+        return !ORDINARY.contains(name);
+    }
+
+    /** Routine allowed as upstream's Guard.runRule reads it: the chat's mode, and not a rule's run. */
+    static boolean routineChat(String approvals, boolean ruleRun) {
+        return "routine".equals(approvals) && !ruleRun;
+    }
+
+    private static final String ROUTINE_NOTE = " (Routine allowed: no card, noted in the chat)";
+
+    /**
      * Changes a setting: check, snapshot, card, then, only if the user approved and nothing changed meanwhile, write.
      * cardFormat: R.string.tools_card_setting (name, now, new). main runs the snapshot and the write on the main
      * thread, where the settings screens write too, so the compare-and-write can't interleave with them.
