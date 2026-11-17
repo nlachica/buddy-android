@@ -245,6 +245,12 @@ public class LiveWatchTest {
         f.advance(500);
         assertTrue(r2.cancelled);
         assertEquals(0, c.toWatch());
+        f.advance(500); // no change: no line
+        assertTrue(f.log.contains("setting 2:Speaker -> watch"));
+        assertTrue(f.log.contains("setting watch -> 2:Speaker"));
+        assertTrue(f.log.contains("setting watch -> auto"));
+        assertTrue(f.log.contains("setting auto -> 2:Speaker"));
+        assertEquals(5, f.log.stream().filter(l -> l.startsWith("setting ")).count()); // one per change
     }
 
     @Test
