@@ -143,3 +143,26 @@ Round 3's only open finding (F1, `broken`/disconnect taken as proof of silence) 
 - A locally synthesized `broken`, a disconnect, or the 30-s give-up are failures: the mic stays closed for FAIL_TAIL = 1500 ms (the watch Speaker's buffer is 1 s, `Speaker.java:28-29`, plus margin), then reopens. ReadStream gets the smallest change needed to tell the coder which case occurred (e.g. a flag on `closed`), if it can't be told apart otherwise.
 - Tests: LiveWatchTest covers a local `broken` with no answer, and a disconnect during the final drain after a mid-utterance setting change; both keep the mic closed ≥ FAIL_TAIL.
 Why: the residual risk is bounded by the watch's 1-s buffer; a receiver-stop ack would need a watch update, which costs more than it's worth here. This overrides plan.md where they conflict.
+
+## 2026-11-17 - Coder: how the failure tail (orchestrator decision, plan round 3) is carried, and two small calls
+- Options: a flag on `ReadStream.closed` only; a new `Events` method every implementer must have; a default method.
+- Choice: `ReadQueue.Events.broken(boolean watchStopped)`, a default that calls `broken()`, so ReadQueue and the 012 tests
+  are untouched. `ReadStream.closed(local, code, lost)` (the old two-argument form stays, `lost = false`) settles code 0
+  on a live link as "stopped" (the watch's own hush: its Speaker is silent). `WatchVoiceLink` passes `lost = reason ==
+  CLOSE_REASON_DISCONNECTED`, since a disconnect carries code 0 too. A locally synthesized `broken` (PcmOut's grace
+  expiry), a disconnect and any other code are not acknowledgements. `LiveWatch`: played, refused and stopped reopen the
+  mic after `TAIL_MS` (300); broken, a disconnect and the 30-s give-up after `FAIL_TAIL_MS` (1500), which replaces the
+  plan's `CANCEL_TAIL` (1000). A failure of an open reading counts only if it had been fed audio.
+- By: Coder (claude-sonnet-5-5), on the orchestrator's decision.
+
+## 2026-11-17 - Coder: the live branch of `reconcile()` also respects `other`
+- Choice: the branch needs `!other` besides the NORMAL/IN_COMMUNICATION mode, so a phone or app call that was on
+  before Buddy's voice started is left alone, as today's lines do (plan: "ringing or in a phone call: today's lines").
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-17 - Coder: names and the check used
+- `LiveWatch` is the static facade (`begin/end/pcm/toWatch/noEarpiece`) and `LiveWatch.Call` the instance the tests
+  build with a fake `LiveWatch.Out`. No Gradle or Android SDK on the phone: the JVM tests were run with a javac/JUnit
+  script over the real sources (github 171 tests, fdroid 147), against the Wear stubs from the earlier pipeline runs; the
+  build, lint and CI steps are CI-only. The page JS was only syntax-checked with node.
+- By: Coder (claude-sonnet-5-5)
