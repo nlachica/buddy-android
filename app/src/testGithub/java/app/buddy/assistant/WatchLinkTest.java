@@ -9,7 +9,9 @@ import org.junit.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 public class WatchLinkTest {
     @Test
@@ -76,5 +78,48 @@ public class WatchLinkTest {
         assertTrue(h.length() < 30);
         assertTrue(h.toString().getBytes(StandardCharsets.UTF_8).length <= WatchLink.HISTORY_MAX_BYTES + 100);
         assertEquals("last", h.getJSONObject(h.length() - 1).getString("text"));
+    }
+
+    private static String shown(Map<String, WatchLink.Viewer> m) {
+        WatchLink.Viewer v = m.get("w");
+        return v == null || v.chat == null ? null : v.chat + v.view;
+    }
+
+    @Test
+    public void aDelayedStartOrStopDoesNotUndoANewerView() {
+        Map<String, WatchLink.Viewer> m = new HashMap<>();
+        assertTrue(WatchLink.register(m, "w", "a", 2, false, 0));
+        assertFalse(WatchLink.register(m, "w", "a", 1, false, 1)); // start 1 comes after start 2
+        assertFalse(WatchLink.register(m, "w", "a", 1, true, 2)); // and so does stop 1
+        assertEquals("a2", shown(m));
+    }
+
+    @Test
+    public void aDelayedStartCannotReviveAStoppedView() {
+        Map<String, WatchLink.Viewer> m = new HashMap<>();
+        assertTrue(WatchLink.register(m, "w", "a", 2, false, 0));
+        assertTrue(WatchLink.register(m, "w", "a", 2, true, 1));
+        assertFalse(WatchLink.register(m, "w", "a", 2, false, 2));
+        assertEquals(null, shown(m));
+        assertTrue(WatchLink.register(m, "w", "b", 3, false, 3)); // a newer start after a stop works
+        assertEquals("b3", shown(m));
+    }
+
+    @Test
+    public void aStopBeforeItsStartKeepsTheViewStopped() {
+        Map<String, WatchLink.Viewer> m = new HashMap<>();
+        assertTrue(WatchLink.register(m, "w", "a", 1, false, 0));
+        assertTrue(WatchLink.register(m, "w", "a", 2, true, 1)); // stop 2 first
+        assertFalse(WatchLink.register(m, "w", "a", 2, false, 2)); // then its start
+        assertEquals(null, shown(m));
+    }
+
+    @Test
+    public void aRegistrationLapsesSoAWatchWithAnOlderClockCanStartAgain() {
+        Map<String, WatchLink.Viewer> m = new HashMap<>();
+        assertTrue(WatchLink.register(m, "w", "a", 100, false, 0));
+        assertFalse(WatchLink.register(m, "w", "a", 5, false, 1));
+        assertTrue(WatchLink.register(m, "w", "a", 5, false, 31 * 60_000L));
+        assertEquals("a5", shown(m));
     }
 }

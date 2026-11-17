@@ -17,17 +17,20 @@ import org.json.JSONObject;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * The phone's end of the Galaxy Watch app (the wear/ module): the watch lists the chats, sends what the user said to
  * one of them, and gets Buddy's answer back to show and speak. Messages are JSON over the Wear Data Layer, paths under
  * /buddy (the table is in docs/features/003-wear-companion/plan.md; the live call's and the ChatGPT voice's additions
- * are in docs/features/007-watch-live-voice/plan.md; the New chat field is in docs/features/013-watch-new-chat/plan.md). Github build only (src/watchlink).
+ * are in docs/features/007-watch-live-voice/plan.md; the New chat field is in docs/features/013-watch-new-chat/plan.md; /buddy/history, a chat's latest messages for the
+ * watch's talk screen, is in docs/features/022-watch-chat-view/plan.md). Github build only (src/watchlink).
  */
 public class WatchLink extends WearableListenerService {
-    private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status";
+    private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status", HISTORY = "/buddy/history";
     private static final int TITLE_MAX = 40;
     /** MessageClient carries 100 KB; stop adding chats before the list itself can fail (about 900 chats). */
     private static final int LIST_MAX_BYTES = 90_000;
@@ -38,6 +41,8 @@ public class WatchLink extends WearableListenerService {
     /** A reply's voice (ChatGPT's, through CodexSpeech): its channel path is VOICE + id, the phone's "the watch says it" is SAY. */
     private static final String VOICE = "/buddy/voice/", SAY = "/buddy/say";
     private static final int VOICE_CAP = 320_000; // 10 s of PCM 16 kHz; past that the reply is broken
+    /** A watch's registration for a chat's messages ends by itself after this, if its stop never came. */
+    private static final long VIEW_MS = 30 * 60_000L;
     private static final long OPEN_MS = 10_000, ABANDON_MS = 60_000;
 
     private static final Handler main = new Handler(Looper.getMainLooper());
@@ -49,6 +54,11 @@ public class WatchLink extends WearableListenerService {
     /** Replies being voiced: channel path → its stream, until the channel closes. Main thread. */
     private static final Map<String, PcmOut> voices = new HashMap<>();
     private static long voiceSeq = System.currentTimeMillis(); // unique across phone restarts
+    /** Watch node id → the talk screen it last started or stopped (see register). Main thread. */
+    private static final Map<String, Viewer> viewers = new HashMap<>();
+    /** Nodes with a snapshot already posted: several messages in one turn make one. Main thread. */
+    private static final Set<String> pushing = new HashSet<>();
+    private static long pushes = System.currentTimeMillis(); // a snapshot's order, only up, also across phone restarts
 
     /** The watch opened a channel: /buddy/live is a call (WatchCall). */
     @Override
@@ -82,6 +92,9 @@ public class WatchLink extends WearableListenerService {
                 case STATUS:
                     Sessions.Session ses = ChatHub.get(c).sessions.find(in.optString("chat"));
                     tell(node, STATUS, json("chat", in.optString("chat"), "running", ses != null && ses.running));
+                    break;
+                case HISTORY:
+                    watching(node, in.optString("chat"), in.optLong("view"), in.optBoolean("stop"));
                     break;
                 default:
                     break;
@@ -135,10 +148,69 @@ public class WatchLink extends WearableListenerService {
             tell(node, "/buddy/heard", json("chat", chat, "text", text));
             tracked.put(chat, node);
             ses.watch = true;
-            if (!listening) {
-                listening = true;
-                hub.addListener(relay);
-            }
+            listen();
+        }
+    }
+
+    private static void listen() {
+        if (listening) return;
+        listening = true;
+        ChatHub.get(app).addListener(relay);
+    }
+
+    /** A talk screen of a watch, by its `view` number (the watch makes them go up); chat is null once it stopped. */
+    static final class Viewer {
+        final String chat;
+        final long view, until;
+
+        Viewer(String chat, long view, long until) {
+            this.chat = chat;
+            this.view = view;
+            this.until = until;
+        }
+    }
+
+    /**
+     * A start or stop from a watch's talk screen. Messages may arrive in any order, so the newest `view` wins: an older
+     * start or stop is ignored, and so is a delayed start of a view that already stopped. Entries (stopped ones too)
+     * lapse after VIEW_MS. Returns whether it counted.
+     */
+    static boolean register(Map<String, Viewer> m, String node, String chat, long view, boolean stop, long now) {
+        Viewer cur = m.get(node);
+        if (cur != null && now <= cur.until) {
+            if (view < cur.view) return false;
+            if (view == cur.view && cur.chat == null && !stop) return false;
+        }
+        m.put(node, new Viewer(stop ? null : chat, view, now + VIEW_MS));
+        return true;
+    }
+
+    private static void watching(String node, String chat, long view, boolean stop) {
+        if (!register(viewers, node, chat, view, stop, System.currentTimeMillis()) || stop) return;
+        listen(); // the relay also tells the screen about messages the phone itself gets
+        sendHistory(node);
+    }
+
+    /** The watch's screen gets the chat's latest messages (main thread). */
+    private static void sendHistory(String node) {
+        Viewer v = viewers.get(node);
+        if (v == null || v.chat == null || System.currentTimeMillis() > v.until) return;
+        Sessions.Session ses = ChatHub.get(app).sessions.find(v.chat);
+        JSONArray rows = ses == null ? new JSONArray()
+                : history(ses.messages, m -> m.kind == Bubble.Kind.USER ? m.label() : Voice.spoken(app, m.label()));
+        tell(node, HISTORY, json("chat", v.chat, "view", v.view, "n", ++pushes, "messages", rows));
+    }
+
+    /** A new message in this chat: the watches showing it get a fresh snapshot, a turn later and one for several. */
+    private static void pushViewers(String chat) {
+        long now = System.currentTimeMillis();
+        for (Map.Entry<String, Viewer> e : viewers.entrySet()) {
+            final String node = e.getKey();
+            if (!chat.equals(e.getValue().chat) || now > e.getValue().until || !pushing.add(node)) continue;
+            main.post(() -> {
+                pushing.remove(node);
+                sendHistory(node);
+            });
         }
     }
 
@@ -183,6 +255,7 @@ public class WatchLink extends WearableListenerService {
     private static final ChatHub.Listener relay = new ChatHub.Listener() {
         @Override
         public void onMessage(Sessions.Session ses, Sessions.Msg msg) {
+            if (msg.kind == Bubble.Kind.USER || msg.kind == Bubble.Kind.BUDDY || msg.kind == Bubble.Kind.ERROR) pushViewers(ses.id);
             String node = tracked.get(ses.id);
             if (node == null) return;
             if (msg.kind == Bubble.Kind.STEP) {
