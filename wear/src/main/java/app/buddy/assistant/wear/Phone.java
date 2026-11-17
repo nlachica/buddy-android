@@ -13,7 +13,7 @@ import java.util.function.BooleanSupplier;
 /** The link to Buddy on the phone: finds it, sends it JSON, and holds the message paths (see the plan's table). */
 final class Phone {
     static final String CHATS = "/buddy/chats", SEND = "/buddy/send", HEARD = "/buddy/heard", STEP = "/buddy/step",
-            REPLY = "/buddy/reply", DONE = "/buddy/done", ERROR = "/buddy/error", STATUS = "/buddy/status",
+            REPLY = "/buddy/reply", DONE = "/buddy/done", ERROR = "/buddy/error", STATUS = "/buddy/status", HISTORY = "/buddy/history",
             // 007: the call (a channel), its status and end, a reply's voice (a channel per reply: VOICE + id) and the
             // phone's "the voice couldn't say reply id"
             LIVE = "/buddy/live", LIVE_STATUS = "/buddy/live/status", LIVE_END = "/buddy/live/end",

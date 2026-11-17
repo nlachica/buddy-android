@@ -49,8 +49,13 @@ public class Talk extends Service {
     static final int YOU = 0, BUDDY = 1, ERROR = 2;
 
     static final class Line {
+        private static int count;
         final int kind;
         final String text;
+        /** Goes up with every line, also across lines.clear(): TalkActivity tells which came after a snapshot of the chat. */
+        final int seq = ++count;
+        /** A message the phone's chat has as well (/buddy/heard, /buddy/reply), unlike the watch's own notes (022). */
+        boolean mirror;
 
         Line(int kind, String text) {
             this.kind = kind;
@@ -333,6 +338,7 @@ public class Talk extends Service {
                 ChatsActivity.remember(this, chat, title, accent); // words sent (009); for a New chat, now that the chat exists
                 h.removeCallbacks(noHeard);
                 lines.add(new Line(YOU, text));
+                lines.get(lines.size() - 1).mirror = true;
                 if (!queue.isEmpty()) next();
                 break;
             case Phone.STEP:
@@ -342,6 +348,7 @@ public class Talk extends Service {
                 status = "";
                 ChatsActivity.remember(this, chat, title, accent); // the default chat: the one that last answered
                 say(in.optBoolean("error") ? ERROR : BUDDY, text, in.optLong("voice", -1));
+                lines.get(lines.size() - 1).mirror = true;
                 break;
             case Phone.DONE:
                 if ("stopped".equals(in.optString("outcome"))) say(ERROR, getString(R.string.talk_stopped));
