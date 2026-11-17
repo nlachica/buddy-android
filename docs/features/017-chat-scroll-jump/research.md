@@ -37,3 +37,12 @@ Add a debug-only (guarded by a pref/BuildConfig-free flag, removed before merge)
 
 ## Answers to open questions
 None (plan.md has none).
+
+## Device evidence (orchestrator, 2026-11-17 19:45, fork.7+ on his phone)
+read_screen of the full chat (ChatActivity) mid-run: an older reply TextView ("Feature 017 has started...") is
+`{focused}` although nobody touched it, while newer replies sit below it. That confirms the focus mechanism: a
+reply grabs focus (fullScroll/scrollAndFocus or selectable text), and later ScrollView size changes
+(helpers/strip/keyboard, `onSizeChanged`) or `requestChildFocus` scroll back to that reply. As more output arrives
+the focused reply is far above the end, so the jump goes "all the way up". Root cause accepted: focusable message
+views + fullScroll moving focus. Fix direction: no message view may take focus (keep tap links and long-press copy),
+and scroll to the end without moving focus (scrollTo the content bottom, not fullScroll), in both screens.
