@@ -176,3 +176,11 @@
 - Choice: the value is laid over the rule's current JSON (`merged` in `SettingsTool.rule`), for both the check and the
   write; `rule/new` is unchanged. `chat` is named in the setting's description. Merge, not replace, so a one-field edit works.
   By: Orchestrator (claude-sonnet-5-5)
+
+## 2026-11-17 - Upstream 2.3.12 sync: `tailnet/<name>` removes one paired computer
+- Review: Setup can revoke one computer (`Tailnet.remove`), buddy_settings had no counterpart; the list stayed "own" for its keys.
+- Choice: an item setting `tailnet/<name>` (listed in the full listing as `= paired`), value `""` removes it, anything else is
+  refused; the normal approval card shows paired -> (deleted). Token and id are never read or shown. Pairing stays on the
+  computer (it needs the computer itself), and `tailnet_devices` stays unregistered in Backup. Not a `keepsCard` name:
+  removing only reduces access.
+  By: Orchestrator (claude-sonnet-5-5)
