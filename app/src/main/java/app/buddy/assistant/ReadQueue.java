@@ -31,6 +31,11 @@ final class ReadQueue {
 
         /** Stopped partway, or the outcome is unknown: nobody reads the rest. */
         void broken();
+
+        /** broken(), and whether the watch itself said its player stopped (not a lost link or a timeout): 017. */
+        default void broken(boolean watchStopped) {
+            broken();
+        }
     }
 
     interface Out {

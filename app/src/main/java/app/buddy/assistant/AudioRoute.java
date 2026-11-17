@@ -122,6 +122,21 @@ final class AudioRoute {
         return pick(saved, indexOf(choices(c), saved) >= 0, headsetNow(c) != null, WatchVoice.link() != null);
     }
 
+    /**
+     * 017: pick() for a phone live call, from the connected media outputs only: in communication mode Android's routed
+     * answer (target()) follows the device Buddy set and hides a connected headset.
+     */
+    static String livePick(String saved, boolean savedHere, int[] connected, boolean watch) {
+        return pick(saved, savedHere, headsetIn(null, connected) != NONE, watch);
+    }
+
+    static String liveTarget(Context c) {
+        String saved = Prefs.audioDevice(c);
+        AudioManager am = c.getSystemService(AudioManager.class);
+        return livePick(saved, indexOf(choices(c), saved) >= 0,
+                types(java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS))), WatchVoice.link() != null);
+    }
+
     /** 016: what Android's routing uses now, as a label. */
     static String androidNow(Context c) {
         String h = headsetNow(c);

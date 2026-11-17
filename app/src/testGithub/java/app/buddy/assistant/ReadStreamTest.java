@@ -21,11 +21,13 @@ public class ReadStreamTest {
     private final AtomicInteger closes = new AtomicInteger(), ends = new AtomicInteger();
     private final CountDownLatch graceScheduled = new CountDownLatch(1);
     private final List<Runnable> grace = new CopyOnWriteArrayList<>();
+    private final List<Boolean> stops = new CopyOnWriteArrayList<>();
 
     private final ReadQueue.Events recorder = new ReadQueue.Events() {
         @Override public void played() { events.add("played"); }
         @Override public void refused() { events.add("refused"); }
         @Override public void broken() { events.add("broken"); }
+        @Override public void broken(boolean stopped) { stops.add(stopped); broken(); }
     };
 
     private ReadStream stream(int cap) {
@@ -171,6 +173,24 @@ public class ReadStreamTest {
         go.countDown();
         Thread.sleep(100);
         assertEquals("[refused]", events.toString());
+    }
+
+    @Test
+    public void onlyTheWatchsOwnHushCountsAsItsPlayerBeingStopped() throws Exception {
+        ReadStream a = stream();
+        attach(a, new ByteArrayOutputStream());
+        a.pcm(new byte[10]);
+        a.closed(false, 0, false); // the watch closed the channel itself
+        ReadStream b = stream();
+        attach(b, new ByteArrayOutputStream());
+        b.pcm(new byte[10]);
+        b.closed(false, 0, true); // a disconnect carries the same code
+        ReadStream c = stream();
+        attach(c, new Throwing());
+        c.pcm(new byte[100]);
+        awaitGrace();
+        grace.get(0).run(); // no code at all
+        assertEquals("[true, false, false]", stops.toString());
     }
 
     @Test

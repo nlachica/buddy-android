@@ -95,7 +95,7 @@ public class WatchVoiceLink implements WatchVoice.Link {
                 final boolean local = reason == ChannelClient.ChannelCallback.CLOSE_REASON_LOCAL_CLOSE;
                 main().post(() -> {
                     ReadStream s = streams.get(ch.getPath());
-                    if (s != null) s.closed(local, code);
+                    if (s != null) s.closed(local, code, reason == ChannelClient.ChannelCallback.CLOSE_REASON_DISCONNECTED);
                 });
             }
         });

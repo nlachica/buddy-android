@@ -120,6 +120,15 @@ public class AudioRouteTest {
     }
 
     @Test
+    public void livePick() {
+        // the connected outputs only: a routed {SPEAKER} answer that hides buds in a call isn't an input here
+        assertEquals("", AudioRoute.livePick("", false, new int[]{SPEAKER, A2DP}, true));
+        assertEquals("watch", AudioRoute.livePick("", false, new int[]{SPEAKER, SCO}, true));
+        assertEquals("watch", AudioRoute.livePick("watch", true, new int[]{SPEAKER, A2DP}, true));
+        assertEquals("2:Speaker", AudioRoute.livePick("2:Speaker", true, new int[]{SPEAKER}, true));
+    }
+
+    @Test
     public void slipped() {
         assertFalse(AudioRoute.slipped("2:Speaker", "1:Earpiece", 1999));
         assertFalse(AudioRoute.slipped("2:Speaker", "2:Speaker", 5000));
