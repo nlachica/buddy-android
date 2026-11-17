@@ -5,6 +5,7 @@
 #      play: the Play version, which has no Linux tools at all)
 #                                    run the agent on the message in that session, streaming events to the bubble
 #   buddy-run <token> stop <session>       stop that session's running request
+#   buddy-run <token> say <session> <text> send a message to the running Claude Code (exit 3: it takes none, the app keeps the text)
 #   buddy-run <token> delete <session>     forget that session
 #   buddy-run <token> prune <id,id,...>    remove the folders of chats not in the list
 #   buddy-run <token> ping                 answer the app's setup check
@@ -33,6 +34,8 @@ post() { # post one JSON event to the bubble
 # Tests (linux/test/run.sh, the runs): events go to a file instead of the app.
 [ -n "${BUDDY_TEST_EVENTS:-}" ] && post() { cat >> "$BUDDY_TEST_EVENTS"; echo >> "$BUDDY_TEST_EVENTS"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# one user line for Claude Code's streaming input (a uuid makes it report when the line is done)
+user_line() { jq -cn --arg t "$1" --arg u "$2" '{type:"user",uuid:$u,message:{role:"user",content:$t}}'; }
 valid_sid() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
 # OpenCode 2 (npm @opencode/cli) rather than 1.x (opencode-ai)? 2 needs --standalone, or it leaves a background service
 oc2() { [[ "$(readlink -f "$(command -v opencode)" 2>/dev/null)" == */@opencode/cli/* ]]; }
@@ -228,6 +231,17 @@ case "$CMD" in
       rm -f "$P" "$D/sessions/$SID/in" "$D/sessions/$SID/in.sent" "$D/sessions/$SID/in.done"
       jq -cn --arg s "$SID" '{type:"buddy_stopped",buddy_session:$s}' | post
     fi
+    exit 0 ;;
+  say) # (the lock makes this and stream_claude's close exclusive; a line written here is pending until its turn ends)
+    SID=${3:-}; valid_sid "$SID" || exit 2
+    S=$D/sessions/$SID
+    [ -p "$S/in" ] && kill -0 "$(cat "$S/pid" 2>/dev/null)" 2>/dev/null || exit 3
+    exec 9>"$S/in.lock"
+    timeout 5 flock 9 || exit 3
+    [ -p "$S/in" ] || exit 3
+    u=$(cat /proc/sys/kernel/random/uuid)
+    user_line "${4:-}" "$u" | timeout 5 tee "$S/in" >/dev/null 2>&1 || exit 3
+    echo "$u" >> "$S/in.sent"
     exit 0 ;;
   delete)
     SID=${3:-}; valid_sid "$SID" || exit 2
@@ -443,7 +457,6 @@ run_claude() {
 # after its turn ended while a background job keeps it alive. The input is closed, and Claude Code exits, only when it
 # says nothing is pending: idle, no job listed, and every line written to it reported completed. $S/in.sent lists the
 # uuids written, $S/in.done the completed ones. The lock $S/in.lock makes a close and a `say` exclusive.
-user_line() { jq -cn --arg t "$1" --arg u "$2" '{type:"user",uuid:$u,message:{role:"user",content:$t}}'; }
 fifo_reset() { rm -f "$S/in" "$S/in.sent" "$S/in.done" "$S/in.lock"; }
 stream_claude() {
   trap '' PIPE

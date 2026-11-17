@@ -181,6 +181,43 @@ rc=$?
 kill -9 "$busy" 2>/dev/null
 finish claude_busy "$problem"
 
+# Live input (feature 023): a message sent with `say` while Claude Code is idle with a job pending reaches it.
+# Both gaps are 7 s, longer than a quiet-wait close would last: the input must stay open on Claude Code's word alone.
+waitev() { # <pattern> <count> [tenths of a second]: wait for that many events matching
+  local i c
+  for i in $(seq "${3:-150}"); do c=$(grep -c "$1" "$H/events" 2>/dev/null); [ "${c:-0}" -ge "$2" ] && return 0; sleep 0.1; done
+  return 1
+}
+say() { HOME=$H bash ../buddy-run test say run "$1" >/dev/null 2>&1; }
+live_case() { # <fake>: start the wrapper on the stand-in, ready when its first text is out
+  HOME=$H BUDDY_FAKE=$1 bash ../buddy-run test ask run claude 0 hi >"$H/out" 2>&1 &
+  w=$!
+  problem=""
+  waitev '"text":"hi"' 1 || problem="the stand-in agent did not start"
+}
+live_end() { # <case>: the wrapper ends soon after the last result; then there is no input left to say to
+  gone "$w" 100 || { problem="${problem:-the wrapper did not end}"; kill -9 "$w" 2>/dev/null; }
+  say late; [ $? = 3 ] || problem="${problem:-a say after the end did not exit 3}"
+  finish "$1" "$problem"
+}
+# a line that got in before the first (job-less) idle waits 7 s, then its turn starts a job; a later line reaches the agent before the job ends
+live_case queued
+say A || problem="${problem:-say A failed}"
+touch "$H/go"
+waitev '"type":"result"' 1 || problem="${problem:-no first result}"
+sleep 7; touch "$H/go2"
+waitev '"type":"result"' 2 || problem="${problem:-no second result}"
+say B || problem="${problem:-say B failed}"
+waitev '"type":"result"' 4 || problem="${problem:-no fourth result}"
+live_end claude_queued
+# a job's notification held 7 s starts a job of its own; a line sent then still reaches the agent
+live_case notify
+waitev '"type":"result"' 1 || problem="${problem:-no first result}"
+touch "$H/go"; sleep 7; touch "$H/go2"
+waitev '"type":"result"' 2 || problem="${problem:-no second result}"
+say ping || problem="${problem:-say ping failed}"
+waitev '"type":"result"' 3 || problem="${problem:-no third result}"
+live_end claude_notify
 # a run that never lists a job closes its input at its first idle; a Claude Code without the state events at its first result
 run_case claude_noinput noinput claude
 run_case claude_legacy legacy claude
