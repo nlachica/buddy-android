@@ -155,4 +155,17 @@ public class SettingsRoutineTest {
         assertEquals(0, stale.writes + bad.writes);
         assertTrue(notes.toString(), notes.isEmpty());
     }
+
+    @Test
+    public void theApprovalsCardTellsRoutineAllowedAlsoSkipsOrdinarySettings() throws Exception {
+        java.util.concurrent.atomic.AtomicReference<String> stored = new java.util.concurrent.atomic.AtomicReference<>("");
+        SettingsTool.Setting s = SettingsTool.approvals("c1", "Trip", null, stored::get, stored::set);
+        List<String> cards = new ArrayList<>();
+        SettingsTool.change(s, "routine", CARD, card -> {
+            cards.add(card);
+            return YES;
+        }, Runnable::run);
+        assertTrue(cards.get(0), cards.get(0).contains("Ordinary Buddy settings"));
+        assertTrue(cards.get(0), cards.get(0).contains("steps go ahead in every app"));
+    }
 }

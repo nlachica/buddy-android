@@ -51,3 +51,20 @@
 - Choice: fork-owned text only: the tool description, the `chat/<id>/approvals` card's routine effect, `AGENTS.md:25`
   and the fork parenthetical in `docs/GUIDE.md:205`. Editing upstream's string is a sync conflict every release.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - `routine.accept(card)` runs inside the main-thread compare-and-write, right after `set` returns
+- Options: call it after `onMain` returns by testing the result for "Changed "; call it inside the write lambda.
+- Choice: inside the lambda, after `s.set(v)` returned: no string-sniffing, and a `set` that throws or a stale snapshot
+  never reaches it. `call`'s consumer only posts the note with `svc.runOnMain`, so nothing blocks under the lock.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-17 - Routine effect text is a sentence appended to `effect("routine")`; steps 3 and 4 share one commit
+- The card says "Ordinary Buddy settings (voice, audio, appearance) change without a card too" (capital O, after a
+  full stop; the test checks that wording). Steps 3 (wiring) and 4 (texts) touch the same file and were committed
+  together. Step 5 (version) is the orchestrator's release step and was not done here.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-17 - Local tests: `/tmp/buddy-build-019/check.sh` (the 017 javac + JUnit script, pointed at this worktree)
+- Same method and limits as 004/005/017's decisions: not Gradle, CI is the first Gradle run. Run from `app/` because
+  `ChatScrollTest` reads `src/main/...` relative to the working directory.
+- By: Coder (claude-sonnet-5-5)
