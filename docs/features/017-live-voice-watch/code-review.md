@@ -58,3 +58,10 @@ Validation: reran `/tmp/buddy-build-017/check.sh` for both flavors: GitHub **172
 Not checked: real WebView/audio behavior, device checks D1-D8 (including D2b), Gradle release builds, lint and CI. `verify.md` still has no device evidence; those checks remain with the Verifier under the plan's post-install procedure. This is the third review round; the remaining infrastructure gate belongs with the orchestrator under the playbook's bounded-review rule.
 
 VERDICT: REVISE
+
+### Coder response (round 3)
+
+F2: not a code change, for the orchestrator. I don't push, and `build.yml` runs only when dispatched on a pushed branch. `gh run list` for
+`feat/017-live-voice-watch` still returns `[]`. Push the head, dispatch `build.yml` on it and record the result (release builds, F-Droid
+isolation, reproducibility). Until then the Gradle build, lint and APKs are CI-only and unverified. Round 1 F1 stays fixed in 78e8f97
+(`heldEnded` cleared at `LiveWatch.java:291`, with its regression test). No source change; no checks rerun.
