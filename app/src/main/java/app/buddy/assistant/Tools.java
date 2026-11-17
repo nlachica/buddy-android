@@ -2275,9 +2275,8 @@ final class Tools {
         r.backend = ses.backend;
         r.chat = chat;
         String filters = r.filters(svc);
-        String card = svc.getString(R.string.tools_card_rule, r.app,
-                filters == null ? svc.getString(R.string.rules_any) : filters, instruction, ses.label());
-        String answer = svc.askConfirm(card, false, !Bypass.secretOrMoney(card)); // 020: Bypass adds it unless it names a secret or money
+        String answer = svc.askConfirm(svc.getString(R.string.tools_card_rule, r.app,
+                filters == null ? svc.getString(R.string.rules_any) : filters, instruction, ses.label()), false);
         Guard.forget(chat); // the OK was for the rule, not for a tap or a message that comes next
         if (!answer.startsWith("APPROVED")) return "Not added. " + answer;
         Rules.put(svc, r);
