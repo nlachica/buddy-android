@@ -15,7 +15,7 @@ jobs:
   helper-tests:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Test the helper on recorded agent output
         run: bash linux/test/run.sh
 
@@ -26,16 +26,16 @@ jobs:
     needs: helper-tests # a red helper or sync-script test means no APK and no release on a tag
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: true # proot and libandroid-shmem (third_party/)
 
-      - uses: actions/setup-java@v6
+      - uses: actions/setup-java@d1374f8ac74474200d16ef8ecee22c7ae7a51880 # v6
         with:
           distribution: temurin
           java-version: "21"
 
-      - uses: gradle/actions/setup-gradle@v6
+      - uses: gradle/actions/setup-gradle@8da46b539cd8fe6ab27ca75128919a18d757604c # v6
 
       # proot, talloc, libandroid-shmem and the pty helper, from source with a fixed NDK
       - name: Build native libraries
@@ -84,7 +84,7 @@ jobs:
         run: '! unzip -p "$FDROID_APK" "classes*.dex" | grep -a "Lcom/google/android/gms/" >/dev/null'
         # no -q: grep stopping at the first hit can break unzip's pipe, and with pipefail that would hide the hit
 
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: buddy-apk
           path: dist/*.apk
@@ -110,7 +110,7 @@ jobs:
 
       # What F-Droid will do: build the fdroid APK again, unsigned, somewhere else, and check it matches the signed one
       # above but for the signature. After publishing, so a mismatch shows up red without holding the release back.
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           submodules: true
           path: rebuild-check # a second copy at another path, as F-Droid's build machine would have

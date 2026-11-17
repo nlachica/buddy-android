@@ -85,8 +85,15 @@ final class ReadStream implements ReadQueue.Stream {
 
     /** The channel closed: local says by us (never the watch's answer), code is the app specific error code. */
     void closed(boolean local, int code) {
+        closed(local, code, false);
+    }
+
+    /** lost: the link went away (a disconnect carries code 0, like the watch's own hush: that one is the watch's answer). */
+    void closed(boolean local, int code, boolean lost) {
         if (local) return;
-        if (settle(code == PLAYED ? Outcome.PLAYED : code == NOT_PLAYED ? Outcome.REFUSED : Outcome.BROKEN)) out.cancel();
+        Outcome o = code == PLAYED ? Outcome.PLAYED : code == NOT_PLAYED ? Outcome.REFUSED
+                : code == 0 && !lost ? Outcome.STOPPED : Outcome.BROKEN;
+        if (settle(o)) out.cancel();
     }
 
     /** The channel did not open in time. */
@@ -120,7 +127,8 @@ final class ReadStream implements ReadQueue.Stream {
         if (first) ended.run();
     }
 
-    private enum Outcome { PLAYED, REFUSED, BROKEN }
+    /** STOPPED: broken, and the watch said so itself (code 0 on a live link): its player is silent. */
+    private enum Outcome { PLAYED, REFUSED, BROKEN, STOPPED }
 
     private boolean settle(Outcome o) {
         PcmOut.Closer c = null;
@@ -140,7 +148,7 @@ final class ReadStream implements ReadQueue.Stream {
             }
             if (o == Outcome.PLAYED) events.played();
             else if (o == Outcome.REFUSED) events.refused();
-            else events.broken();
+            else events.broken(o == Outcome.STOPPED);
         });
         return true;
     }

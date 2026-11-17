@@ -156,6 +156,7 @@ final class SettingsTool {
         List<Setting> l = new ArrayList<>();
         l.add(onOff("linux_tools_new_chats", () -> Prefs.devMode(svc), on -> Prefs.setDevMode(svc, on)));
         l.add(onOff("agents_tap_buddy", () -> Prefs.agentsTapBuddy(svc), on -> Prefs.setAgentsTapBuddy(svc, on)));
+        l.add(onOff("ask_new_apps", () -> Prefs.askNewApps(svc), on -> Prefs.setAskNewApps(svc, on)));
         l.add(onOff("background_new_chats", () -> Prefs.backgroundDefault(svc), on -> Prefs.setBackgroundDefault(svc, on)));
         l.add(new Scalar("phone_commands", () -> Prefs.phoneShell(svc) ? "on" : "off",
                 v -> Prefs.setPhoneShell(svc, v.equals("on")), "", "on", "off") {
@@ -352,7 +353,9 @@ final class SettingsTool {
             @Override
             String allowed() {
                 return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can"
-                        + "; auto uses a connected headset (the latest), else the watch for read aloud, else the phone speaker";
+                        + "; on Android 12+ it also plays a phone live voice call's voice on the watch (a headset or the phone speaker"
+                        + " when it can't, never the earpiece)"
+                        + "; auto uses a connected headset (the latest), else the watch for read aloud and live voice, else the phone speaker";
             }
 
             @Override
