@@ -206,6 +206,13 @@ F5 [major] The no-reviewer fallback drops the draft before the new secret check 
 
 VERDICT: REVISE
 
+### Planner response (round 3)
+
+F1: resolved. Nicholas accepted all four Q1 recommendations (brief, Clarifications, 2026-11-17). The plan says so in
+its header, Goal, Risks and Open questions, and done-when 3 is judged against his answers.
+
+F2-F5: accepted. Round 4 restates them as F1-F4; the answers are under round 4.
+
 ## Round 4 - Plan Reviewer (gpt-6-astra)
 
 Round 3 F1 is resolved: `brief.md:33` records Nicholas accepting all four Q1 recommendations. No further approval of those choices is needed. The following are the still-open round 3 technical findings, rechecked against the code; they concern explicit evidence discarded by the proposed implementation, not the accepted unnamed-money or opaque-shell limits. No Planner response or corresponding plan revision addresses them. The pipeline's three-round debate limit has been reached; the orchestrator owns disposition of these findings.
@@ -219,3 +226,49 @@ F3 [major] Append-and-submit still checks only the added fragment (round 3 F4) -
 F4 [major] The no-reviewer fallback still loses draft sensitivity (round 3 F5) - The Enter `money` flag at `plan.md:139` contains app/web/browser facts only, and `review` merely forwards it. If `Reviewer.harness` returns null, `app/src/main/java/app/buddy/assistant/Tools.java:1795-1796` calls `guardAction` with only the no-reviewer message, discarding the supplied draft; the ordinary reviewer path retains it at `:1808-1809`. Submitting "password: example" from a native non-search field in a non-money Smart app can consequently bypass Ask's fallback card. -> Compute draft sensitivity before branching on reviewer availability and retain it in the fallback, or pass the full draft as a separate classification input. Add sensitive and harmless no-harness cases, including denial preventing the sensitive submission.
 
 VERDICT: REVISE
+
+### Planner response (round 4)
+
+F1 (round 3 F2): accepted.
+- `Bypass.tapMoney` no longer uses `Guard.riskyLabel`'s answer. It walks the same bounded nodes (the node, up to 3
+  parents until the first clickable one, and that one's first 6 children). On each it reads every short label (text,
+  content description and tooltip at 30 characters and 4 words or fewer, `Guard.risky`'s filter, plus the view id's
+  name) and doesn't stop at the first risky one.
+- It only decides whether a card already showing may be skipped, so it adds no card to a tap Ask lets through.
+- The walk is a ~15-line copy in `Bypass.java`, since `Guard.risky` is private and Guard is upstream's.
+- T9 adds: "Send" text with a "Pay now" description, with a "Pay" tooltip, and with id `com.shop:id/pay_button`; and
+  an icon button with a child described "Buy". All are true. A "Send" whose description is a long "Free shipping on
+  orders over $25" stays false.
+- The Send/Pay example is gone from Risks. The rejected alternative at the old `plan.md:299-300` is replaced.
+
+F2 (round 3 F3): accepted.
+- `browser.js` moves the form facts out of `B.target` into `payForm(form)` and `formName(form)`, and `B.focus` returns
+  `payForm` and `form` from them. A neutral-URL text box in a `/checkout` form now reaches `money` with its form.
+- T7 adds a focus result in `B.focus`'s full shape (`form:"/checkout"`, `submitLabel:"Send"`: true; `form:"/note"`:
+  false).
+- There is no JS test harness, so new T11 reads `browser.js` and checks that `B.focus`'s code returns `payForm:` and
+  `form:`. That is the producer/consumer contract.
+- The phone check serves a page from Buddy's Linux with a `/checkout` form and a Send button: Enter cards, and on
+  denial the page doesn't change. Denial stopping Enter is upstream's unchanged `if (blocked != null) return`
+  (`BrowserTools.java:341-342`), a code-review item.
+
+F3 (round 3 F4): accepted.
+- Each caller ors `Bypass.secretOrMoney(<full draft>)` into the `money` it passes, so the check no longer depends on
+  what the card shows.
+- Native Enter uses `value`, the field's whole text after an append (`Tools.java:1920-1922`).
+- Browser Enter reads `__buddy.draft()` after `Browser.insertText`. That is `B.target`'s draft reader, moved out as
+  `B.draft(not)` with no clip. An append of empty text is judged on the whole field.
+- The card text stays as it is in every mode. Putting the whole field on the card would change Ask's card.
+- T10 adds `"password: example" + "!"` (true) against `"!"` (false). The phone check adds append-and-submit, natively
+  on Hard and in the background browser: each cards, and denied, nothing is sent.
+
+F4 (round 3 F5): accepted, fixed by F3's change.
+- The draft's sensitivity is in `money`, computed in `guard` and `typeText` before `review` runs.
+- `review` passes `money` to both its `guardAction` calls, the no-reviewer fallback (`Tools.java:1796`) included.
+- `Tools` can't be built on the JVM (no Robolectric), so the code review checks this line. T10 covers the predicate on
+  sensitive and harmless drafts.
+- Denial stopping the Enter is the unchanged `if (blocked != null) return result + " Not sent: "`
+  (`Tools.java:1973`).
+
+Also changed: main took `2.3.11-fork.4` / 224 for the watch-voice fix, so step 8 and the phone check now use fork.5 /
+225 for this feature and the next number for the controlled update.

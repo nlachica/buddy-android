@@ -1,8 +1,8 @@
 # Plan: 020-bypass-approvals
 
-Research is empty for this run. The facts below come from the code, with `path:line` on each (lines as of `9c7a20b`).
-Revised after plan review rounds 1 and 2 (`plan-review.md`). **Q1 (Open questions) blocks coding** until Nicholas
-answers it.
+Research is empty for this run. The facts below come from the code, with `path:line` on each (lines as of `9c7a20b`;
+main's later commits don't touch the files cited). Revised after plan review rounds 1-4 (`plan-review.md`). Q1 is
+answered: Nicholas accepted all four recommendations (brief, Clarifications, 2026-11-17). Nothing blocks coding.
 
 ## Goal
 Add a fourth per-chat approvals mode, **Bypass** (stored `"bypass"` in `Session.approvals`), next to upstream's Ask
@@ -20,20 +20,24 @@ Secrets and money still card:
   transfers or money;
 - everything in banking and payment apps and on money sites, and Enter on a web page or in a browser app;
 - buttons on the user's always-ask list (as Trust and never-ask, the user's own rules stay as set);
-- reading the clipboard (its card isn't opted in: Q1c);
+- reading the clipboard (its card isn't opted in: Q1c, accepted);
 - `buddy_settings` key routes (011), approvals modes, Safety settings (per-app modes, button rules, built-in words) and
-  a chat's allowed apps.
+  a chat's allowed apps (Q1d, accepted).
 
 What Bypass promises:
-- A step's secret-and-money check reads every input that step's own risk check read, before any clipping: risky labels
-  of the button and of the node under the tap, the app and its package, the site and URL, the form, the full draft,
-  the reviewer's reason, the dialog's full text, the command line.
+- A step's secret-and-money check reads every input that step's own risk check read, before any clipping and before
+  the Smart reviewer runs:
+  - every short label (text, description, tooltip, id) of the button and of the node under the tap, not just the
+    first risky one;
+  - the app and its package, the site and URL, and the form, for Enter too;
+  - the full outgoing draft, which after an append is the field's whole text;
+  - the reviewer's reason, the dialog's full text, the command line.
 - The agent can't change approvals modes, Safety settings or a chat's allowed apps without a card.
 
-What it can't promise ("recognisably" is the limit, Risks): a money step whose card, app and site carry no money word
-or name (a "Send" in a bank app called "Chase"), and a phone command whose secret read isn't on its command line (a
-script). Bypass is not "every card Ask would show"; Nicholas accepts these limits or picks the alternatives in Q1
-before coding, and done-when 3 is judged against his answer.
+What it can't promise ("recognisably" is the limit, Risks), and Nicholas accepted (Q1a, Q1b): a money step whose
+labels, app and site carry no money word or name (a "Send" in a bank app called "Chase"), and a phone command whose
+secret read isn't on its command line (a script). Bypass is not "every card Ask would show". Done-when 3 is judged
+against his answers.
 
 Also revert 019, so Routine allowed is upstream's again.
 
@@ -136,11 +140,11 @@ that count come from the risky labels, app, draft, reviewer reason, command, URL
 
 | Site | Opt-in (`bypass` argument) | Still cards when |
 |---|---|---|
-| Tap / Enter guard: `Tools.guardAction` (`Tools.java:1830`), reached from Hard rules (`guard`), Enter (`typeText`) and the Smart reviewer's ask/block (`review`) | `!money && !Guard.moneyApp(svc, frontPkg()) && !Bypass.secretOrMoney(summary)`. `guardAction` gets `boolean money` from its caller, computed before any formatting: a tap passes `Bypass.tapMoney(Guard.moneyApp(svc, pkg), target, hit) \|\| userAsks`; Enter passes `Guard.moneyApp(svc, pkg) \|\| web \|\| Guard.browser(svc, pkg)`; `review` passes on what it was given | banking/payment app (target's or front, or unknown: `moneyApp(null)` is true); a risky label of the target or of the node under the tap, the visible label, app name, draft or reviewer reason names a secret or money; a button on the user's always-ask list; Enter on a web page or in a browser app |
+| Tap / Enter guard: `Tools.guardAction` (`Tools.java:1830`), reached from Hard rules (`guard`), Enter (`typeText`) and the Smart reviewer's ask/block (`review`) | `!money && !Guard.moneyApp(svc, frontPkg()) && !Bypass.secretOrMoney(summary)`. `guardAction` gets `boolean money` from its caller, computed before any formatting and before the reviewer: a tap passes `Bypass.tapMoney(Guard.moneyApp(svc, pkg), target, hit) \|\| userAsks \|\| Bypass.secretOrMoney(draft)` (`draft`: the focused field's text, `Tools.java:1757`); Enter passes `Guard.moneyApp(svc, pkg) \|\| web \|\| Guard.browser(svc, pkg) \|\| Bypass.secretOrMoney(value)` (`value`: the field's whole text after an append, `:1920-1922`); `review` passes its `money` to both its `guardAction` calls, the no-reviewer one (`:1796`) included | banking/payment app (target's or front, or unknown: `moneyApp(null)` is true); any short label of the target or of the node under the tap, the visible label, app name, full draft or reviewer reason names a secret or money; a button on the user's always-ask list; Enter on a web page or in a browser app |
 | `confirm` (`Tools.java:518`) | `!Guard.moneyApp(svc, front) && !Bypass.secretOrMoney(summary)` | the same |
 | `phone_shell` (`Tools.java:668`) | `!Bypass.secretOrMoney(cmd)` (Q1a) | the command line names a secret, a key file or money (the command line only: see Risks) |
 | `update_buddy` (`Tools.java:2355`) | `true` | never (the release notes aren't scanned: they talk about keys and money as features) |
-| Background browser tap / Enter (`BrowserTools.approve`, `:461`) | `!money && !Bypass.secretOrMoney(card, draft)`, with the full draft, not the clipped summary. `approve` gets `boolean money` = `BrowserTools.money(o) \|\| moneySite(key)`, where `o` is the tap's target JSON or Enter's focus JSON; a tap also ors in its always-ask rule (`Guard.listed(svc, "ask", label, null)`, `:248`) | a payment form; a money word in the URL or the item's form, title, label, ids or submit label; a host with a money name (bank, pay, wallet, finance, credit, crypto, trading, broker); a secret or money word anywhere in the draft |
+| Background browser tap / Enter (`BrowserTools.approve`, `:461`) | `!money && !Bypass.secretOrMoney(card)`. `approve` gets `boolean money` = `BrowserTools.money(o) \|\| moneySite(key) \|\| Bypass.secretOrMoney(draft)`. A tap: `o` is its target JSON, `draft` its unclipped `draft`, and it also ors in its always-ask rule (`Guard.listed(svc, "ask", label, null)`, `:248`). Enter: `o` is its focus JSON (which now carries `form` and `payForm`), `draft` is `__buddy.draft()` read after typing (the field's whole text, append included) | a payment form; a money word in the URL or the item's form, title, label, ids or submit label; a host with a money name (bank, pay, wallet, finance, credit, crypto, trading, broker); a secret or money word anywhere in the full draft |
 | Browser "Are you sure?" dialog (`BrowserTools.pendingDialog`, `:476-508`) | `!money && !moneySite(key) && !Bypass.secretOrMoney(fullMessage)` | the opener's `money`; the page the dialog is on is a money site; the dialog's full message names money or a secret, even after a bypassed tap (below) |
 | Location (`PhoneTools.java:528`) | `true` | never |
 | Clipboard read (`PhoneTools.java:140`) | not opted in (Q1c) | always, as in Ask |
@@ -162,12 +166,31 @@ What goes with the table:
     !Bypass.secretOrMoney(fullMessage))`, where `fullMessage` is `d.optString("message")` before the 300-character clip
     and `moneySite` is read on the page the dialog is on.
   - So in a Bypass chat every risky dialog is judged on its own text and its site. Other modes are unchanged.
-- **Native taps keep the labels that made them risky.** `Tools.guard` decides to ask from `Guard.riskyLabel(target)`
-  or `riskyLabel(hit)` (`Tools.java:1761-1762`), which read text, content description, tooltip and id; the card shows
-  `Guard.buttonLabel(target)`, which prefers the visible text. So a "Continue" whose description is "Pay now" cards in
-  Ask as "Tap Continue in Shop". New `Bypass.tapMoney(boolean moneyApp, AccessibilityNodeInfo target,
-  AccessibilityNodeInfo hit)` = `moneyApp || secretOrMoney(Guard.riskyLabel(target), Guard.riskyLabel(hit))`, called
-  once in `guard` (with `Guard.moneyApp(svc, pkg)`, the target's package) and passed to `guardAction` and to `review`.
+- **Native taps keep every label that could name money.** `Tools.guard` decides to ask from `Guard.riskyLabel(target)`
+  or `riskyLabel(hit)` (`Tools.java:1761-1762`); the card shows `Guard.buttonLabel(target)`, which prefers the visible
+  text. `riskyLabel` returns the first risky field it meets (`Guard.java:666-680`, `:707-718`), so a button with text
+  "Send" and description "Pay now" yields only "Send". New `Bypass.tapMoney(boolean moneyApp, AccessibilityNodeInfo
+  target, AccessibilityNodeInfo hit)`:
+  - true when `moneyApp`, or when any label in the scope below names a secret or money (`secretOrMoney`);
+  - the scope is the same bounded walk as `riskyLabel`: the node, up to 3 parents until the first clickable one, and
+    that one's first 6 children;
+  - on each node it reads every short label, not stopping at the first risky one: text, content description and
+    tooltip at 30 characters and 4 words or fewer (`Guard.risky`'s own filter), and the view id's name after the `/`;
+  - it copies the ~15-line walk, because `Guard.risky` is private and Guard is upstream's.
+
+  It is called once in `guard` (with `Guard.moneyApp(svc, pkg)`, the target's package) and passed to `guardAction` and
+  to `review`. It only decides whether a card that is already showing may be skipped, so it adds no card to a tap
+  Ask lets through.
+- **The full draft is judged before the reviewer and before any clip.** Each caller ors `Bypass.secretOrMoney(<full
+  draft>)` into the `money` it passes on, so the check doesn't depend on the card text carrying the draft:
+  - native tap: the focused field's text (`draft`, `Tools.java:1757`);
+  - native Enter: `value`, the field's whole text after an append (`:1920-1922`), not the typed `text` the card shows;
+  - browser tap: the target's `draft`, no longer clipped in `browser.js`;
+  - browser Enter: `__buddy.draft()`, read after `Browser.insertText` (`BrowserTools.java:332`), so an append (even
+    of empty text) is judged whole.
+
+  `review` passes `money` to its no-reviewer fallback (`Tools.java:1796`), whose card says only "No reviewer is signed
+  in" and drops the draft. The card text is unchanged in every mode.
 - **The user's always-ask rules keep their card.** `guard` already computes `userAsks` (`Tools.java:1760`); it is ored
   into `money`, and the browser tap does the same with its ask-list check. Trust apps and never-ask buttons stay as the
   user set them (round 1), and so do always-ask buttons. This is also how Nicholas marks a money step Buddy can't
@@ -178,12 +201,18 @@ What goes with the table:
 - **The browser's money context is read before presentation.**
   - New pure `static boolean money(JSONObject o)` = `o.optBoolean("payForm") || Bypass.secretOrMoney(o.optString("form"),
     o.optString("title"), o.optString("label"), o.optString("ids"), o.optString("submitLabel"))`. The tap passes its
-    target `t`, and Enter passes its focus result `f` (which holds `submitLabel`, `:338`).
+    target `t`, and Enter passes its focus result `f`.
+  - Today `__buddy.focus` returns only `ok`, `label`, `multiline`, `search` and `submitLabel` (`browser.js:404`); the
+    form facts are computed only in `__buddy.target` (`:305-315`). So `browser.js` moves them into two small functions,
+    `payForm(form)` (a field of the form is a payment field) and `formName(form)` (action, id and name, clipped to
+    200), and `B.focus` returns `payForm` and `form` from them, as `B.target` does. A neutral-URL text box in a
+    `/checkout` form then reaches `money` with its form.
   - `private boolean moneySite(String key)` = `Guard.moneyApp(svc, host(key)) || Bypass.secretOrMoney(url)`, with `url`
     from `Browser.page(key)`.
-  - The draft reaches the check whole. `browser.js` stops clipping a tap's `draft` (`browser.js:321`: `clean(…)` without
-    the 300; `clean` clips only when given a length, `:16-19`). `approve` still clips it to 300 for the card (`:465`).
-    Enter passes the typed `text`, which was never clipped.
+  - The draft reaches the check whole. `B.target`'s inline draft reader (`browser.js:319-322`) becomes
+    `B.draft(not)`: the focused field's text, unclipped (`clean` clips only when given a length, `:16-19`), `''` for a
+    field `B.sensitive` flags, as today. `B.target` returns `draft: B.draft(el)`, and Enter calls `__buddy.draft()`.
+    `approve` still clips the draft to 300 for the card (`:465`).
 - **The clipboard keeps its card in Bypass** (Q1c). Reading it is the one step where Buddy can't know whether a secret
   is involved until the secret is already in the agent's hands; the card comes before the read, as in Ask. No code.
 - **The Smart reviewer still runs in Bypass.** It takes its usual ~3 s. Its "ask" or "block" reason goes into the card
@@ -226,7 +255,7 @@ tools, MCP servers, skills, schedules, notification rules, agents and models, lo
 sense, so they don't card (a decision, listed for Nicholas).
 
 The brief's goal lists "safety" among the settings Bypass doesn't card. The Safety settings above card anyway, because
-each one can switch off a money card; that is Q1d for Nicholas.
+each one can switch off a money card; Nicholas accepted this (Q1d).
 
 `call` reads the name from the setting `find` resolved, after `find`: `Setting s = …find(svc, name, file)`, then
 `card -> svc.askConfirm(card, false, !keepsCard(s.name, file != null))`. `change()` and `approval()` stay as 004 and
@@ -268,8 +297,8 @@ upstream's: no settings card is skipped, and the card text has no extra sentence
 files (BuddyService, Tools, BrowserTools, SettingsTool). Putting it in `Guard.java` (upstream) would add a
 merge-conflict surface on every upstream sync (AGENTS.md "Bringing in official Buddy"). This is a home for fork code,
 not a new abstraction. `BrowserTools.money`, `moneySite` and `dialogAsks` stay in BrowserTools, next to the private
-patterns they read. `tapMoney` is the only new node-reading code, and it calls upstream's `Guard.riskyLabel` rather
-than walking nodes itself.
+patterns they read. `tapMoney` is the only new node-reading code: a copy of `Guard.riskyLabel`'s bounded walk that
+reads every short label, kept in the fork file so Guard stays upstream's.
 
 Alternatives considered:
 - Skip in `askConfirm` for every caller, scanning the card text (fail-open): rejected. It loses the money app and the
@@ -296,8 +325,11 @@ Alternatives considered:
 - Read the clipboard first in Bypass and card on the sensitive flag or the predicate (round 1): dropped. An unflagged
   copied password goes straight to the agent (round 2 F1). Both choices need Nicholas, and keeping the card needs no
   code.
-- Feed the tap predicate every text of the target and hit nodes, not only their risky labels: rejected. A long text
-  under the finger ("Free shipping on orders over $25") would card plain taps that Ask lets through.
+- `tapMoney` on `Guard.riskyLabel`'s first hit only (round 2): replaced (round 3 F2, round 4 F1). It stops at "Send"
+  before a "Pay now" description. Reading texts of any length was rejected: a long text under the finger ("Free
+  shipping on orders over $25") would card a Send that has nothing to do with money. Short labels only, as `Guard.risky`.
+- Pass the full draft to `approve` and the cards as their detail (round 4 F3): rejected. It would change the card
+  text in Ask (the whole field instead of what was typed). The full draft goes into `money` instead.
 
 ## Steps
 1. **Revert 019.**
@@ -313,15 +345,18 @@ Alternatives considered:
      `noteBypassed`.
    - In `values/strings.xml`: `card_note_bypassed`.
    - Opt in, in `Tools.java`: `confirm` (and the `Guard.approved` guard), `phoneShell` and `updateBuddy`.
-     `guardAction` gains `boolean money`; `guard` passes `Bypass.tapMoney(…)`, `typeText` passes its Enter `money`, and
-     `review` passes on what it got. In `PhoneTools.java`: `location`.
+     `guardAction` gains `boolean money`; `guard` passes `Bypass.tapMoney(…) || userAsks || Bypass.secretOrMoney(draft)`,
+     `typeText` passes its Enter `money` (with `Bypass.secretOrMoney(value)`), and `review` passes what it got to both
+     its `guardAction` calls, the no-reviewer one included. In `PhoneTools.java`: `location`.
 4. **The skip, browser.**
    - In `BrowserTools.java`: `money(JSONObject)`, `moneySite(key)` and `dialogAsks(boolean, boolean, String)`.
-   - `approve` gains `boolean money` and checks the full draft; `click` and `type` pass it.
+   - `approve` gains `boolean money`; `click` passes it with its target's `draft`, `type` with `__buddy.draft()` read
+     after typing.
    - `pendingDialog` gains `money`, uses `dialogAsks`, `moneySite` and the full message.
-   - In `browser.js:321`: no 300-character clip on `draft`.
+   - In `browser.js`: `B.draft(not)` (moved out of `B.target`, no 300-character clip), and `payForm(form)` and
+     `formName(form)` (moved out of `B.target`); `B.target` and `B.focus` both return `payForm` and `form` from them.
 
-   Add T7, T8 and T10 (in `BypassTest`).
+   Add T7, T8, T10 and T11 (in `BypassTest`).
 5. **Settings.** In `SettingsTool.java`:
    - `keepsCard(name, keyFile)` and the `call` asker (on `s.name`);
    - the `approvals` factory (value, `allowed`, `label`, `effect`);
@@ -338,9 +373,10 @@ Alternatives considered:
      approval cards; each step is noted in the chat. Still asks: paying, buying, money transfers, banking and payment
      apps and money sites, passwords, codes and keys, reading the clipboard, always-ask buttons, and changes to Safety
      settings and a chat's allowed apps. Apps on Trust and never-ask buttons stay as you set them."
-8. **Version** (the orchestrator's release step): `BuildInfo.java` → `2.3.11-fork.4`, `VERSION_CODE` 224. After
-   fork.4 is installed, cut `2.3.11-fork.5` (version bump only, via "Updating Buddy on the phone") as the controlled
-   update for the phone check.
+8. **Version** (the orchestrator's release step): main is already at `2.3.11-fork.4` / 224 (the watch-voice fix), so
+   `BuildInfo.java` → `2.3.11-fork.5`, `VERSION_CODE` 225 (or max + 1 if main moves again). After it is installed, cut
+   the next fork number (version bump only, via "Updating Buddy on the phone") as the controlled update for the phone
+   check.
 
 ## Test plan
 These are JVM tests (JUnit only, `app/build.gradle.kts:83-92`). Locally they run with the javac + JUnit script of
@@ -354,10 +390,11 @@ These are JVM tests (JUnit only, `app/build.gradle.kts:83-92`). Locally they run
 | T4 | The settings decision path: `SettingsTool.change` with the asker `c -> Bypass.skips(!keepsCard(s.name, keyFile), mode, ruleRun) ? BYPASSED : user.ask(c)`, where `user` counts cards and answers yes or no, run on factory-built settings (a Scalar `audio_device`, a Scalar named `builtin_risky_words` with on/off, `button(...)`, `approvals(...)`). In mode `bypass`: `audio_device=auto` gives 0 cards and 1 write. These give 1 card, and on denial 0 writes (the old protection stays): `button/com.bank.app/Send=allow`; `button/*/Pay=" ALLOW "`; `button/*/Continue=""` with an existing ask rule (removal); `builtin_risky_words=" OFF "`; `chat/c1/approvals=" Bypass "`. In `routine`, `""`, `strict`, and `bypass` with `ruleRun`: `audio_device=auto` gives 1 card. Also: `BYPASSED` starts with `APPROVED`, `selfApproved(BYPASSED)` is false, and the existing `onlyTheUsersApprovalWritesTheChange` answers (DENIED, CHANGES, NOT_NOW, AUTO, RULE) still write nothing | settings go through in Bypass; keys, approvals and Safety settings keep their card whatever the value's case or spacing (round 2 F5, F6); denial writes nothing; Routine skips nothing (done-when 1-4) |
 | T5 | `keepsCard(name, keyFile)` is **true** for: `mcp/notes/key`, `service/deepseek/key`, any name with `keyFile`, `chat/c1/approvals`, `app/com.x`, `button/*/Pay`, `button/com.bank.app/Send`, `button/*/Delete`, `chat/c1/allowed/com.whatsapp`, `builtin_risky_words`. It is **false** for: `audio_device`, `reviewer`, `reviewer_model/codex`, `phone_commands`, `linux_tools_new_chats`, `agents_tap_buddy`, `mcp/notes`, `service/deepseek`, `skill/x`, `rule/abc`, `chat/c1/schedule`, `chat/c1/linux_tools`, `default_agent`, `default_model/claude` | the settings split by name: keys, approvals modes, Safety settings and allowed apps card (done-when 1 and 3); the rest don't (done-when 2) |
 | T6 | 010's factory: `bypass` is accepted (and `BYPASS` too). `read()` lists `bypass (Bypass)`. The card for `ask` → `bypass` shows `bypass (Bypass): no approval cards` and `still ask`. `chatLines` prints `approvals bypass`. The `routine` card no longer contains "Ordinary Buddy settings" | done-when 1 (setting it); done-when 4 (019's sentence is gone) |
-| T7 | `BrowserTools.money` is **true** for: focus `{submitLabel:"Pay"}` (the URL `https://shop.example/session` and the typed text neutral: `secretOrMoney` of each is false); target `{label:"→", title:"Pay now"}`; `{label:"", ids:"add-to-cart-button"}`; `{label:"Continue", payForm:true}`; `{label:"Continue", form:"/checkout/step2"}`. It is **false** for: `{label:"Send"}` (and `secretOrMoney("https://mail.example/compose")` is false); focus `{submitLabel:"Search"}`; `{label:"Delete", title:"Delete draft"}` | round 1 F2: the browser's money context counts before presentation (done-when 3) |
+| T7 | `BrowserTools.money` is **true** for: focus `{submitLabel:"Pay"}` (the URL `https://shop.example/session` and the typed text neutral: `secretOrMoney` of each is false); a focus result in `B.focus`'s full shape `{ok:true, label:"Message", multiline:true, search:false, submitLabel:"Send", payForm:false, form:"/checkout"}` (round 3 F3: neutral URL, neutral label, the form says checkout); target `{label:"→", title:"Pay now"}`; `{label:"", ids:"add-to-cart-button"}`; `{label:"Continue", payForm:true}`; `{label:"Continue", form:"/checkout/step2"}`. It is **false** for: `{label:"Send"}` (and `secretOrMoney("https://mail.example/compose")` is false); focus `{submitLabel:"Search"}`; the same full-shape focus with `form:"/note"`; `{label:"Delete", title:"Delete draft"}` | round 1 F2, round 4 F2: the browser's money context, the Enter form included, counts before presentation (done-when 3) |
 | T8 | `dialogAsks(true, true, "Pay $20?")` is true, and `secretOrMoney("Pay $20?")` is true, so it cards. `dialogAsks(true, true, "Delete this item?")` is true, but the predicate is false, so it is skipped and noted. `dialogAsks(true, false, "Pay $20?")` is false (upstream unchanged). `dialogAsks(false, false, "Hello")` is false. Round 2 F4: on `https://bank.example/checkout`, `dialogAsks(false, true, "Send now?")` is true and `secretOrMoney("Send now?")` is false, but `secretOrMoney("https://bank.example/checkout")` and `Guard.moneyApp(c, "bank.example")` (its name test, `Guard.java:109-110`, decides before any package lookup) are true, so the site keeps the card | round 1 F3 and round 2 F4: a bypassed tap can't approve a money dialog, and a money site's dialog cards (done-when 3) |
-| T9 | Native tap labels, with fake `AccessibilityNodeInfo` subclasses (JVM: `unitTests.isReturnDefaultValues`, `app/build.gradle.kts:84-86`) overriding text, content description, `isClickable`, children and parent. A button with text "Continue" and description "Pay now": `Bypass.tapMoney(false, it, null)` is true, while `secretOrMoney("Tap “Continue” in Shop")` (its card) is false. A plain "Continue" target over a hit node described "Pay": true. A plain "Continue" or "Next" target and hit: false. `tapMoney(true, plain, null)`: true | round 2 F2: the risky labels from target and hit reach the decision (done-when 3) |
-| T10 | A draft of 301 harmless characters followed by " password: x": `secretOrMoney(card, draft)` is true, and the same check on the card with the draft clipped to 300 is false (why the full draft is passed). The same with "Pay $20" past character 300 | round 2 F3: the draft is judged whole (done-when 3) |
+| T9 | Native tap labels, with fake `AccessibilityNodeInfo` subclasses (JVM: `unitTests.isReturnDefaultValues`, `app/build.gradle.kts:84-86`) overriding text, content description, tooltip, view id, `isClickable`, children and parent. `Bypass.tapMoney(false, it, null)` is **true** for a clickable button with: text "Continue" and description "Pay now" (its card, "Tap “Continue” in Shop", is not `secretOrMoney`); text "Send" and description "Pay now" (round 3 F2: "Send" is risky and comes first); text "Send" and tooltip "Pay"; text "Send" and id `com.shop:id/pay_button`; no text and a child icon described "Buy". A plain "Continue" target over a hit node described "Pay": true. `tapMoney(true, plain, null)`: true. It is **false** for: plain "Continue", "Next" or "Send" targets and hits; a "Send" button whose description is "Free shipping on orders over $25" (longer than a label) | round 2 F2, round 4 F1: every short label of target and hit reaches the decision, not only the first risky one (done-when 3) |
+| T10 | A draft of 301 harmless characters followed by " password: x": `secretOrMoney(draft)` is true, and `secretOrMoney(ChatHub.clip(draft, 300))` is false (why the full draft is passed). The same with "Pay $20" past character 300. Append: `secretOrMoney("password: example" + "!")` is true and `secretOrMoney("!")` is false (why Enter reads `value` and `__buddy.draft()`, not `text`) | round 2 F3, round 4 F3: the draft is judged whole (done-when 3) |
+| T11 | The producer side of `money`, read from `src/main/assets/browser.js` (as `ChatScrollTest` reads `res`): the text of `B.focus` (from `B.focus = function` to `B.choose`) contains `payForm:`, `form:` and `submitLabel:`; the text of `B.target` contains `draft: B.draft(`; `B.draft`'s text has no `300` | round 4 F2, F3: Enter's focus result carries the form, and the draft isn't clipped at the source (done-when 3) |
 
 Done-when item by item:
 1. **Fourth mode, settable with one card:**
@@ -369,15 +406,18 @@ Done-when item by item:
      that aren't JVM-constructible. Code review checks every opt-in against the table above, and the phone check
      confirms.
 3. **Secrets and money still card:**
-   - T1 (positives), T4, T5 (positives), T7, T8, T9, T10, and T2 (no frame hides or forces it).
+   - T1 (positives), T4, T5 (positives), T7, T8, T9, T10, T11, and T2 (no frame hides or forces it).
    - Code review checks:
-     - that `moneyApp` sits in `guardAction` and `confirm`, that `guard` passes `tapMoney || userAsks` and `typeText`
-       passes `web || browser`, that the browser tap ors in its ask-list check, and that `money(...)` and `moneySite` sit in `approve` and `pendingDialog`;
-     - that `approve` checks the full draft and `browser.js` no longer clips it;
+     - that `moneyApp` sits in `guardAction` and `confirm`, that `guard` passes `tapMoney || userAsks ||
+       secretOrMoney(draft)` and `typeText` passes `web || browser || secretOrMoney(value)`, that the browser tap ors
+       in its ask-list check, and that `money(...)` and `moneySite` sit in `approve` and `pendingDialog`;
+     - that `review` passes `money` to both its `guardAction` calls, the no-reviewer fallback included (round 4 F4);
+     - that the browser tap's `money` reads its unclipped `draft`, and Enter's reads `__buddy.draft()` after
+       `Browser.insertText` and before `approve`;
      - that a denied card still stops the step: the unchanged `if (blocked != null) return …` after `approve`
        (`BrowserTools.java:250-252`, `:341-342`) and `guardAction`'s non-`APPROVED` answers;
      - that the clipboard isn't opted in, and `Guard.approved` skips `BYPASSED`.
-   - Judged against Nicholas's answer to Q1: the limits he accepts are not counted as gaps.
+   - Judged against Nicholas's Q1 answers (brief, Clarifications): the limits he accepted (a, b) are not gaps.
 4. **Routine allowed is upstream's again:**
    - Step 1's revert: the diff of `SettingsTool.java` against `2e6624d` (before 019) shows only 020's lines.
    - T6's negative, T3 and T4 (`routine` doesn't skip).
@@ -386,7 +426,7 @@ Done-when item by item:
 5. **CI and Codex:** the PR's `build.yml` run (`testGithubDebugUnitTest`, both release builds, wear,
    `helper-tests`), watched with `gh pr checks --watch`. Then the Codex code review.
 
-**Phone check.** It runs after merge, tag and `update_buddy` (fork.4). Each line stays `pending` in `verify.md` until
+**Phone check.** It runs after merge, tag and `update_buddy` (step 8's version). Each line stays `pending` in `verify.md` until
 it is seen, and the feature isn't verified until all are.
 1. Chat options → Approvals shows four rows. Pick Bypass: the line reads "Approvals · Bypass" in the accent colour.
 2. In that chat, these go through with no card, each noted ("✓ Approved by Bypass…"):
@@ -405,11 +445,18 @@ it is seen, and the feature isn't verified until all are.
    - `buddy_settings app/<some shop app>=hard`;
    - `buddy_settings button/<a bank app>/Send=allow`;
    - a tap on a button you put on the always-ask list (Settings → Safety → Button rules);
-   - `clipboard_read` after copying a web link (the clipboard keeps its card, unless Q1c says otherwise);
-   - Enter after typing into a web page's text box in Chrome.
-5. Install without a card: the orchestrator publishes `2.3.11-fork.5` (version only). In the Bypass chat,
+   - `clipboard_read` after copying a web link (Q1c: the clipboard keeps its card);
+   - Enter after typing into a web page's text box in Chrome;
+   - in a messaging app on Hard, a note to yourself: `type_text "password: example"` without submit, then
+     `type_text "!" append=true submit=true` (the card shows only "!"; denied, nothing is sent);
+   - background browser, on a page served from Buddy's Linux (`python3 -m http.server` on 127.0.0.1, a neutral path)
+     with two forms, each a textarea and a "Send" button: one `action="/checkout"`, where `browser_type "hello"
+     submit=true` cards; one `action="/note"` whose textarea starts with "password: example", where `browser_type "!"
+     append=true submit=true` cards. Denied, the page doesn't change. (If the background browser can't reach
+     127.0.0.1, record that; T7, T11 and code review stand.)
+5. Install without a card: the orchestrator publishes the next fork number (version only). In the Bypass chat,
    `update_buddy install=true` shows no Buddy card and notes the step, and Android's installer asks (tap Update).
-   Buddy restarts on fork.5.
+   Buddy restarts on that version.
 6. Switch the chat to Routine allowed and set `read_aloud`: a card shows (019's skip is gone).
 
 ## Risks
@@ -419,15 +466,15 @@ it is seen, and the feature isn't verified until all are.
   blocks (Buddy's screens, password fields, `SHELL_NO`), the cards on loosening settings, and each step noted in the
   chat.
 - **"Recognisably" is a heuristic.** These go through in Bypass:
-  - **phone_shell scripts and encoded commands** (Q1a). The check reads the command line only. `sh /sdcard/x.sh` or
-    `base64 -d … | sh` can read a key file on shared storage with no card.
-  - **A money step that Ask cards, but whose risky labels, card, app and site carry no money word or name** (Q1b).
-    Example: "Send" in a bank app called "Chase" (`moneyApp` tests names only), or a button whose text is "Send" and
-    whose description is "Pay" (`riskyLabel` returns the first risky label). Upstream's Routine allowed has the same
-    limit (`Guard.sends` excludes only `moneyApp` apps).
+  - **phone_shell scripts and encoded commands** (Q1a, accepted). The check reads the command line only.
+    `sh /sdcard/x.sh` or `base64 -d … | sh` can read a key file on shared storage with no card.
+  - **A money step that Ask cards, but whose labels, card, app and site carry no money word or name** (Q1b,
+    accepted). Example: "Send" in a bank app called "Chase" (`moneyApp` tests names only). Upstream's Routine allowed
+    has the same limit (`Guard.sends` excludes only `moneyApp` apps). A "Pay" in any short label of the button is
+    seen (T9).
   - **Secret words are English only.** Key-file names don't depend on language.
 
-  So Bypass shows fewer cards than Ask in these cases, and Nicholas decides in Q1 whether that's acceptable.
+  So Bypass shows fewer cards than Ask in these cases; Nicholas accepted that (Q1a, Q1b).
 - **The same as Ask:** a money step Ask doesn't card either, such as a plain "Continue" on Hard (not a risky label,
   and Hard has no reviewer: `Tools.java:1761-1776`), or anything in a Trust app.
 - **False positives** (a draft mentioning pay, "transfer files", `$1` in awk, a "Confirm" for a delete, every Enter on
@@ -445,23 +492,14 @@ it is seen, and the feature isn't verified until all are.
   the sync's Review step checks 020's done-when.
 
 ## Open questions
-- **Q1 (blocking: for Nicholas, through the orchestrator, before coding; review round 1 F4, round 2 F1).** Bypass
-  recognises secrets and money by words, app names, site names, URLs and file names. It can't see everything Ask's
-  "card for every risky step" catches. The orchestrator records his answers in the brief's Clarifications; done-when 3
-  is judged against them. Each alternative is a one-line change.
-  - **a. phone_shell.** It skips its card unless the command line names a secret, a key file or money. A script or an
-    encoded command can read a key file with no card. Recommended: accept (the brief lists phone_shell among the
-    no-card steps). Alternative: phone_shell keeps its card in Bypass.
-  - **b. Unnamed money.** A step whose labels, app and site carry no money word or name goes through: "Send" in a bank
-    app named "Chase". Recommended: accept. Upstream's Routine allowed has the same limit, and the alternative (every
-    Send and Delete cards in Bypass) undoes most of the mode. For such an app he adds an always-ask rule
-    (`button/<app>/Send=ask`), which keeps its card in Bypass.
-  - **c. Clipboard.** Recommended: `clipboard_read` keeps its card in Bypass, because reading it can hand a secret to
-    the agent before anyone knows it's one. Alternative: read first, and card only when the copying app flagged the
-    clip sensitive or the text looks like a secret (an unflagged copied password goes through).
-  - **d. Safety settings.** The brief's goal lists "safety" among the settings that don't card. Recommended: per-app
-    modes, button rules, built-in words and a chat's allowed apps card in Bypass, whatever the value, because each
-    can switch a money card off. Alternative: they go through like the rest.
+- None blocking. **Q1 is resolved** (brief, Clarifications, 2026-11-17): Nicholas accepted all four recommendations.
+  - a. `phone_shell` skips its card unless the command line names a secret, a key file or money (scripts and encoded
+    commands go through).
+  - b. A money step whose labels, app and site carry no money word or name goes through; an always-ask rule
+    (`button/<app>/Send=ask`) marks one, and keeps its card in Bypass.
+  - c. `clipboard_read` keeps its card in Bypass.
+  - d. Per-app modes, button rules, built-in words and a chat's allowed apps keep their card in Bypass, whatever the
+    value.
 - To show Nicholas in the PR (each is a one-line flip):
   - `default_agent` and `default_model/*` don't card, though they can point chats at a pay-per-use API service;
   - Enter on a web page or in a browser app cards in Bypass (upstream's own reason, `Tools.java:1965-1966`);

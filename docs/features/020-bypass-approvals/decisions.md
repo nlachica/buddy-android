@@ -159,3 +159,37 @@
   can't be turned off). Supersedes the value rules in "Bypass's money floor is Ask's cards; the agent can't loosen them
   silently".
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - Q1 answered: all four recommendations accepted
+- Options: per Q1 in plan.md, each with a one-line alternative.
+- Choice: (a) phone_shell skips its card unless the command line names a secret, a key file or money; (b) a money step
+  with no money word or name goes through (an always-ask rule marks one); (c) clipboard_read keeps its card; (d) per-app
+  modes, button rules, built-in words and allowed apps keep their card. Recorded in the brief's Clarifications.
+  Done-when 3 is judged against these.
+- By: Nicholas (recorded by Planner, claude-opus-5-5)
+
+## 2026-11-17 - `tapMoney` reads every short label in `riskyLabel`'s bounded walk (plan review round 3 F2, round 4 F1)
+- Options: `secretOrMoney(Guard.riskyLabel(target), riskyLabel(hit))`, which stops at the first risky field ("Send"
+  before a "Pay now" description); every text of any length (a long "orders over $25" text would card a plain Send);
+  every short label (text, description, tooltip at 30 chars and 4 words or fewer, and the view id) on the same nodes
+  riskyLabel visits.
+- Choice: the last. A ~15-line copy of the walk in `Bypass.java`, since `Guard.risky` is private and Guard is upstream's.
+  It only decides whether a card already showing may be skipped, so it adds no card to a tap Ask lets through.
+  Supersedes the `tapMoney` definition in "Each Bypass check reads its site's own risk inputs, unclipped".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - The full outgoing draft goes into the caller's `money`, before the reviewer (round 4 F3, F4)
+- Options: check the draft from the card text (loses it in the no-reviewer fallback, and Enter's card shows only the
+  appended text); show the full draft on the card (changes Ask's card); or each caller ors `secretOrMoney(full draft)`
+  into `money`.
+- Choice: `money`. Native tap: the focused field's text; native Enter: `value` (the field's whole text after an
+  append); browser tap: the target's `draft`, unclipped; browser Enter: `__buddy.draft()` read after typing. `review`
+  passes `money` to both `guardAction` calls, the no-reviewer fallback included. Card text unchanged in every mode.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-17 - `__buddy.focus` returns the form facts `__buddy.target` already computes (round 4 F2)
+- Options: a second `__buddy.target` call before Enter; return `payForm` and `form` from `B.focus` too.
+- Choice: return them, from two small functions `payForm(form)` and `formName(form)` moved out of `B.target` (now two
+  users). `B.draft(not)` is moved out the same way, with no clip. T11 checks the producer's source for those keys, as
+  there is no JS test harness; the phone check covers a real checkout form.
+- By: Planner (claude-opus-5-5)
