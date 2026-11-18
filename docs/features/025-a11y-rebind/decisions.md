@@ -91,3 +91,14 @@
   says `unavailable` when no Buddy record is left. A pure `ownIndex` keeps the selection testable on the JVM.
 - By: Planner (claude-opus-5-5), plan review round 2 F2
 - Orchestrator: list destination accepted (see brief); plan approved as of round 3.
+
+## 2026-11-18 - Coder: exit time goes at the end of the `start:` line; connect also cancels via the same helper
+- Options: put the exit time before the process (`last exit <time> <process> …`, as the plan's prose shows); keep
+  `exitText` as the plan's signature has it (no time) and append ` at <date>`.
+- Choice: append ` at <Date>` after `exitText`, so the tested pure function stays as specified.
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-18 - Coder: nothing could be compiled or run in this environment
+- The JVM fails to start here (`Failed to mark memory page as executable - check if grsecurity/PaX is enabled`, even
+  for `java -version`), so neither Gradle, `javac` nor the unit tests ran. CI is the first compile and test run.
+- By: Coder (claude-sonnet-5-5)
