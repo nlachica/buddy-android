@@ -11,9 +11,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /** 027: a due scheduled task waits only for its own chat (however long), a pause, Stop or no internet. */
 public class SchedulesWaitTest {
@@ -76,6 +79,51 @@ public class SchedulesWaitTest {
                 assertFalse(waiting.containsKey(key));
             }
         }
+    }
+
+    private static Set<String> set(String... ids) {
+        return new HashSet<>(Arrays.asList(ids));
+    }
+
+    @Test public void aWaitingScheduleSurvivesARestart() {
+        a.running = true;
+        b.running = true;
+        waiting.put("b", T0 + H);
+        assertEquals(Schedules.Due.WAIT, look("b", false, false, true, T0));
+        Set<String> stored = Schedules.kept(Collections.emptySet(), waiting, "b");
+        assertEquals(set("b"), stored);
+        // a restart: a new map, the stored ids come back, and the chat is free
+        waiting.clear();
+        Schedules.restore(waiting, stored, T0 + 5 * H);
+        b.running = false;
+        assertEquals(Schedules.Due.START, look("b", false, false, true, T0 + 5 * H + 1000));
+        assertEquals(Collections.emptySet(), Schedules.kept(stored, waiting, "b"));
+    }
+
+    @Test public void aBootCancelOfAnotherChatKeepsTheStoredRun() {
+        // cold process: b is stored, nothing restored yet, and boot's sync() cancels a paused schedule a
+        Set<String> stored = set("b");
+        assertEquals(set("b"), Schedules.kept(stored, waiting, "a"));
+        // then the service starts
+        Schedules.restore(waiting, stored, T0);
+        assertEquals(Schedules.Due.START, look("b", false, false, true, T0 + 1000));
+        assertEquals(Collections.emptySet(), Schedules.kept(stored, waiting, "b"));
+    }
+
+    @Test public void agentMessagesAreNotHeldInPrefs() {
+        waiting.put("b/x", T0 + H);
+        assertEquals(Collections.emptySet(), Schedules.kept(Collections.emptySet(), waiting, "b"));
+    }
+
+    @Test public void editingAScheduleEndsTheOldRunThatWaits() throws Exception {
+        // supersede() takes the key out of waiting and out of the stored set; pump() drops what it doesn't find
+        waiting.put("b", T0 + H);
+        waiting.remove("b");
+        assertEquals(Collections.emptySet(), Schedules.kept(set("b"), waiting, "b"));
+        String hub = src("ChatHub.java");
+        int sup = hub.indexOf("Schedules.supersede(app, ses.id)");
+        assertTrue("setSchedule clears the old run", sup > 0);
+        assertTrue("before the new alarm", sup < hub.indexOf("Schedules.set(app, ses)", sup));
     }
 
     private static String src(String name) throws Exception {

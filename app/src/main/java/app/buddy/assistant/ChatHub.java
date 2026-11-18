@@ -539,6 +539,7 @@ final class ChatHub {
      */
     void setSchedule(Sessions.Session ses, Schedules.Plan plan) {
         ses.schedule = plan;
+        Schedules.supersede(app, ses.id); // fork 027: the old Schedule's waiting run doesn't carry the new message
         if (plan == null && !ses.running) ses.allowed.clear();
         sessions.save(ses);
         Schedules.set(app, ses);

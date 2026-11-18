@@ -20,6 +20,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -220,7 +221,10 @@ public final class Schedules extends BroadcastReceiver {
     /** How long a task waits for Buddy to be free, or a run for the user to unlock, before giving up. */
     private static final long WAIT_MS = 3600_000L, LOOK_MS = 30_000L, UNLOCK_WAIT_MS = 45_000L;
     private static final Handler main = new Handler(Looper.getMainLooper());
-    /** Tasks whose time came while Buddy was busy: chat id → when they're given up (elapsedRealtime). Main thread. */
+    /**
+     * Tasks whose time came while Buddy was busy: chat id → when they're given up (elapsedRealtime). Main thread.
+     * (fork 027: its chats' Schedules are kept in Prefs too, see keep)
+     */
     private static final Map<String, Long> waiting = new LinkedHashMap<>();
     /** Chats in a scheduled task's run (the phone tools look them up from their own threads). */
     private static final Set<String> running = ConcurrentHashMap.newKeySet();
@@ -285,6 +289,7 @@ public final class Schedules extends BroadcastReceiver {
     static void cancel(Context c, String id) {
         c.getSystemService(AlarmManager.class).cancel(alarm(c, id, 0));
         waiting.remove(id);
+        keep(c, id);
         clearNotice(c, id);
     }
 
@@ -351,6 +356,7 @@ public final class Schedules extends BroadcastReceiver {
         // an earlier time of this chat may still wait (several times a day): one run does for both, and it gets
         // this time's full hour before it is given up
         waiting.put(id, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(c, id);
         listen(c);
         pump();
     }
@@ -360,6 +366,7 @@ public final class Schedules extends BroadcastReceiver {
         if (s.schedule == null || waiting.containsKey(s.id)) return;
         app = c.getApplicationContext();
         waiting.put(s.id, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(c, s.id);
         listen(c);
         pump();
     }
@@ -412,6 +419,7 @@ public final class Schedules extends BroadcastReceiver {
                 Later l = s == null || slash < 0 ? null : later(s, key.substring(slash + 1));
                 if (until == null || s == null || (slash < 0 ? s.schedule == null : l == null)) {
                     waiting.remove(key);
+                    keep(app, key);
                     continue;
                 }
                 BuddyService svc = BuddyService.get();
@@ -424,6 +432,7 @@ public final class Schedules extends BroadcastReceiver {
                     if (d == Due.GIVE_UP) skip = app.getString(R.string.schedule_skip_busy);
                 }
                 waiting.remove(key);
+                keep(app, key);
                 if (l != null) {
                     s.later.remove(l); // sent once, whatever happens now
                     hub.sessions.save(s);
@@ -460,6 +469,35 @@ public final class Schedules extends BroadcastReceiver {
         if (held && until != null && now < until) return Due.WAIT;
         waiting.remove(key);
         return held ? Due.GIVE_UP : Due.START;
+    }
+
+    /**
+     * fork 027: the stored ids of waiting Schedules once id's key in waiting changed. Per chat, not the whole map: a
+     * boot-time cancel of another chat's schedule, before restore, must leave a stored run alone.
+     */
+    static Set<String> kept(Set<String> stored, Map<String, Long> waiting, String id) {
+        Set<String> out = new HashSet<>(stored);
+        if (waiting.containsKey(id)) out.add(id);
+        else out.remove(id);
+        return out;
+    }
+
+    /** fork 027: Buddy started again: the Schedules stored as waiting wait again, with their hour (see keep). */
+    static void restore(Map<String, Long> waiting, Set<String> held, long now) {
+        for (String id : held) waiting.putIfAbsent(id, now + WAIT_MS);
+    }
+
+    /** fork 027: a Schedule's wait survives a restart of Buddy; an agent's own message does, in its chat's later. */
+    private static void keep(Context c, String id) {
+        if (id.indexOf('/') >= 0) return;
+        Set<String> stored = Prefs.heldSchedules(c), now = kept(stored, waiting, id);
+        if (!now.equals(stored)) Prefs.setHeldSchedules(c, now);
+    }
+
+    /** fork 027: editing a chat's Schedule ends the run of the old one that waits (before the new one is armed). */
+    static void supersede(Context c, String id) {
+        waiting.remove(id);
+        keep(c, id);
     }
 
     /** fork 027: the chat a waiting key is for: "chat" (its Schedule) or "chat/message" (the agent's own message). */
@@ -554,7 +592,9 @@ public final class Schedules extends BroadcastReceiver {
     /** The service started (after boot, an update, or being switched on): alarms are set again (main thread). */
     static void serviceStarted(Context c) {
         listen(c);
+        restore(waiting, Prefs.heldSchedules(c), SystemClock.elapsedRealtime()); // fork 027
         sync(c);
+        pump();
     }
 
     // --------------------------------------------------- the screen while locked
