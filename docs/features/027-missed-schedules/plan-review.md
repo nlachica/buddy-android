@@ -71,3 +71,48 @@ F3 [major] Overlapping screen reads can redirect an element action to another ch
 F4 [minor] The phone check can mistake a late Android alarm for a scheduler delay - `plan.md:172` measures dispatch against the requested time with a one-minute tolerance. `Schedules.java:271-280` uses an inexact alarm when exact alarms are unavailable, and `Schedules.java:677` already reports that condition to the tester. -> Confirm exact-alarm access before the timed phone check, or measure the delay from alarm delivery. Record that A was still working when B started.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted, in its smallest form. This design makes a recurring run wait in memory, possibly for hours, where it
+used to be skipped. A restart during that wait would drop it without a word. An agent's own message is already safe:
+it stays in `s.later`, and `serviceStarted` → `sync` arms its past alarm again, which fires at once. So only a chat's
+Schedule needs this:
+- A pure `Schedules.held(waiting)` returns the waiting keys without a `/` (chats' Schedules). It is mirrored into a
+  `schedules_held` string set in Buddy's prefs (`Prefs.heldSchedules` / `setHeldSchedules`, beside the existing
+  `busy_chats`), and written only when it changed. `pump()` writes it at the end, and `cancel()` writes it after its
+  `waiting.remove`.
+- `serviceStarted` calls the pure `Schedules.restore(waiting, Prefs.heldSchedules(c), now)` before `sync(c)`. That puts
+  each id back with a fresh hour (`putIfAbsent`). Then `pump()` runs.
+- The existing rules still apply. One key per chat, so two times still become one run. A pause, a removed schedule or a
+  deleted chat goes through `cancel()`, and `sync` runs after the restore. `pump()` drops a key whose chat or schedule
+  is gone.
+- The state is the waiting map itself, so a dispatch, give-up or skip clears the persisted copy on the same pass,
+  without a separate path that could be missed.
+
+Test (`SchedulesWaitTest`): B's Schedule waits while B runs, and `held` is `{b}` (and leaves out `b/x`). After a
+restart (a new map, `restore`, B idle), the first look starts B, and `held` is then empty.
+
+F2: accepted - The lookup at `Schedules.java:409-410` becomes a pure `Schedules.chat(List<Session> all, String key)`:
+the session whose id is the key's part before `/`. `pump()` calls `chat(hub.sessions.all, key)` in place of
+`hub.sessions.find(...)`, which is the same loop. The two-chat tests now pass `all = [a, b]` (A first, as the most
+recent) and call `due(waiting, key, chat(all, key), ...)` for `b` and `b/x`. Each also asserts `assertSame(b, chat(all,
+key))`. A wrong pick would now hand A's running state to B's key and fail:
+- B idle beside a running A: START on the first pass;
+- both running: WAIT past the old hour;
+- B idle, A still running: START once, then the key is gone.
+
+F3: accepted, as suggested - `readScreen()` records `readKey = screenKey()` and `readDisplay = display()` under `lock`
+when it refills `lastNodes`. `node()` checks the pure `Tools.sameRead(readKey, readDisplay, screenKey(), display())`
+first. On a mismatch it throws "Element ids are from another chat's read_screen. Call read_screen again." That's the
+same kind of error and instruction as the existing unknown or stale element errors. `node()` is the only lookup of
+`lastNodes` ids. There's no lock across calls. Two chats driving screens at once may need an extra `read_screen` each,
+but a tap never lands on another chat's element. `ElementIdsTest` covers interleaved reads: A reads, then B reads on
+its own display; A's lookup is refused and B's passes; A reads again, and it flips. A chat whose display changed (it
+was brought to the real screen) is refused too. `Tools` already loads in JVM tests (ApprovalGateTest).
+
+F4: accepted - The phone checks start with a precondition: the `schedule_message` reply has no "Android allows Buddy
+no exact alarms" sentence (`Schedules.java:677`). If it does, turn on Alarms & reminders for Buddy first. In (a), A's
+card is answered only after B's run has started. The evidence is B's first event time before the time of A's answer,
+plus a `read_screen` of the chat list that shows A working when B starts. The restart from F1 is CI only: on the phone,
+the only clean restart is installing a release.

@@ -103,3 +103,40 @@
     that a JVM test covers.
   - The parent mapping and the fallback keep today's rules for sub-agents and outside sessions.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - A waiting Schedule is kept across a restart, as a prefs mirror of the waiting map
+- Options:
+  - (a) leave waits in memory, an accepted risk;
+  - (b) a `held` occurrence field in `Plan`'s JSON;
+  - (c) a string set `schedules_held` in Buddy's prefs, derived from `waiting`'s Schedule keys, written when it changes
+    and restored in `serviceStarted`.
+- Choice: (c) (plan-review round 2, F1).
+  - Not (a): this feature makes a recurring run wait for its own chat, possibly for hours, where it used to be skipped.
+    A restart during that wait would drop it silently, against "never dropped".
+  - Not (b): it touches upstream's `toJson`, `of` and `copy`, and every path that ends a wait would need to clear it.
+  - (c) can't drift from the map, which already holds the rules: one key per chat, so two times still become one run;
+    `cancel` for a pause, a removed schedule or a deleted chat.
+  - An agent's own message needs nothing: it stays in `s.later`, and `sync` arms its past alarm at service start.
+  - `busy_chats` in `Prefs` is the precedent.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - The key-to-chat lookup is a pure `Schedules.chat(all, key)` that pump() and the tests share
+- Options: keep `hub.sessions.find(...)` in `pump()` and pass B directly in the tests; a pure `chat(all, key)` used by
+  both; fold the lookup into `due()`.
+- Choice: `chat(all, key)` (plan-review round 2, F2). The two-chat tests pass both chats and each key form through the
+  same selection `pump()` makes, so a wrong pick fails them. Folding it into `due()` doesn't work: `pump()` still needs
+  the session for the sign-in skip and `start`.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Element ids only work for the chat whose read_screen made them
+- Options:
+  - leave the shared `lastNodes` as it is (a bug that already exists with two chats);
+  - one node cache per chat;
+  - record the reader's screen key and display, and refuse a lookup from another one with "Call read_screen again".
+- Choice: the owner check (plan-review round 2, F3).
+  - This feature makes unattended runs beside other chats routine. A tap resolved against another chat's read could
+    land on the wrong display or the wrong element.
+  - The check is a few lines and a pure `Tools.sameRead(...)` that a JVM test covers.
+  - One cache per chat would need cleanup when a chat ends.
+  - The cost is an extra `read_screen` when two chats drive screens at once.
+- By: Planner (claude-opus-5-5)
