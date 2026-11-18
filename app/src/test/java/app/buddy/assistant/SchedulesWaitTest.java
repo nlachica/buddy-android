@@ -126,6 +126,43 @@ public class SchedulesWaitTest {
         assertTrue("before the new alarm", sup < hub.indexOf("Schedules.set(app, ses)", sup));
     }
 
+    @Test public void savingWithoutChangingTheRunKeepsTheWaitingOne() {
+        Schedules.Plan old = new Schedules.Plan();
+        old.text = "check in";
+        Schedules.Plan same = old.copy();
+        same.quiet = true; // an option, not the run
+        same.wake = true;
+        assertTrue(old.sameRun(same));
+        Schedules.Plan text = old.copy(), time = old.copy(), days = old.copy();
+        text.text = "other";
+        time.minutes = new int[]{8 * 60};
+        days.days = Schedules.Plan.WEEKDAYS;
+        assertFalse(old.sameRun(text));
+        assertFalse(old.sameRun(time));
+        assertFalse(old.sameRun(days));
+        assertFalse(old.sameRun(null));
+        String hub = src("ChatHub.java");
+        assertTrue("setSchedule asks sameRun", hub.contains("!plan.sameRun(ses.schedule)) Schedules.supersede"));
+    }
+
+    @Test public void aRefusedRunWaitsForTheEarlierOneThenStartsOnce() throws Exception {
+        // busy() puts the Schedule back in waiting; its chat is working (the earlier run) until that ends
+        b.running = true;
+        waiting.put("b", T0 + H);
+        assertEquals(Schedules.Due.WAIT, look("b", false, false, true, T0 + 2 * H));
+        b.running = false;
+        assertEquals(Schedules.Due.START, look("b", false, false, true, T0 + 2 * H + 1000));
+        assertFalse(waiting.containsKey("b"));
+        assertTrue(src("ChatHub.java").contains("Schedules.busy(app, ses)"));
+    }
+
+    @Test public void aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd() throws Exception {
+        String s = src("Schedules.java");
+        int l = s.indexOf("hubListener");
+        assertTrue("posted, not run inside the notification", s.indexOf("main.post(look)", l) > 0
+                && !s.substring(l, s.indexOf("private static void listen")).contains("pump();\n        }\n\n        @Override\n        public void onMessage"));
+    }
+
     private static String src(String name) throws Exception {
         return new String(Files.readAllBytes(Paths.get("src/main/java/app/buddy/assistant/" + name)), StandardCharsets.UTF_8);
     }

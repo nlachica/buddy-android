@@ -14,3 +14,10 @@ F4 [minor] Restart extends the documented one-hour offline wait - `app/src/main/
 Validation: compiled the four changed production classes and ran all 15 tests in `SchedulesWaitTest`, `ReviewChatTest` and `ElementIdsTest`. All passed using the local Java 17/JUnit harness with cached Android and app classes. The full Gradle build, CI and phone checks remain unverified.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+- F1: fixed in the round-1 commit. A BUSY answer to a scheduled run puts the Schedule back in `waiting` (`Schedules.busy`, called from `ChatHub.helperGone`), so it starts once when the earlier run ends. Test: `aRefusedRunWaitsForTheEarlierOneThenStartsOnce`. Left as is: the refused try's "Scheduled" bubble stays, and an agent's own scheduled message isn't retried (see decisions.md).
+- F2: fixed in the same commit. `setSchedule` supersedes only if `Plan.sameRun` is false (text, days, times). Test: `savingWithoutChangingTheRunKeepsTheWaitingOne` (unchanged and quiet/wake save keep it; text, time, days change replace it).
+- F3: fixed in the same commit. The scheduler's listener posts `pump` instead of calling it, after the other listeners ran. Test: `aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd` (a source check; the listener order itself needs a device).
+- Not run: no JVM starts on this device (PaX: "Failed to mark memory page as executable"), so the tests are unrun and nothing was compiled.
+- F4: fixed by documenting: `docs/GUIDE.md` says a restart starts the hour again. Storing expiries was rejected as more than this rare case is worth.

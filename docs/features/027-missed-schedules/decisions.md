@@ -149,3 +149,10 @@
 - Choice: (b), because a boot-time `sync()` can cancel another chat's schedule before `serviceStarted` restores, and (a) would then overwrite a stored run with the still-empty map. (d), because `start()` reads the replacement text, so the old run would send the new message early.
 - Coder notes: `held(...)` from the plan is not needed (`kept` replaces it). `pump()` calls `keep` where a key leaves `waiting`; `fire` and `runNow` after their put; `cancel` after its remove. A restored key whose chat or schedule is gone is dropped by `pump()` as before. Agent messages ("chat/message") are never stored: `keep` ignores keys with `/`.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-18 - Code-review round 1: four small fixes
+- F1: when the helper answers BUSY to a scheduled run (`ChatHub.helperGone`), `Schedules.busy` puts the Schedule back in `waiting` (stored too); it starts when the earlier run ends. Not done: keeping the occurrence until the helper accepts (a bigger change to `pump`). Limit: the "Scheduled" bubble of the refused try stays, and an agent's own message (already out of `later`) is still lost in this case.
+- F2: `setSchedule` supersedes the waiting run only when text, days or times change (`Plan.sameRun`); a quiet/wake/no-op save keeps it. A pause still cancels it.
+- F3: the scheduler's hub listener runs `pump` posted (`main.post(look)`), so the watch and notification-rule listeners see the run end before the next one starts.
+- F4: documented, not stored: a restart starts the hour again (GUIDE.md). Storing expiries would turn the held set into a map for a rare case.
+- By: Coder (claude-sonnet-5-5)

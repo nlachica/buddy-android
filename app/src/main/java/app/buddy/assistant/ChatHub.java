@@ -375,7 +375,10 @@ final class ChatHub {
         if (!ses.running || ses.runId != runId) return;
         // the chat's earlier run is still going (this helper only said so): that run's own end ends the chat's work,
         // and until then Stop must still reach it
-        if (code == Helper.BUSY) return;
+        if (code == Helper.BUSY) {
+            if (ses.scheduledRun) Schedules.busy(app, ses); // fork 027: a scheduled run isn't lost to it
+            return;
+        }
         // with how it ended, for a report: 137 is a kill from outside (Android ending an app's child processes)
         // 137: killed from outside, which on a phone is Android ending an app's child processes when there are too
         // many (confirmed on a Pixel 10 Pro with sub-agents, issue #50): say what lets them run
@@ -538,8 +541,10 @@ final class ChatHub {
      * asking" apps kept for it (a running chat keeps them until its run ends, as any chat).
      */
     void setSchedule(Sessions.Session ses, Schedules.Plan plan) {
+        // fork 027: a new message or time ends the old Schedule's waiting run (it would send the new text early);
+        // a save that changes neither (the options only) keeps it
+        if (plan == null || !plan.sameRun(ses.schedule)) Schedules.supersede(app, ses.id);
         ses.schedule = plan;
-        Schedules.supersede(app, ses.id); // fork 027: the old Schedule's waiting run doesn't carry the new message
         if (plan == null && !ses.running) ses.allowed.clear();
         sessions.save(ses);
         Schedules.set(app, ses);

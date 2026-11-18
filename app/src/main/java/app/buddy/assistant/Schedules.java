@@ -109,6 +109,11 @@ public final class Schedules extends BroadcastReceiver {
             return p;
         }
 
+        /** fork 027: the same message at the same times, so a run already waiting for the old plan is still due. */
+        boolean sameRun(Plan o) {
+            return o != null && text.equals(o.text) && days == o.days && java.util.Arrays.equals(minutes, o.minutes);
+        }
+
         JSONObject toJson() {
             try {
                 // "minute" (the first time) is what versions before several times read
@@ -494,6 +499,19 @@ public final class Schedules extends BroadcastReceiver {
         if (!now.equals(stored)) Prefs.setHeldSchedules(c, now);
     }
 
+    /**
+     * fork 027: the helper refused a scheduled run (BUSY): an earlier run of this chat, from before Buddy restarted, is
+     * still going. The Schedule waits again and starts once that run ends. shortcut: an agent's own message isn't
+     * kept for this (it was taken out of its chat's later), so it is lost as before; upgrade if that ever happens.
+     */
+    static void busy(Context c, Sessions.Session s) {
+        if (s.schedule == null) return;
+        waiting.put(s.id, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(c, s.id);
+        listen(c);
+        main.post(look);
+    }
+
     /** fork 027: editing a chat's Schedule ends the run of the old one that waits (before the new one is armed). */
     static void supersede(Context c, String id) {
         waiting.remove(id);
@@ -575,7 +593,12 @@ public final class Schedules extends BroadcastReceiver {
                     WakeActivity.close();
                 }
             }
-            if (!waiting.isEmpty()) pump();
+            // fork 027: after the other listeners saw this run end (the watch's, a notification rule's), not before:
+            // else a waiting task starts in the chat while they still count it as the old run's
+            if (!waiting.isEmpty()) {
+                main.removeCallbacks(look);
+                main.post(look);
+            }
         }
 
         @Override
