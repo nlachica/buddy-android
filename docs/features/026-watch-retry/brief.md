@@ -31,3 +31,5 @@ When the watch drops mid-call and the setting is Auto, the voice fell back to th
 See diagnosis-watchcall.md. A call started from the watch connects, but the backend gets silence (mic peak ~0) and the watch shows "Working on it…" forever. In scope: (1) frame/peak counters on watch Call.mic and phone CodexLive.push, logged; (2) find and fix why the watch mic sends silence (half-duplex gate Call.java:246 or VOICE_COMMUNICATION source; prefer a source/gate that works on Galaxy Watch); (3) status shows "Listening…" while the call is idle even if the chat run is busy; (4) keep 5 rotated live logs.
 
 Nicholas: the watch call status should match the phone's call UI (phone says "Listening…" while the chat works); mirror the phone's status logic exactly on the watch.
+
+Nicholas (firm): keep it simple. Reuse the phone's existing call-status code (Listening/Speaking/Thinking) and send that same string to the watch; no new status logic.
