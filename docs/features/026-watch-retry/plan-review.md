@@ -101,3 +101,15 @@ left).
   speaks.
 - *Five rotated logs* (step 6). `rotate(log, 5)` shifts `live.log.1` to `live.log.5` at each call's start. T8 runs 7
   calls and keeps the newest 5 rotated logs. D5 step 4 checks the files on the device after 6 or more calls.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+No blocker or major findings remain at the plan level. Final round reviewed only those severities.
+
+Round 2 F1 is addressed: steps 6-10 cover both ends' counters, five rotated logs, and an evidence-dependent microphone fix. D4b explicitly keeps the feature open until two watch-started spoken exchanges succeed (`plan.md:379-382`); shipping counters alone is not completion. The shared-status decision follows Nicholas's latest instruction to reuse the phone's existing logic: `CodexLive.java:408-421` computes one string for both destinations, `WatchCall.java:159-160` forwards it, and wear `Call.java:262-264` displays the received text. The plan documents the existing busy-and-silent behavior and checks parity in D5 rather than adding watch-specific logic.
+
+The retry design matches the current lifecycle: failed finds clear the turn, failed readings fall back, and cancelled/stale turns cannot move the voice (`LiveWatch.java:155-184,229-254`). The plan checks quiet at both retry start and attach, retains the per-call cap, and covers timing, failed attempts, setting changes and phone playback in T1-T6. The Auto route correction and regression coverage remain explicit. The existing unit-test configuration permits Android stubs to return defaults (`app/build.gradle.kts:84-85`), so the planned pure log-rotation test does not require a new Android test framework.
+
+This is plan approval, not device verification: D1 must still establish speakerphone fallback, D4a must locate the microphone failure, D4b must pass, and CI must be green. No implementation tests or device checks were run for this review.
+
+VERDICT: APPROVE
