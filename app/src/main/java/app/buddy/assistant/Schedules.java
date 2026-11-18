@@ -35,9 +35,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * At its time the task starts, also with the phone locked: the background browser and Linux tools work without the
  * screen, and a partial wake lock lets the run finish with the screen off. Only when the agent needs the screen while
  * the phone is locked does the run wait (see awaitUnlock): a notification asks the user to unlock (with "Wake the
- * phone for this task" the screen comes on too, see WakeActivity), and after an hour without that the run stops. A chat that's still working, an agent that isn't signed in, or Buddy's service being
- * off skips the task, with a notification; another chat at work, a pause or no internet make it wait, for an hour at
- * most. Main thread, except awaitUnlock (a phone tool's thread).
+ * phone for this task" the screen comes on too, see WakeActivity), and after an hour without that the run stops.
+ * agent that isn't signed in, or Buddy's service being off skips the task, with a notification. A pause, Stop or no
+ * internet make it wait, for an hour at most. Its own chat still working makes it wait until the chat is done (fork
+ * 027: other chats at work don't hold it up). Main thread, except awaitUnlock (a phone tool's thread).
  *
  * The agent can schedule messages to itself too (schedule_message, see agentTool): "check the price again tomorrow at
  * 9". Each is sent once, into its own chat, and runs like a scheduled task; the chat lists them above its composer,
@@ -406,8 +407,8 @@ public final class Schedules extends BroadcastReceiver {
             long now = SystemClock.elapsedRealtime();
             for (String key : new ArrayList<>(waiting.keySet())) {
                 Long until = waiting.get(key);
+                Sessions.Session s = chat(hub.sessions.all, key);
                 int slash = key.indexOf('/');
-                Sessions.Session s = hub.sessions.find(slash < 0 ? key : key.substring(0, slash));
                 Later l = s == null || slash < 0 ? null : later(s, key.substring(slash + 1));
                 if (until == null || s == null || (slash < 0 ? s.schedule == null : l == null)) {
                     waiting.remove(key);
@@ -416,10 +417,11 @@ public final class Schedules extends BroadcastReceiver {
                 BuddyService svc = BuddyService.get();
                 String skip = svc == null ? app.getString(R.string.rules_log_no_service) // its server is how the agent works
                         : !SetupState.signedIn(app, s.backend) ? app.getString(R.string.rules_log_not_signed_in, s.brainName())
-                        : s.running && l == null ? app.getString(R.string.schedule_skip_running) : null;
-                if (skip == null && busy(hub, svc)) { // the agent's own message waits for its chat to finish, too
-                    if (now < until) continue;
-                    skip = app.getString(R.string.schedule_skip_busy);
+                        : null;
+                if (skip == null) { // fork 027: see due()
+                    Due d = due(waiting, key, s, svc.paused(), svc.controlRevoked() != null, online(), now);
+                    if (d == Due.WAIT) continue;
+                    if (d == Due.GIVE_UP) skip = app.getString(R.string.schedule_skip_busy);
                 }
                 waiting.remove(key);
                 if (l != null) {
@@ -437,13 +439,35 @@ public final class Schedules extends BroadcastReceiver {
         }
     }
 
+    /** fork 027: what one look at a due task does (see due). */
+    enum Due { START, WAIT, GIVE_UP }
+
     /**
-     * Another chat at work (they'd share the screen), a pause, Stop's minute, a card waiting for the user or no
-     * internet: the task waits, as notification rules' runs do.
+     * fork 027: one look at a due task (key in waiting, s its chat). If its own chat is at work, the task waits for it,
+     * however long, and its hour starts again, so it is never dropped for that. A pause, Stop's minute or no internet
+     * make it wait, an hour at most, and then it is given up. Otherwise it starts. Other chats at work and cards waiting
+     * for the user don't hold it up: they did, and on pipeline days the morning's tasks were dropped. START and GIVE_UP
+     * take the key out of waiting.
      */
-    private static boolean busy(ChatHub hub, BuddyService svc) {
-        return hub.runningCount() > 0 || svc.paused() || (svc.bubble() != null && svc.bubble().confirming())
-                || svc.controlRevoked() != null || !online();
+    static Due due(Map<String, Long> waiting, String key, Sessions.Session s, boolean paused, boolean stopped,
+                   boolean online, long now) {
+        if (s.running) {
+            waiting.put(key, now + WAIT_MS);
+            return Due.WAIT;
+        }
+        boolean held = paused || stopped || !online;
+        Long until = waiting.get(key);
+        if (held && until != null && now < until) return Due.WAIT;
+        waiting.remove(key);
+        return held ? Due.GIVE_UP : Due.START;
+    }
+
+    /** fork 027: the chat a waiting key is for: "chat" (its Schedule) or "chat/message" (the agent's own message). */
+    static Sessions.Session chat(List<Sessions.Session> all, String key) {
+        int slash = key.indexOf('/');
+        String id = slash < 0 ? key : key.substring(0, slash);
+        for (Sessions.Session s : all) if (s.id.equals(id)) return s;
+        return null;
     }
 
     private static void start(Sessions.Session s, Later l) {
