@@ -166,3 +166,21 @@ Why: the residual risk is bounded by the watch's 1-s buffer; a receiver-stop ack
   script over the real sources (github 171 tests, fdroid 147), against the Wear stubs from the earlier pipeline runs; the
   build, lint and CI steps are CI-only. The page JS was only syntax-checked with node.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-18 - A fallback retries the watch up to 3 times per call, in a pause (replaces the 'no retry otherwise' part of the 2026-11-17 'LiveWatch decides at call start…' entry; feature 026)
+- Why: the W2 log (026 diagnosis.md): the watch app was restarted mid-call, the voice fell back to the phone and, with
+  Auto, never came back.
+- Rules: every `fallback()` (refused, broken, stopped by the watch, the 30-s give-up) and every retry that finds no
+  watch arms the next retry 5 s later (`RETRY_MS`, polled every 500 ms); at most 3 per call (`RETRIES`, reset only by a
+  new call); a retry starts only in a pause of the voice (no peak above 0.01 for `QUIET_MS` = 1 s), and its channel
+  moves the voice only at a pause too (it waits, open, until then); a retry waits, unused, while the watch doesn't win
+  (a headset came); `stop()` never arms; a setting change cancels an armed retry and decides afresh as before, neither
+  counted nor pause-gated. An unreachable watch never mutes the phone: only an attached channel does.
+- By: Coder (claude-sonnet-5-5), feature 026
+
+## 2026-11-18 - The live route rule doesn't depend on the voice session's `other` latch (feature 026)
+- Replaces the 2026-11-17 "the live branch of `reconcile()` also respects `other`" entry. W2's log has no `route:` line
+  in the whole call: `live()` never ran, because a session that began outside NORMAL mode had set `other`, and Auto then
+  fell through to `drop()`, Android's routing, the earpiece. `AudioRoute.liveRule(mode, noEarpiece)` keeps the mode check
+  (ringing and phone calls stay excluded) and drops `other`, which still guards the device branch.
+- By: Coder (claude-sonnet-5-5), feature 026

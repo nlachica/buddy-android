@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
  * commands, and it then claims things it never did, so Buddy doesn't depend on it: a hand-off is taken like the rest.)
  * One call at a time; it ends with End (the chat's live bar or the notification), when the screen goes off, when Buddy
  * is paused or stopped, or after a while with nothing said. Every call logs what happens to ~/.buddy/live.log in
- * Buddy's Linux (the previous call's: live.log.1).
+ * Buddy's Linux (the five before it: live.log.1, the newest, to live.log.5).
  */
 final class CodexLive {
     static final String ACTION_END = "app.buddy.assistant.END_LIVE";
@@ -153,7 +153,7 @@ final class CodexLive {
         return t != null && t.equals(thread);
     }
 
-    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux; the previous call's: live.log.1)
+    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux; the five before it: live.log.1 (newest) to live.log.5)
 
     private static final ExecutorService logger = Executors.newSingleThreadExecutor();
     private static volatile long logStart;
@@ -175,13 +175,21 @@ final class CodexLive {
         });
     }
 
+    static final int LOGS_KEPT = 5;
+
+    /** Shifts log.1 to log.2 and so on up to log.keep (the oldest goes), then log to log.1. A failed rename is ignored. */
+    static void rotate(File log, int keep) {
+        for (int i = keep - 1; i >= 1; i--) new File(log.getParentFile(), log.getName() + "." + i).renameTo(new File(log.getParentFile(), log.getName() + "." + (i + 1)));
+        log.renameTo(new File(log.getParentFile(), log.getName() + ".1"));
+    }
+
     private static void logStartNew() {
         logStart = SystemClock.elapsedRealtime();
         logger.execute(() -> {
             try {
                 File f = logFile();
                 f.getParentFile().mkdirs();
-                f.renameTo(new File(f.getParentFile(), "live.log.1")); // the previous call's log; a failed rename must not cost this call its log
+                rotate(f, LOGS_KEPT); // a failed rename must not cost this call its log
                 try (FileOutputStream o = new FileOutputStream(f, false)) {
                     o.write(("live voice call, " + new java.util.Date() + ", Buddy " + BuildInfo.VERSION + "\n")
                             .getBytes(StandardCharsets.UTF_8));
@@ -343,6 +351,7 @@ final class CodexLive {
                 end(app.getString(R.string.dictation_chatgpt_no_connect, app.getString(R.string.dictation_stage_connecting)));
                 return;
             }
+            if (remote != null && now - inLogAt >= 10_000) logWatchIn(now); // 026: counts at the phone's end of the watch link
             if (!sent && heard.length() > 0 && now - lastHeard > PAUSE_MS) utterance("pause");
             if (ses.running) lastActivity = now; // the agent working counts: its reply is still to come
             if (now - lastActivity > IDLE_MS) {
@@ -722,10 +731,13 @@ final class CodexLive {
                 else LiveWatch.pcm(b); // a phone call whose voice is on the watch (017)
             }
 
-            /** 017, a phone call: bit 1 = the voice plays on the watch (mute here, tap it), bit 2 = the mic is closed. */
+            /**
+             * 017, a phone call: bit 1 = the voice plays on the watch (mute here, tap it), bit 2 = the mic is closed.
+             * voicePeak: the voice's peak this tick (LiveWatch's pause, 026).
+             */
             @JavascriptInterface
-            public int toWatch() {
-                return web == mine && remote == null ? LiveWatch.toWatch() : 0;
+            public int toWatch(float voicePeak) {
+                return web == mine && remote == null ? LiveWatch.toWatch(voicePeak) : 0;
             }
 
             /** Loudness of the microphone or the voice (0..1), for the bar's waveform; voice: the voice is audible. */
@@ -865,10 +877,32 @@ final class CodexLive {
     /** Watch audio for the call (any thread; the array is kept): only while r is the current call's Remote. */
     static void push(Remote r, byte[] pcm) {
         if (r == null || r != remote) return;
+        final int peak = LiveWatch.Gate.peak(pcm);
         synchronized (chunks) {
             chunks.add(pcm);
-            while (chunks.size() > 125) chunks.poll(); // the same 5 s cap as the phone's own recording
+            inFrames++;
+            inPeak = Math.max(inPeak, peak);
+            while (chunks.size() > 125) { // the same 5 s cap as the phone's own recording
+                chunks.poll();
+                inDropped++; // the page didn't pull
+            }
         }
+    }
+
+    /** What push() got from the watch since the last line (026): frames, loudest sample, frames the 5 s cap threw away. */
+    private static int inFrames, inPeak, inDropped;
+    private static long inLogAt;
+
+    private static void logWatchIn(long now) {
+        int n, p, d;
+        synchronized (chunks) {
+            n = inFrames;
+            p = inPeak;
+            d = inDropped;
+            inFrames = inPeak = inDropped = 0;
+        }
+        inLogAt = now;
+        log(String.format(java.util.Locale.ROOT, "watch in 10 s: %d frames, peak %.3f, %d dropped", n, p / 32768.0, d));
     }
 
     /** Whether r is the Remote of the call that is on. */
@@ -891,7 +925,9 @@ final class CodexLive {
         recording = false;
         synchronized (chunks) {
             chunks.clear();
+            inFrames = inPeak = inDropped = 0;
         }
+        inLogAt = SystemClock.elapsedRealtime();
     }
 
     /**
@@ -995,7 +1031,7 @@ final class CodexLive {
             + "    timer = setInterval(() => { const h = heard(), v = said(), voice = v > 0.02;\n"
             + "      Buddy.level(Math.min(1, Math.max(h, v) * 3), voice); vMax = Math.max(vMax, v); keepPlaying(); wake();\n"
             // half-duplex while the voice is on the watch: the phone mic would hear the watch speaker (Java says when it reopens)
-            + "      if (!rem) { const w = Buddy.toWatch(), on = (w & 1) !== 0, m = (w & 2) === 0;\n"
+            + "      if (!rem) { const w = Buddy.toWatch(v), on = (w & 1) !== 0, m = (w & 2) === 0;\n"
             + "        if (on !== fwd) route(on);\n"
             + "        if (sendTrack && sendTrack.enabled !== m) { sendTrack.enabled = m; L('mic ' + (m ? 'open' : 'closed')); } }\n"
             + "    }, 70);\n"

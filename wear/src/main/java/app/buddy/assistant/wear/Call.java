@@ -215,10 +215,14 @@ public class Call extends Service {
         private void mic(OutputStream out, Speaker sp) throws IOException {
             int rate = 16000, min = AudioRecord.getMinBufferSize(rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
             AudioRecord r = null;
+            String source = "";
             for (int src : new int[]{MediaRecorder.AudioSource.VOICE_COMMUNICATION, MediaRecorder.AudioSource.MIC}) {
                 try {
                     r = new AudioRecord(src, rate, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate));
-                    if (r.getState() == AudioRecord.STATE_INITIALIZED) break;
+                    if (r.getState() == AudioRecord.STATE_INITIALIZED) {
+                        source = src == MediaRecorder.AudioSource.MIC ? "MIC" : "VOICE_COMMUNICATION";
+                        break;
+                    }
                 } catch (RuntimeException ignored) {
                 }
                 if (r != null) r.release();
@@ -234,8 +238,10 @@ public class Call extends Service {
                 return;
             }
             r.startRecording();
+            Log.i(TAG, "call " + id + " mic: " + source);
             byte[] buf = new byte[1280]; // 40 ms
-            long quietUntil = 0;
+            long quietUntil = 0, logAt = SystemClock.elapsedRealtime() + 5000;
+            int reads = 0, sent = 0, gated = 0, peak = 0; // 026: where does the speech get lost
             while (!dead) {
                 int n = r.read(buf, 0, buf.length);
                 if (n < 0) {
@@ -244,7 +250,23 @@ public class Call extends Service {
                 }
                 long now = SystemClock.elapsedRealtime();
                 if (sp.audibleNow()) quietUntil = now + AFTER_MS;
-                if (n == 0 || now < quietUntil) continue; // half-duplex: the speaker is 3 cm from the microphone
+                if (n > 0) {
+                    reads++;
+                    peak = Math.max(peak, Speaker.peak(buf, n));
+                }
+                if (now >= logAt) {
+                    android.media.AudioRecordingConfiguration cfg = r.getActiveRecordingConfiguration();
+                    Log.i(TAG, String.format(java.util.Locale.ROOT, "call %d mic 5 s: read %d, sent %d, gated %d, peak %.3f, silenced %s",
+                            id, reads, sent, gated, peak / 32768.0, cfg != null && cfg.isClientSilenced() ? "yes" : "no"));
+                    logAt = now + 5000;
+                    reads = sent = gated = peak = 0;
+                }
+                if (n == 0) continue;
+                if (now < quietUntil) { // half-duplex: the speaker is 3 cm from the microphone
+                    gated++;
+                    continue;
+                }
+                sent++;
                 out.write(buf, 0, n);
                 out.flush();
             }

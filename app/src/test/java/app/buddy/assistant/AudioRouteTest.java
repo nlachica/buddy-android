@@ -5,6 +5,7 @@ import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
 import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
 
 import org.junit.Test;
 
@@ -88,6 +89,15 @@ public class AudioRouteTest {
                 new int[]{SPEAKER, WIRED}, new String[]{"Speaker", "Headset"}));
         // the earpiece is never chosen
         assertEquals(AudioRoute.NONE, live(new int[]{EARPIECE}, new String[]{"Earpiece"}, new int[]{SPEAKER}, new String[]{"Speaker"}));
+    }
+
+    @Test
+    public void liveRule() {
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_NORMAL, true));
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, true));
+        assertFalse(AudioRoute.liveRule(AudioManager.MODE_IN_CALL, true));
+        assertFalse(AudioRoute.liveRule(AudioManager.MODE_RINGTONE, true));
+        assertFalse(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, false));
     }
 
     @Test
