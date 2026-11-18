@@ -68,3 +68,36 @@ Round 1 F1-F3 are addressed at the plan level: the Auto routing change and check
 F1 [major] The added watch-started-call requirements have no implementation or verification plan - `brief.md:30-35` requires logged frame/peak counters at both ends, a fix for silent watch microphone input, idle Listening status using the phone's shared status code, and five rotated live logs. Yet `plan.md:30` still excludes watch-side changes, steps 1-6 (`plan.md:155-198`) cover only routing/retries/docs, and `plan.md:288-302` explicitly leaves the addition blocking and unplanned. These are real remaining gaps: `wear/src/main/java/app/buddy/assistant/wear/Call.java:215-250` selects VOICE_COMMUNICATION first and drops gated frames without counters; `app/src/main/java/app/buddy/assistant/CodexLive.java:866-871` queues incoming PCM without counters; `CodexLive.java:178-185` retains only one previous log. The status question is also grounded in the code: `CodexLive.java:408-421` prioritizes `ses.running` and sends the same resulting string to both phone UI and Remote, while `app/src/watchlink/java/app/buddy/assistant/WatchCall.java:159-160` forwards it unchanged. Thus existing mirroring alone does not establish the requested idle Listening behavior. -> Complete the targeted research requested in Open questions, then add concrete steps and checks for all four requirements and remove the stale watch-side non-goal. If microphone diagnosis needs a device run with counters first, specify that dependency and retain the actual silence fix as an outstanding acceptance gate. Resolve the shared-status behavior with the orchestrator against Nicholas's latest clarification; preserve one shared status source rather than adding watch-specific logic. Include verification of microphone capture versus gated/sent/received frames, a successful watch-started spoken exchange, identical idle status on both UIs while the chat works, and retention across more than five calls. An observability-only stage must not be treated as completion of the expanded brief.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted. The four watch-call requirements now have a design, steps, tests and device checks, and the stale non-goal
+is gone. The research was answered from the code (plan Design, "The watch-started call"; Open questions has no blocker
+left).
+- *Non-goal.* "Watch-side changes" is now "watch changes beyond `Call.mic`". Done-when 6-9 restate the brief's items.
+- *Counters* (step 7 phone, step 8 watch).
+  - Watch: the source it opened, logged once. Then every 5 s: read, sent and gated frames, the peak, and
+    `isClientSilenced()`.
+  - Phone: every 10 s, from the watchdog: the frames `push()` got, their peak, and the frames dropped because the page
+    didn't pull them. An explicit `0 frames` line when nothing arrives.
+  - T9 covers the phone's peak. D4a checks both ends' lines and that their frame counts agree.
+- *Silence fix: a device run first, with the fix as an open acceptance gate* (step 10, Risk 9). The code doesn't support
+  a fix chosen now. The watch's `Call`, `Speaker` and `WatchCall` are unchanged since v2.3.9-fork.4, with which a watch
+  call worked using the same VOICE_COMMUNICATION-first source (007 verify.md). The gate is unlikely: `audibleUntil` only
+  follows audible blocks, and call B's voice peak was 0.000 throughout. The page's `mic peak` is a 21 ms snapshot, so
+  "~0" doesn't prove silence. So:
+  - stage 1 ships the counters with the retry and route work;
+  - D4a reads them;
+  - stage 2 applies a table decided now. Its row 1 is `MIC` before `VOICE_COMMUNICATION`; the other rows go back to
+    the Researcher.
+  Done-when 7 (D4b: a watch-started call with two spoken exchanges) stays open until it passes. Stage 1 is not
+  completion.
+- *Status.* One shared source, no change. The code already sends the same `t` to the phone's bar and the watch. The
+  phone says "Listening…" while the chat works only while it hears the user, and call B heard nothing, so both said
+  "Working on it…". Nicholas's latest, firm, clarification ("reuse the phone's existing call-status code … same string
+  … no new status logic") is that code. The literal "Listening… while silent and the chat is busy" would change both
+  UIs. It is left to Nicholas as a non-blocking question for the orchestrator to relay, defaulting to unchanged.
+  D5 checks that both UIs show the same string while idle, while the chat works, while he speaks, and while the voice
+  speaks.
+- *Five rotated logs* (step 6). `rotate(log, 5)` shifts `live.log.1` to `live.log.5` at each call's start. T8 runs 7
+  calls and keeps the newest 5 rotated logs. D5 step 4 checks the files on the device after 6 or more calls.

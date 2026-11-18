@@ -20,6 +20,15 @@ Done when:
 5. After a watch drop with Auto and no headset, the voice plays on the speakerphone, not the earpiece (a connected
    headset when there is one), and a test covers it.
 
+Added mid-run, a call started from the watch hears nothing (diagnosis-watchcall.md, call B):
+6. Counters at both ends, logged. The watch's `Call.mic` logs its source once, then every 5 s: the frames it read,
+   sent and gated, their peak, and whether Android silenced the recorder. The phone logs every 10 s what
+   `CodexLive.push` got from the watch: frames, peak, and frames dropped because the page didn't pull them.
+7. A call started from the watch hears the user. Speaking on the watch gives a user turn and a spoken reply (device
+   check D4b). This is the acceptance gate for the silence fix, and it stays open until it passes (see stage 2).
+8. The watch's call status is the phone's status string, from the one shared status code, with no new status logic.
+9. live.log keeps the current call plus 5 rotated logs (live.log.1 to live.log.5).
+
 Non-goals:
 - The cause of the W2 drop itself (the phone agent ran `adb install -r` of the watch app mid-call). That is a process
   note in diagnosis.md, not code.
@@ -27,15 +36,20 @@ Non-goals:
   these retries).
 - Auto calls where the watch never took the voice. They keep Android's routing, as 018 decided. The brief's addition is
   about the fallback after a drop.
-- Watch-side changes. The installed watch app already answers every case the retry needs.
+- Watch changes beyond `Call.mic`: its counters (stage 1), and the source swap if the counters point there (stage 2).
+  The installed watch app already answers every case the retry needs.
+- Watch-specific status logic, and any change to the shared status order (Nicholas: "no new status logic").
+- The page's `rtp 10 s` report. Its `mic peak` is a snapshot (Design). For watch calls, the new phone line is the
+  measure.
 - Retrying calls started from the watch (007's Remote). They never reach `LiveWatch`.
 - Phone read-aloud (012). It is off during a live call anyway (`ChatHub.java:1269`, `Bubble.java:2511`).
 
 ## Design
 
-Two parts. The route fix is in `AudioRoute` and is independent of the retry. The retry logic all goes into
+Three parts. The route fix is in `AudioRoute` and is independent of the retry. The retry logic all goes into
 `LiveWatch.Call`, which is pure and unit-tested through the `Out` fake. The page feeds it the voice's loudness through
-the fork's existing `toWatch` bridge call.
+the fork's existing `toWatch` bridge call. The watch-started call (last section) adds counters, keeps more logs, and
+leaves the shared status alone. Its silence fix is picked from the counters in a second stage.
 
 ### Auto's fallback route (done-when 5)
 
@@ -150,6 +164,81 @@ Alternatives considered:
 - Changing the page's 0.02 to 0.01 (review F2's suggestion): it changes upstream's Speaking… and log lines, and it
   can't be tested. The peak through `toWatch` can.
 
+### The watch-started call (done-when 6-9)
+
+**What the code says about call B (plan-review round 2).** It rules out less than the diagnosis assumed:
+- *The watch side hasn't changed since it worked.* `Call`, `Speaker` and `WatchCall` are unchanged since v2.3.9-fork.4,
+  and with that build Nicholas made a watch call and spoke with Buddy (007 verify.md, 2026-11-15). That build also
+  opened VOICE_COMMUNICATION first. So the source alone doesn't explain call B. Since then, the phone page changed (017's
+  tap and route; 020 replaced the awaited `ctx.resume()` with `wake()`, which doesn't wait), upstream 2.3.12 was
+  merged, and the watch's firmware may have updated.
+- *The half-duplex gate is unlikely.* `Speaker.audibleUntil` only moves when a block above 0.01 reaches the track.
+  Call B's `voice peak` (a 10 s maximum, `vMax`) read 0.000 in every report, so the voice never played and the gate
+  never closed.
+- *"mic peak ~0" doesn't prove silence.* The page's `mic peak` is `heard()` at report time: one 21 ms window every
+  10 s. Readings of 0.001-0.003 look like a noise floor (frames arriving), not the digital zeros `ownTrack` outputs when
+  nothing arrives. The 0.102 at +220 s shows sound did arrive at least once.
+
+So the code can't say where the speech is lost. It could be the capture, the link, the page not pulling (a suspended
+context stalls `ownTrack`'s processor), the page-to-WebRTC leg, or Nicholas not speaking at those moments. The brief's
+item (1), the counters, is what settles it. A blind fix now could change nothing, and it would drop the source a working
+call used.
+
+**Stage 1: counters, shipped with the retry and route work.**
+- *Watch, `Call.mic`.* Once: `call <id> mic: VOICE_COMMUNICATION` (or `MIC`), the source that opened. Then every 5 s:
+  `call <id> mic 5 s: read R, sent S, gated G, peak P, silenced yes|no`.
+  - R, S and G count 40 ms reads with n > 0. A read is either gated or sent.
+  - P is the loudest sample read, as a fraction of full scale with 3 decimals (the page's scale).
+  - silenced comes from `r.getActiveRecordingConfiguration().isClientSilenced()` (API 29; the watch's floor is 30).
+    The diagnosis only saw "not silenced" at open, and silencing can start later.
+  - `Speaker.peak` becomes package-private and is reused.
+- *Phone, `CodexLive.push`.* Under the `chunks` lock it counts frames, the peak (`LiveWatch.Gate.peak`, new; `loud()`
+  uses it), and the frames its 5 s cap throws away because the page didn't pull them. The counters reset with the queue
+  when a watch call starts (CodexLive.java:217). Every 10 s while `remote != null`, the watchdog (every 250 ms, main
+  thread) logs `watch in 10 s: N frames, peak P, D dropped` and resets them. The watchdog rather than `push()` itself,
+  so that "nothing arrived" is an explicit `0 frames` line, not a missing one.
+- Together, the two lines show the loss end to end. The watch reads (peak, silenced), gates or sends. The phone
+  receives about 2 × the watch's 5 s `sent` per line, and the page pulls (`dropped` 0). The page's report adds `ctx`
+  state, and the `page dc` lines show whether a user turn came.
+
+**Stage 2: the silence fix, chosen from device check D4a's counters.** This table is decided now. Each row reads the
+lines from the seconds Nicholas spoke:
+
+| Watch `mic 5 s` | Phone `watch in 10 s` | Lost at | Stage 2 |
+|---|---|---|---|
+| peak < 0.01, silenced no | (anything) | the capture: the source's processing | `Call.mic` tries `MIC` before `VOICE_COMMUNICATION`, a one-line swap. The half-duplex gate is the echo guard (007 chose it because the Watch4's AEC was unknown), so the voice-call processing adds nothing. Append a 007 decisions entry. |
+| silenced yes | (anything) | another app holds the mic | back to diagnosis: which app (`dumpsys audio` recording configs on the watch) |
+| gated ≈ read while the voice is quiet | (anything) | the gate stuck closed | back to diagnosis: `Speaker.audibleUntil` |
+| peak ≥ 0.05, sent ≈ read | frames ≪ 2 × sent | the link | back to diagnosis: `WatchCall.read`, the channel |
+| (fine) | frames fine, dropped > 0 | the page isn't pulling | back to diagnosis: the context's state, 020's unawaited resume |
+| (fine) | frames fine, peak ≥ 0.05, dropped 0, no user turn | page to WebRTC | back to diagnosis: `ownTrack`, `sendTrack` |
+| (fine) | (fine), a user turn and a reply | nowhere: it works | none. D4a counts as D4b |
+
+Only the first row is a planned code change. The other rows go back to the Researcher with both logs (the
+orchestrator runs it), and done-when 7 stays open. Stage 1 alone does not complete the brief.
+
+Alternatives: swap to `MIC` now, unproven (above); set MODE_IN_COMMUNICATION on the watch for the call (it reroutes
+the watch's audio and volume stream, more side effects than a source); drop the gate (it is 007's echo guard, and
+unlikely here); counters inside the watch's status JSON (the logcat line is enough to diagnose).
+
+**The status: no change (brief item 3, Nicholas's clarifications).** `CodexLive.status()` computes one string `t`, and
+that same `t` goes to the phone's live bar (`u.onStatus(t)`) and to the watch: `r.status(t)` → `WatchCall.status` →
+wear `Call.onPhone` sets `Call.status` → `CallActivity`. Nothing in that path is watch-specific. The order is:
+Connecting… > Speaking… > Listening… (words heard, not sent yet) > Working on it… (the chat runs) > Thinking… >
+Listening…. So the phone shows "Listening…" while the chat works exactly when it is hearing the user. In call B no
+words arrived, and the chat's run (busy from before the call) kept "Working on it…" on both ends. The phone, had it
+been on screen, showed the same string. Nicholas's latest, firm, clarification ("reuse the phone's existing
+call-status code … send that same string to the watch; no new status logic") describes today's code. So the code
+doesn't change. Once the audio arrives (done-when 7), the watch says "Listening…" whenever the phone does. Taken
+literally (user silent, chat busy, "Listening…"), the brief's item (3) would need the shared order changed for both
+UIs. That contradicts "no new status logic", so it is left to Nicholas as a non-blocking question (Open questions).
+
+**Five rotated logs.** `logStartNew()` renames `live.log` to `live.log.1` (020). It now shifts first: `live.log.4` →
+`.5`, …, `.1` → `.2`, then `live.log` → `.1`, through a pure `static void rotate(File log, int keep)` with
+`LOGS_KEPT = 5`. On Android, `renameTo` replaces the target, so `.5` drops the oldest. A failed rename is ignored, as
+today ("a failed rename must not cost this call its log"). Alternative: timestamped names (they need pruning and are
+harder to name in a check).
+
 ## Steps
 
 1. **Auto's fallback route** (`AudioRoute.java`, `AudioRouteTest.java`, `LiveWatchTest.java`).
@@ -193,9 +282,34 @@ Alternatives considered:
    - `README.md:102` (Live voice on the watch): after "…never the earpiece.", add one sentence: "When the watch can play
      again, the voice goes back to it at the next pause (up to 3 tries per call)." The earpiece sentence already states
      done-when 5; the code now keeps it.
-6. **Run the tests.** Run AudioRouteTest, LiveWatchTest and the full github unit-test set with the local javac/JUnit
-   harness (as 018 and 023 did; it is not Gradle). Then push the branch, and CI's `./gradlew testGithubDebugUnitTest …`
-   decides.
+6. **Five rotated logs** (`CodexLive.java`, new `CodexLiveTest.java`).
+   - Add `LOGS_KEPT = 5` and `static void rotate(File log, int keep)` (Design). `logStartNew()` calls it in place of
+     its single rename.
+   - Update the class javadoc (line 42) and the log section's comment (line 156) to "the five before it: live.log.1
+     (newest) to live.log.5".
+   - Test T8.
+7. **The phone's watch-in counter** (`LiveWatch.java`, `CodexLive.java`, `LiveWatchTest.java`).
+   - `Gate.peak(byte[])` returns the loudest sample's magnitude. `loud()` becomes `peak(p) > AUDIBLE * 32768`, using
+     step 2's constant, so it behaves as before.
+   - `push()`: the frame count, the peak (computed before the lock) and the dropped count, as in Design. They reset with
+     the queue at a watch call's start.
+   - The watchdog logs `watch in 10 s: …` every 10 s while `remote != null`. That is the one line added to upstream's
+     code in this feature; `push()` is 007's.
+   - Test T9.
+8. **The watch's mic counters** (`wear/src/main/java/app/buddy/assistant/wear/Call.java`, `Speaker.java`).
+   - `Speaker.peak` becomes package-private.
+   - `mic()` keeps the source that opened and logs it once, then counts and logs the 5 s line (Design) with
+     `Log.i(TAG, …)`.
+   - No behaviour change: the source order and the gate stay. D4a reads the lines.
+9. **Run the tests.** Run AudioRouteTest, LiveWatchTest, CodexLiveTest and the full github unit-test set with the local
+   javac/JUnit harness (as 018 and 023 did; it is not Gradle). Then push the branch, and CI decides:
+   `./gradlew testGithubDebugUnitTest … :wear:testDebugUnitTest`, with the wear module compiled by `:wear:assembleRelease`.
+10. **Stage 2, the silence fix** (after stage 1's release and device check D4a; a follow-up commit, review and release in
+    this feature folder).
+    - Read D4a's two logs against the Design table and record the row in decisions.md.
+    - Row 1: swap the two entries of `Call.mic`'s source array (`MIC` first), and append a 007 decisions entry. Then
+      run D4b.
+    - Any other row: stop. Hand the logs to the orchestrator for the Researcher. Done-when 7 stays open.
 
 ## Test plan
 
@@ -214,6 +328,8 @@ the page's 0.02. No test calls `voicePeak` unless it says so, so `loudAt` stays 
 | T5 | `anUnreachableWatchNeverSilencesThePhone`: `node = null`, a drop, `advance(TAIL)`. Then 60 × `advance(POLL_MS)`, each followed by `assertEquals(0, c.toWatch())` (3 retries happen in that time). A second call: a drop, and the retry opens a reading that never attaches → `toWatch() == 0`, and `pcm(LOUD)` → that reading got nothing. `refused()` (the open timeout) → `toWatch() == 0`. | Done-when 2 |
 | T6 | `aRetryWaitsWhileTheWatchDoesNotWinAndASettingChangeCancelsIt`: the call starts on Auto (`saved = ""`). (a) A drop, then `wins = false` with `saved` unchanged (a headset came), `advance(10_000)` → `finds == 1`, no `retry` line. `wins = true; advance(POLL_MS)` → `retry 1`. (b) Attach, then a drop. `saved = "2:Speaker", wins = false; advance(POLL_MS)`. `saved = "", wins = true`, then `c.voicePeak(0.5f)`, then `advance(POLL_MS)` → a find with no `retry 2` line, and its `attached` → `toWatch() == 1` (setting-change attaches aren't gated). Then `advance(10_000)` → still no `retry 2`. | Done-when 3 (gating), 018 rules kept |
 | T7 | `anAutoCallThatLosesTheWatchUsesTheSpeakerNotTheEarpiece`: a drop. Then `toWatch() & 1 == 0` and `AudioRoute.liveRule(MODE_IN_COMMUNICATION, c.noEarpiece(""))`. `AudioRoute.liveDevice({EARPIECE, SPEAKER, SCO}, {"Earpiece", "Speaker", "Watch4"}, {SPEAKER}, {"Speaker"}, ∅) == 1`: the speaker; the watch's SCO isn't a headset. With buds connected, `liveDevice({EARPIECE, SPEAKER, SCO, SCO}, {…, "Watch4", "Buds2"}, {SPEAKER, A2DP}, {"Speaker", "Buds2"}, ∅) == 3`: the buds' SCO. | Done-when 5 (headset preference kept) |
+| T8 | `CodexLiveTest.liveLogsRotateKeepingFive`: in a temp dir, `rotate(log, LOGS_KEPT)` with no files throws nothing. Then 7 times: `rotate`, then write "call k" to `live.log`. After that, `live.log` holds call 7, `live.log.1` call 6, …, `live.log.5` call 2. There is no `live.log.6`, and call 1 is gone. | Done-when 9 (retention past five calls) |
+| T9 | `LiveWatchTest.gatePeakIsTheLoudestSample`: the peak of samples {0, 500, -1200, 30} is 1200, of {-32768} it is 32768, of an empty array 0. `loud` is still true for a 500 sample (the existing case) and false for 300. | Done-when 6 (the phone's number), the gate unchanged |
 
 `AudioRouteTest.liveRule`: `(MODE_NORMAL, true)` and `(MODE_IN_COMMUNICATION, true)` are true. `(MODE_IN_CALL, true)`,
 `(MODE_RINGTONE, true)` and `(MODE_IN_COMMUNICATION, false)` are false. The rule takes no session state, so a session
@@ -247,12 +363,42 @@ device line, through `phone_shell`.
 - **D3 (done-when 2):** the watch off after a drop. The reply is heard on the phone throughout, the log shows 3
   `retry` lines each followed by `none found: phone`, and no `page mic closed` from them.
 
+D4 and D5 need the watch app from the same release (`adb -s <watch> install -r buddy-watch.apk`, never during a call).
+The watch's lines come from `adb -s <watch> logcat -d -s BuddyCall`. The phone's come from the watch call's live.log (or
+`live.log.n`).
+- **D4a (done-when 6; stage 1).** Start a call from the watch's talk screen in a chat that isn't running. At
+  "Listening…", ask a short question. Wait 15 s, ask again, then End. Note the times he spoke.
+  1. Watch: one `call <id> mic: <source>` line, then a `mic 5 s` line every 5 s, with read ≈ 125. While he spoke:
+     peak, gated, sent, silenced.
+  2. Phone: a `watch in 10 s` line every 10 s, with frames ≈ 2 × the watch's `sent` for the same seconds, plus
+     `dropped`, its peak, and the page report's `ctx`.
+  3. Whether a user turn came (`page dc … user: …`) and the voice answered.
+
+  D4a passes as a counter check when both ends' lines are there and their frame counts agree within one line's worth.
+  Its numbers select the stage 2 row (Design table).
+- **D4b (done-when 7; the acceptance gate).** After stage 2, or D4a itself if D4a already had a user turn and a reply.
+  A call started from the watch: what he says shows as a user turn with his words, and the voice answers on the watch,
+  for two exchanges in one call. The `mic 5 s` lines show `gated` rising only while the voice plays (half-duplex as
+  designed). Until D4b passes, done-when 7 is open and the feature isn't closed.
+- **D5 (done-when 8, 9).** During D4b, the phone unlocked with the call's chat on screen (the live bar) beside the watch:
+  1. Idle, chat not running: both show "Listening…".
+  2. Ask something that makes the chat work (e.g. "what's on my calendar today"). While it works and he is silent,
+     both show the same string (today "Working on it…"). While he speaks during the run, both show "Listening…". While
+     the voice answers, both show "Speaking…".
+  3. Every `status:` line in live.log appears on the watch within ~1 s. Pass: the two never differ beyond that delay.
+  4. After at least 6 calls since the release (D1-D5 together), `ls ~/.buddy/live.log*` lists `live.log` and
+     `live.log.1` to `live.log.5`, and the oldest call's file is gone.
+
 Checks by done-when item:
 1. T1-T4 in CI, D2 on the device.
 2. T5 in CI, D3 on the device.
 3. T1-T6 in CI, plus the 018 decisions.md entries from step 5.
 4. CI green: the PR's `build.yml` run (helper tests, `testGithubDebugUnitTest`, assembles, wear tests).
 5. T7 and `AudioRouteTest.liveRule` in CI, D1 on the device.
+6. T9 in CI, D4a on the device (both ends' lines).
+7. D4b on the device, after stage 2. It stays open until then.
+8. D5 on the device. No code changes, so code review only confirms that the one `t` reaches both.
+9. T8 in CI, D5 step 4 on the device.
 
 ## Risks
 
@@ -280,26 +426,33 @@ Checks by done-when item:
 8. **Device behaviour after a reinstall is unverified.** Whether the restarted watch app accepts a channel right after
    `install -r` (stopped-state rules, the capability coming back) is only known on the device. If it doesn't, each
    try ends refused or broken and the voice stays on the phone. The phone is never silenced.
+9. **Two releases for the watch call.** The silence fix waits for the counters on the device. Stage 1's release
+   carries the retry, the route, the counters and the logs; stage 2's carries the fix. Done-when 7 stays open between
+   them, and the feature is not closed on stage 1.
+10. **The cause may not be in a planned row.** Only the source swap is planned. The other rows go back to diagnosis,
+    but the counters at least say which end lost the audio.
+11. **`MIC` has no echo canceller (if stage 2 takes row 1).** The half-duplex gate is already the echo guard: the mic
+    isn't sent while the voice plays, nor for 300 ms after. A longer room tail could still reach the backend and
+    interrupt the voice. The counters would show it as sent frames with a peak right after the voice. `AFTER_MS` is the
+    knob; it doesn't change now.
+12. **Log volume.** One watch line per 5 s and one phone line per 10 s add ~540 lines to a 30-minute call. That is
+    small next to the page's own lines.
 
-No upstream lines change. `toWatch`, its page call, `AudioRoute` and `LiveWatch` are all fork code (017/018).
+Upstream lines: one added line in the watchdog (step 7). `toWatch`, its page call, `push()`, the log rotation,
+`AudioRoute`, `LiveWatch` and the wear `Call` are fork code (007/017/018/020).
 
 ## Open questions
 
-**Blocking, for the brief's "watch-started call hears nothing" section (added while this round was being answered;
-not planned yet).** Everything above covers the retry and the Auto fallback route only. The new section needs facts
-first, and one answer from Nicholas:
-1. *Status (Nicholas).* `CodexLive.status()` is already the one status source. The phone's bar (`onStatus`,
-   `statusText()`) and the watch (`Remote.status(t)` → wear `Call.status`, shown by `CallActivity:61`) get the same
-   string. Phone calls also show "Working on it…" while the chat runs: W2's log at 31.48, 57.79, 119.12 and 171.00 s.
-   So "mirror the phone's status exactly, no new logic" already holds. "Listening… while the call is idle even if
-   the chat is busy" would mean moving `ses.running` below the listening case in that one shared precedence, and the
-   phone would change too. Is that what he wants, or does he want something else changed?
-2. *Why the watch mic sends silence (Researcher).* diagnosis-watchcall.md names two candidates and proves neither: the
-   half-duplex gate (`wear Call.java:246`, `sp.audibleNow()`), and the VOICE_COMMUNICATION source. Before planning a
-   fix, read the wear Speaker's `audible`/`audibleUntil` path (`Speaker.java:69, 122`) for a way it stays true on a
-   silent stream. Check whether Galaxy Watch is known to return near-silence from VOICE_COMMUNICATION. And decide
-   whether brief items (1) and (4), the counters and 5 rotated logs, ship first so a device call can settle it, or
-   whether the fix can be chosen now.
+**None blocking.** Plan-review round 2's two questions are answered from the code (Design, "The watch-started call"):
+- *Why the watch mic sends silence.* The code can't tell; the counters will. Stage 1 ships them, D4a reads them, and
+  stage 2 applies the table's row.
+- *Status.* One shared string already reaches both UIs, and Nicholas's latest clarification describes that code. No
+  change.
+
+**For Nicholas, non-blocking (the orchestrator relays).** In any call where he is silent and the chat is busy, both
+UIs show "Working on it…", as the phone always has. The phone shows "Listening…" during the chat's work only while it
+hears him. If he wants "Listening…" in the silent case too, it is a reorder of the shared `status()`, and the phone
+changes the same way. Default: unchanged, per "no new status logic".
 
 **Not blocking.** Defaults recorded in decisions.md that Nicholas may overrule after trying:
 - the count is per call and isn't reset by a successful return (a 4th drop in one call stays on the phone);

@@ -72,3 +72,43 @@
   and the retry's move log the quiet time (`retry n (quiet X ms)`, `playing there (quiet Y ms)`), so the device check
   reads the same number the decision used.
 - By: Planner (claude-opus-5-5), plan-review round 1 F2/F3
+
+## 2026-11-18 - Watch-started call silence: counters first, the fix picked from them (stage 2)
+- Options: swap the watch's source to `MIC` now; set MODE_IN_COMMUNICATION on the watch for the call; drop the
+  half-duplex gate; ship the counters first and choose the fix from a table decided now.
+- Choice: counters first, with the table in plan.md (Design, "The watch-started call"). Only its first row is a code
+  change: `MIC` before `VOICE_COMMUNICATION`. The other rows go back to diagnosis. Why:
+  - The watch's `Call`, `Speaker` and `WatchCall` are unchanged since v2.3.9-fork.4, with which a watch call worked
+    (007 verify.md, 2026-11-15). That build opened VOICE_COMMUNICATION first too, so the source alone doesn't explain
+    call B.
+  - The gate is unlikely: `audibleUntil` only follows blocks above 0.01, and call B's voice peak read 0.000 throughout.
+  - The page's `mic peak` is a 21 ms snapshot, so it doesn't prove the watch sent silence.
+  A blind swap could change nothing and would drop the source a working call used. Cost: a second release, with
+  done-when 7 open until D4b passes.
+- By: Planner (claude-opus-5-5), plan-review round 2 F1
+
+## 2026-11-18 - Where the counters live
+- Options: phone: log from `push()` on a timer, in the page's 10 s report (a new bridge call), or from the watchdog.
+  Watch: a logcat line, or counters in the status JSON too.
+- Choice: the phone logs from the watchdog every 10 s while a watch call is on: frames, peak, and frames dropped by the
+  5 s cap (the page isn't pulling). That way "nothing arrived" is an explicit `0 frames` line, not a missing one; a
+  `push()` timer only runs when frames come. The watch logs a logcat line every 5 s: read, sent, gated, peak, and
+  `isClientSilenced()`, which can change after open. The source is logged once. The peak helpers are reused
+  (`Speaker.peak`, and a new `Gate.peak` that `Gate.loud` uses). The status JSON is not changed (the log is enough).
+- By: Planner (claude-opus-5-5), plan-review round 2 F1
+
+## 2026-11-18 - The call status doesn't change: the one shared string already reaches the watch
+- Options: reorder the shared `status()` so "Listening…" beats "Working on it…" (the phone changes too); add status
+  logic on the watch; no change.
+- Choice: no change. `CodexLive.status()` sends the same `t` to the phone's bar and to the watch (`Remote.status` →
+  wear `Call.status`). The phone shows "Listening…" while the chat works exactly when it hears the user. In call B no
+  words arrived, so both ends said "Working on it…". Nicholas's latest, firm, clarification (reuse the phone's
+  call-status code, send the same string, no new status logic) is today's code. The literal "Listening… while idle
+  even if the chat is busy" would change both UIs, so it is left to Nicholas as a non-blocking question.
+- By: Planner (claude-opus-5-5), plan-review round 2 F1
+
+## 2026-11-18 - Five rotated live logs: live.log.1 to live.log.5, shifted at each call's start
+- Options: shift N numbered files; timestamped files with pruning.
+- Choice: shift 5 (`rotate(log, LOGS_KEPT)`): it keeps 020's naming, needs no pruning, and is easy to name in a check.
+  A failed rename is ignored, as today.
+- By: Planner (claude-opus-5-5), plan-review round 2 F1
