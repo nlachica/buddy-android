@@ -39,7 +39,7 @@ import java.util.concurrent.Executors;
  * commands, and it then claims things it never did, so Buddy doesn't depend on it: a hand-off is taken like the rest.)
  * One call at a time; it ends with End (the chat's live bar or the notification), when the screen goes off, when Buddy
  * is paused or stopped, or after a while with nothing said. Every call logs what happens to ~/.buddy/live.log in
- * Buddy's Linux (the previous call's: live.log.1).
+ * Buddy's Linux (the five before it: live.log.1, the newest, to live.log.5).
  */
 final class CodexLive {
     static final String ACTION_END = "app.buddy.assistant.END_LIVE";
@@ -153,7 +153,7 @@ final class CodexLive {
         return t != null && t.equals(thread);
     }
 
-    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux; the previous call's: live.log.1)
+    // ------------------------------------------------------------------ the log (~/.buddy/live.log in Buddy's Linux; the five before it: live.log.1 (newest) to live.log.5)
 
     private static final ExecutorService logger = Executors.newSingleThreadExecutor();
     private static volatile long logStart;
@@ -175,13 +175,21 @@ final class CodexLive {
         });
     }
 
+    static final int LOGS_KEPT = 5;
+
+    /** Shifts log.1 to log.2 and so on up to log.keep (the oldest goes), then log to log.1. A failed rename is ignored. */
+    static void rotate(File log, int keep) {
+        for (int i = keep - 1; i >= 1; i--) new File(log.getParentFile(), log.getName() + "." + i).renameTo(new File(log.getParentFile(), log.getName() + "." + (i + 1)));
+        log.renameTo(new File(log.getParentFile(), log.getName() + ".1"));
+    }
+
     private static void logStartNew() {
         logStart = SystemClock.elapsedRealtime();
         logger.execute(() -> {
             try {
                 File f = logFile();
                 f.getParentFile().mkdirs();
-                f.renameTo(new File(f.getParentFile(), "live.log.1")); // the previous call's log; a failed rename must not cost this call its log
+                rotate(f, LOGS_KEPT); // a failed rename must not cost this call its log
                 try (FileOutputStream o = new FileOutputStream(f, false)) {
                     o.write(("live voice call, " + new java.util.Date() + ", Buddy " + BuildInfo.VERSION + "\n")
                             .getBytes(StandardCharsets.UTF_8));
