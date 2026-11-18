@@ -26,3 +26,6 @@ x
 
 ## Added by Nicholas mid-run (in scope)
 When the watch drops mid-call and the setting is Auto, the voice fell back to the earpiece (hold-to-ear speaker). Auto's fallback must prefer the loudspeaker (or a connected headset) over the earpiece. Acceptance: after a watch drop with Auto and no headset, audio plays on the speakerphone, not the earpiece; a test covers it.
+
+## Added mid-run: watch-started call hears nothing (in scope)
+See diagnosis-watchcall.md. A call started from the watch connects, but the backend gets silence (mic peak ~0) and the watch shows "Working on it…" forever. In scope: (1) frame/peak counters on watch Call.mic and phone CodexLive.push, logged; (2) find and fix why the watch mic sends silence (half-duplex gate Call.java:246 or VOICE_COMMUNICATION source; prefer a source/gate that works on Galaxy Watch); (3) status shows "Listening…" while the call is idle even if the chat run is busy; (4) keep 5 rotated live logs.
