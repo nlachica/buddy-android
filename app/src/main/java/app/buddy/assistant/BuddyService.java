@@ -79,6 +79,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
     protected void onServiceConnected() {
         super.onServiceConnected();
         instance = this;
+        A11yWatch.connected(this);
         Theme.load(this);
         orientation = getResources().getConfiguration().orientation;
         Models.set("claude", Prefs.claudeModels(this));
@@ -300,6 +301,12 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
     }
 
     @Override
+    public boolean onUnbind(android.content.Intent intent) {
+        A11yWatch.lost(this, "unbind");
+        return super.onUnbind(intent);
+    }
+
+    @Override
     public void onDestroy() {
         try {
             unregisterReceiver(lockReceiver);
@@ -320,6 +327,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         if (bubble != null) bubble.remove();
         if (control != null) control.end();
         instance = null;
+        A11yWatch.lost(this, "destroy");
         super.onDestroy();
     }
 
