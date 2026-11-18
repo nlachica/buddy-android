@@ -955,11 +955,13 @@ final class ChatHub {
     }
 
     /**
-     * For the smart reviewer, from the chat that's working (call on the main thread): {agent backend, the
-     * user's latest request, the agent's latest note}, or null when no chat is running (an outside agent).
+     * For the smart reviewer, from the calling chat (fork 027; the newest working chat when it isn't one of Buddy's;
+     * call on the main thread): {agent backend, the user's latest request, the agent's latest note}, or null when no
+     * chat is running (an outside agent).
      */
-    String[] reviewContext() {
-        Sessions.Session latest = latestRunning();
+    String[] reviewContext(String chat) {
+        Sessions.Session latest = reviewed(sessions.all, chat);
+        if (latest == null) latest = latestRunning();
         if (latest == null) return null;
         String request = "", note = "";
         for (int i = latest.messages.size() - 1; i >= 0; i--) {
@@ -1117,6 +1119,19 @@ final class ChatHub {
         String text = ses.unsent;
         ses.unsent = null;
         return text;
+    }
+
+    /**
+     * fork 027: the chat whose request the reviewer judges a call against: the caller's, or for a sub-agent or a
+     * helper its parent (those work for their parent). null for no or an unknown caller (an agent outside Buddy's chats).
+     */
+    static Sessions.Session reviewed(List<Sessions.Session> all, String chat) {
+        for (Sessions.Session s : all) {
+            if (!s.id.equals(chat)) continue;
+            if (s.parent.isEmpty()) return s;
+            for (Sessions.Session p : all) if (p.id.equals(s.parent)) return p;
+        }
+        return null;
     }
 
     /** The newest working chat, or null. */

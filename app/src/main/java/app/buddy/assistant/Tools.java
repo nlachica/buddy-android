@@ -1833,8 +1833,9 @@ final class Tools {
         String app = frontName();
         final String[][] ctx = new String[1][];
         final CountDownLatch got = new CountDownLatch(1);
+        final String chat = McpServer.CALLER_CHAT.get(); // fork 027: this call's chat, not the newest one
         svc.runOnMain(() -> {
-            ctx[0] = ChatHub.get(svc).reviewContext();
+            ctx[0] = ChatHub.get(svc).reviewContext(chat);
             got.countDown();
         });
         got.await(2, TimeUnit.SECONDS);
