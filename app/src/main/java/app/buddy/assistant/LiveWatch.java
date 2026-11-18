@@ -17,7 +17,8 @@ import java.util.function.Consumer;
  * it is unit-tested through {@link Call}. Calls started from the watch have a Remote (007) and never come here.
  */
 final class LiveWatch {
-    static final long POLL_MS = 500, TAIL_MS = 300, FAIL_TAIL_MS = 1500, ANSWER_MS = 30_000, QUIET_MS = 1000;
+    static final long POLL_MS = 500, TAIL_MS = 300, FAIL_TAIL_MS = 1500, ANSWER_MS = 30_000, QUIET_MS = 1000, RETRY_MS = 5000;
+    static final int RETRIES = 3;
 
     private static volatile Call call;
 
@@ -89,12 +90,14 @@ final class LiveWatch {
         private final Gate gate = new Gate();
         private final ArrayList<byte[]> held = new ArrayList<>();
         private boolean on, took, watch, fed, heldEnded;
-        private int gen, count;
+        private int gen, count, retries;
         private String saved, node;
         private Object turn;
         /** cur: the open reading that takes audio now. drain: the finished reading whose answer isn't here yet. Never both. */
         private ReadQueue.Stream cur, drain;
-        private long openAt, endedAt, loudAt;
+        private long openAt, endedAt, loudAt, retryAt;
+        /** retryTurn: the turn a retry made. pending: its channel is open, the voice waits for a pause to move (026). */
+        private Object retryTurn, pending;
 
         Call(Out out) {
             this.out = out;
@@ -102,6 +105,7 @@ final class LiveWatch {
 
         synchronized void begin() {
             clear();
+            retries = 0;
             on = true;
             final int g = ++gen;
             saved = out.saved();
@@ -121,8 +125,8 @@ final class LiveWatch {
             cur = drain = null;
             held.clear();
             took = watch = fed = heldEnded = false;
-            turn = null;
-            openAt = 0;
+            turn = retryTurn = pending = null;
+            openAt = retryAt = 0;
         }
 
         /** A phone call is on and Watch is picked, or Auto after the watch took the voice in this call. */
@@ -136,7 +140,15 @@ final class LiveWatch {
             if (!s.equals(saved)) { // only a change of the setting decides again
                 out.log("setting " + show(saved) + " -> " + show(s));
                 saved = s;
+                retryAt = 0; // the change is the fresh decision, not a retry
                 decide();
+            } else if (pending != null && pending == turn && quiet()) {
+                move(pending);
+            } else if (retryAt != 0 && turn == null && drain == null && out.now() >= retryAt && quiet() && out.watchWins()) {
+                retryAt = 0;
+                retries++;
+                out.log("retry " + retries + " (quiet " + (out.now() - loudAt) + " ms)");
+                attempt(true);
             }
             out.after(POLL_MS, () -> poll(g));
         }
@@ -147,12 +159,18 @@ final class LiveWatch {
 
         private void decide() {
             boolean want = out.watchWins();
-            if (want && turn == null && drain == null) attempt();
+            if (want && turn == null && drain == null) attempt(false);
             else if (!want && turn != null) stop();
         }
 
-        private void attempt() {
+        /** Retries run again after a fallback: RETRIES per call, RETRY_MS apart, in a pause of the voice (026). */
+        private void arm() {
+            retryAt = retries < RETRIES ? out.now() + RETRY_MS : 0;
+        }
+
+        private void attempt(boolean retry) {
             final Object t = turn = new Object();
+            if (retry) retryTurn = t; // before find: the fake answers at once
             out.log("looking");
             out.find(n -> found(t, n));
         }
@@ -162,6 +180,7 @@ final class LiveWatch {
             if (n == null) {
                 turn = null;
                 out.log("none found: phone");
+                if (t == retryTurn) arm(); // a watch that comes back between tries is caught
                 return;
             }
             node = n;
@@ -184,9 +203,19 @@ final class LiveWatch {
         /** The channel is open: from now the phone is muted. Not before, so an unreachable watch never silences it. */
         private synchronized void attached(Object t) {
             if (turn != t || watch) return;
+            if (t == retryTurn && !quiet()) { // a retry moves the voice only in a pause; the channel idles meanwhile
+                pending = t;
+                out.log("waiting for a pause");
+                return;
+            }
+            move(t);
+        }
+
+        private void move(Object t) {
+            pending = null;
             gate.reset();
             watch = took = true;
-            out.log("playing there");
+            out.log(t == retryTurn ? "playing there (quiet " + (out.now() - loudAt) + " ms)" : "playing there");
         }
 
         /** The utterance is over: the reading ends, and the watch's answer says when it is quiet. */
@@ -244,7 +273,7 @@ final class LiveWatch {
             }
         }
 
-        /** The watch can't play it (refused, broken, silent): the phone's own route, until the setting changes. */
+        /** The watch can't play it (refused, broken, silent): the phone's own route; retried in a pause (026), and on a setting change. */
         private void fallback(String why, long tail) {
             if (cur != null) cur.cancel();
             cur = null;
@@ -257,6 +286,7 @@ final class LiveWatch {
                 openAt = out.now() + tail;
             }
             out.log("fallback: " + why);
+            arm();
         }
 
         /** The setting moved away: the voice is back on the phone, and the mic stays closed until the watch is quiet. */

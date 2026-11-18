@@ -14,7 +14,8 @@ import java.util.List;
 import java.util.function.Consumer;
 
 public class LiveWatchTest {
-    private static final long TAIL = LiveWatch.TAIL_MS, FAIL = LiveWatch.FAIL_TAIL_MS;
+    private static final long TAIL = LiveWatch.TAIL_MS, FAIL = LiveWatch.FAIL_TAIL_MS, RETRY = LiveWatch.RETRY_MS,
+            QUIET_MS = LiveWatch.QUIET_MS, POLL = LiveWatch.POLL_MS;
 
     private static final class Reading implements ReadQueue.Stream {
         final ReadQueue.Events events;
@@ -148,12 +149,12 @@ public class LiveWatchTest {
     }
 
     @Test
-    public void refusedAfterAttachFallsBackAndNothingIsFoundAgainWithTheSameSetting() {
+    public void refusedAfterAttachFallsBackAndNothingIsFoundAgainBeforeTheRetry() {
         Reading r = onWatch();
         r.events.refused();
         assertEquals(0, c.toWatch());
         assertTrue(c.noEarpiece("")); // took stays: the phone route keeps the live rule
-        f.advance(5000);
+        f.advance(RETRY - 1);
         assertEquals(1, f.finds);
         assertEquals(1, f.opened.size());
     }
@@ -163,7 +164,7 @@ public class LiveWatchTest {
         Reading r = onWatch();
         r.events.broken();
         assertEquals(0, c.toWatch());
-        f.advance(5000);
+        f.advance(RETRY - 1);
         assertEquals(1, f.opened.size());
     }
 
@@ -368,7 +369,7 @@ public class LiveWatchTest {
         assertEquals(2, c.toWatch());
         f.advance(1);
         assertEquals(0, c.toWatch());
-        assertEquals(1, f.opened.size()); // no retry in this call
+        assertEquals(1, f.opened.size()); // no retry yet
 
         // the same while the reading is still open and has audio
         Fake g = new Fake();
@@ -453,6 +454,201 @@ public class LiveWatchTest {
         assertEquals(2, c.toWatch());
         f.advance(1);
         assertEquals(0, c.toWatch());
+    }
+
+    private boolean logged(String prefix) {
+        return logCount(prefix) > 0;
+    }
+
+    private int logCount(String prefix) {
+        int n = 0;
+        for (String l : f.log) if (l.startsWith(prefix)) n++;
+        return n;
+    }
+
+    /** The number in the last log line that starts with prefix, e.g. "retry 1 (quiet 1500 ms)" -> 1500. */
+    private long quietIn(String prefix) {
+        String line = null;
+        for (String l : f.log) if (l.startsWith(prefix)) line = l;
+        return Long.parseLong(line.replaceAll(".*quiet (\\d+) ms.*", "$1"));
+    }
+
+    /** The W2 drop: an utterance went to the watch, and the watch stopped that reading. */
+    private void drop(Reading r) {
+        utterance();
+        r.events.broken(true);
+    }
+
+    private void soft(long ms) {
+        for (long t = 0; t < ms; t += 70) {
+            c.voicePeak(0.015f); // between the gate's 0.01 and the page's 0.02
+            f.advance(70);
+        }
+    }
+
+    private void silent(long ms) {
+        for (long t = 0; t < ms; t += 70) {
+            c.voicePeak(0.005f);
+            f.advance(70);
+        }
+    }
+
+    @Test
+    public void aDropIsRetriedFiveSecondsLaterInAPauseAndTheVoiceGoesBackToTheWatch() {
+        drop(onWatch());
+        f.advance(RETRY - 1);
+        assertEquals(1, f.finds);
+        assertEquals(1, f.opened.size());
+        f.advance(1);
+        assertEquals(2, f.finds);
+        assertTrue(logged("retry 1 (quiet"));
+        assertEquals(2, f.opened.size());
+        assertEquals(0, c.toWatch() & 1);
+        Reading n = f.last();
+        n.attached.run();
+        assertEquals(1, c.toWatch());
+        assertTrue(logged("playing there (quiet"));
+        c.pcm(LOUD);
+        assertEquals(1, n.got.size());
+    }
+
+    @Test
+    public void aRetryWaitsForAPauseAndMovesTheVoiceOnlyInOne() {
+        drop(onWatch());
+        soft(10_000);
+        assertEquals(1, f.finds);
+        assertFalse(logged("retry"));
+        silent(QUIET_MS + POLL);
+        assertTrue(logged("retry 1"));
+        assertTrue(quietIn("retry 1") >= QUIET_MS);
+        Reading n = f.last();
+        soft(70);
+        n.attached.run();
+        assertEquals(0, c.toWatch());
+        assertTrue(logged("waiting for a pause"));
+        c.pcm(LOUD);
+        assertTrue(n.got.isEmpty());
+        soft(2000);
+        assertEquals(0, c.toWatch());
+        f.advance(QUIET_MS + POLL);
+        assertEquals(1, c.toWatch());
+        assertTrue(quietIn("playing there (quiet") >= QUIET_MS);
+    }
+
+    @Test
+    public void aWatchThatComesBackLaterIsFoundByTheNextRetry() {
+        Reading r = onWatch();
+        f.node = null;
+        drop(r);
+        f.advance(RETRY);
+        assertTrue(logged("retry 1"));
+        assertEquals("none found: phone", f.log.get(f.log.size() - 1));
+        f.advance(1000);
+        f.node = "n1";
+        f.advance(RETRY - 1001);
+        assertEquals(2, f.finds);
+        f.advance(1);
+        assertEquals(3, f.finds);
+        assertTrue(logged("retry 2"));
+        f.last().attached.run();
+        assertEquals(1, c.toWatch());
+    }
+
+    @Test
+    public void atMostThreeRetriesPerCallWhateverTheirOutcome() {
+        drop(onWatch());
+        f.node = null;
+        f.advance(RETRY - 1);
+        assertEquals(1, f.finds);
+        f.advance(1); // retry 1: none found
+        assertEquals(2, f.finds);
+        f.node = "n1";
+        f.advance(RETRY - 1);
+        assertEquals(2, f.finds);
+        f.advance(1); // retry 2: opens
+        assertEquals(3, f.finds);
+        f.last().events.refused(); // before it attached
+        f.advance(RETRY - 1);
+        assertEquals(3, f.finds);
+        f.advance(1); // retry 3: attaches, then the watch stops it
+        assertEquals(4, f.finds);
+        Reading third = f.last();
+        third.attached.run();
+        assertEquals(1, c.toWatch() & 1);
+        third.events.broken(true);
+        f.advance(60_000);
+        assertEquals(4, f.finds);
+        assertFalse(logged("retry 4"));
+        assertEquals(0, c.toWatch());
+
+        // the count is per call
+        c.end();
+        c.begin();
+        Reading r = f.last();
+        r.attached.run();
+        drop(r);
+        f.advance(RETRY);
+        assertEquals(2, logCount("retry 1"));
+    }
+
+    @Test
+    public void anUnreachableWatchNeverSilencesThePhone() {
+        Reading r = onWatch();
+        f.node = null;
+        drop(r);
+        f.advance(TAIL);
+        for (int i = 0; i < 60; i++) {
+            f.advance(POLL);
+            assertEquals(0, c.toWatch());
+        }
+        assertEquals(3, logCount("retry "));
+
+        // a retry whose channel never attaches
+        f.node = "n1";
+        c.end();
+        c.begin();
+        Reading o = f.last();
+        o.attached.run();
+        drop(o);
+        f.advance(RETRY);
+        Reading n = f.last();
+        assertTrue(n != o);
+        assertEquals(0, c.toWatch());
+        c.pcm(LOUD);
+        assertTrue(n.got.isEmpty());
+        n.events.refused(); // the open timeout
+        assertEquals(0, c.toWatch());
+    }
+
+    @Test
+    public void aRetryWaitsWhileTheWatchDoesNotWinAndASettingChangeCancelsIt() {
+        f.saved = ""; // Auto
+        drop(onWatch());
+        f.wins = false; // a headset came
+        f.advance(10_000);
+        assertEquals(1, f.finds);
+        assertFalse(logged("retry"));
+        f.wins = true;
+        f.advance(POLL);
+        assertTrue(logged("retry 1"));
+
+        f.last().attached.run();
+        Reading n = f.last();
+        drop(n);
+        f.saved = "2:Speaker";
+        f.wins = false;
+        f.advance(POLL);
+        f.saved = "";
+        f.wins = true;
+        c.voicePeak(0.5f);
+        int finds = f.finds;
+        f.advance(POLL);
+        assertEquals(finds + 1, f.finds);
+        assertFalse(logged("retry 2"));
+        f.last().attached.run(); // a setting change's attach isn't gated
+        assertEquals(1, c.toWatch());
+        f.advance(10_000);
+        assertFalse(logged("retry 2"));
     }
 
     @Test
