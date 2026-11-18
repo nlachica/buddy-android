@@ -82,3 +82,11 @@
   process killed while the job is pending) and Buddy's OFF run after release time it from `a11y.log`. A miss fails
   the row and reopens the mechanism.
 - By: Planner (claude-opus-5-5), plan review round 1 F1
+
+## 2026-11-18 - The exit breadcrumb uses Buddy's own newest exit record, not the package's newest
+- Options: the newest package-wide record (`maxNum = 1`); the full bounded history (`maxNum = 0`) filtered to
+  `Application.getProcessName()`.
+- Choice: the filtered history. The package's exit history also holds external-service processes (WebView's sandboxed
+  renderers), so a newer renderer exit could stand in for Buddy's. The line names the record's process and pid, and
+  says `unavailable` when no Buddy record is left. A pure `ownIndex` keeps the selection testable on the JVM.
+- By: Planner (claude-opus-5-5), plan review round 2 F2

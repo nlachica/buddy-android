@@ -52,3 +52,20 @@ F1 [major] The replacement tap destination still changes an unamended requiremen
 F2 [major] The breadcrumb can attribute a renderer's death to Buddy's service process - `plan.md:103-107` takes `getHistoricalProcessExitReasons(pkg, 0, 1)` and states that the returned record is the previous Buddy process's exit. The [ActivityManager API contract](https://developer.android.com/reference/android/app/ActivityManager#getHistoricalProcessExitReasons(java.lang.String,%20int,%20int)) explicitly includes external-service processes in the package's exit history, and returns records newest first. Buddy uses WebView (`app/src/main/java/app/buddy/assistant/CodexLive.java:670`, `CodexSpeech.java:154`, `CodexDictation.java:167`); [Chromium's renderer documentation](https://chromium.googlesource.com/chromium/src/+/main/android_webview/renderer/) describes its external sandboxed processes running in the embedding app's context. Thus a newer renderer exit can occupy the single returned slot, hiding the main-process death and producing misleading evidence for the very WebView/update/memory incidents this feature investigates. The planned log also omits process identity, so an agent cannot detect that substitution. -> Retrieve the available bounded history (`maxNum = 0`), choose the newest record whose `getProcessName()` matches `Application.getProcessName()`, and log its process name/PID with the existing fields. If no matching record remains, say that the previous main-process exit is unavailable. Add a small selection test with a newer renderer record before an older Buddy record, plus the no-match case; do not infer a Buddy exit from the newest package-wide record.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - The plan no longer counts the tap destination as proof of done-when 1. Row 1 now marks the tap half
+unmet until Nicholas's answer is in `brief.md` Clarifications; with his acceptance the Verifier checks the clarified
+wording against what row 2's tap opens, and without it the half stays unmet. The Open question is now worded for the
+orchestrator to ask as is, the possibly missing highlight on Samsung included, and says where the answer goes. It
+blocks sign-off of that half, not coding: no route open to a third-party app reaches Buddy's own page, so the code is
+the same whatever he answers. The Goal line no longer promises "one tap". This finding stays open until the
+orchestrator appends his answer.
+
+F2: accepted - The start line now reads `getHistoricalProcessExitReasons(pkg, 0, 0)` and uses the newest record whose
+`getProcessName()` equals `Application.getProcessName()`. It logs that record's process and pid next to the existing
+fields, and `start: last exit of <process> unavailable` when none matches. A new pure `ownIndex(String[] names, String
+own)` does the selection, and CI tests it with a newer WebView renderer entry before Buddy's (→ 1), no match (→ -1)
+and a null entry. `exitText` gains `process` and `pid`. A `RuntimeException` in the lookup logs
+`start: last exit error <class>` rather than crashing the log executor. A decision entry is added.

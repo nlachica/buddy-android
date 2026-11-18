@@ -6,7 +6,8 @@ Buddy then can't reach the phone, and nothing says so until a chat fails (upstre
 `ChatHub.java:309`). The service can also be really off, for example after a force-stop. The goal is that Buddy notices
 either state by itself:
 - soon after its process starts, and when the service is lost while the process lives;
-- it posts one notification whose tap opens Settings → Accessibility → Buddy;
+- it posts one notification whose tap leads to Buddy's accessibility settings (a third-party app can't open Buddy's
+  own page, so "in one tap" needs Nicholas's answer: Open questions);
 - the notification goes away once the service connects;
 - connect, unbind and destroy events, with times and the last process exit reason, are logged to a file agents can read.
 
@@ -100,11 +101,14 @@ Results:
 **The breadcrumb** is `~/.buddy/a11y.log` in Buddy's Linux: `Linux.root(c)/root/.buddy/a11y.log`, the same place and
 pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log`.
 - One line per event, starting with local wall time `yyyy-MM-dd HH:mm:ss Z`:
-  - `start: last exit <time> <REASON>(<code>) status=<n> importance=<n> "<description>"`: the newest
-    `ApplicationExitInfo` from `getHistoricalProcessExitReasons(pkg, 0, 1)` (API 30, minSdk 30). That is the exit of
-    the previous process, so it is logged once per start. This includes the starts where the service never connects,
-    which are the case that matters. Connect lines don't repeat it. A toggle off and on within one process has no
-    exit to report.
+  - `start: last exit <time> <process> pid=<n> <REASON>(<code>) status=<n> importance=<n> "<description>"`: the exit
+    of the previous Buddy process. `getHistoricalProcessExitReasons(pkg, 0, 0)` (API 30, minSdk 30) returns the
+    package's bounded history, newest first, and that history includes external-service processes such as WebView's
+    sandboxed renderers (round 2 F2). So the line takes the newest record whose `getProcessName()` equals
+    `Application.getProcessName()` (Buddy has one process, no `android:process`), never the newest package-wide one.
+    If none matches: `start: last exit of <process> unavailable`. It is logged once per start. This includes the
+    starts where the service never connects, which are the case that matters. Connect lines don't repeat it. A toggle
+    off and on within one process has no exit to report.
   - `connected (<s> s after process start)`, from `Process.getStartElapsedRealtime()`. This also measures how fast
     Android binds, which is evidence for tuning the 40 s.
   - `unbind`, `destroy`.
@@ -123,6 +127,7 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
   "after process start". A force-stop cancels jobs anyway.
 - Refactoring `ChatHub`'s message into a shared helper: one line saved, at the cost of upstream merge surface.
 - A gate on `Prefs.hadReply` or a "bound once" pref: either hides real outages (round 1 F2).
+- The newest package-wide exit record (`maxNum = 1`): a newer WebView renderer exit can hide Buddy's own (round 2 F2).
 - The accessibility details page: needs a `signature|installer` permission (round 1 F3).
 
 ## Steps
@@ -130,8 +135,10 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
    `public final class A11yWatch extends JobService` and its pure statics, with no Android calls:
    - `enum State {CLEAR, DEAD, OFF}` and `static State decide(boolean bound, boolean enabled)`.
    - `static String reasonName(int code)`.
-   - `static String exitText(int reason, int status, int importance, String desc)`. Newlines in `desc` become spaces;
-     a null `desc` prints as `""`.
+   - `static int ownIndex(String[] processNames, String own)`: the index of the first entry equal to `own` (the list
+     is newest first), or -1. Null entries never match.
+   - `static String exitText(String process, int pid, int reason, int status, int importance, String desc)`. Newlines
+     in `desc` become spaces; a null `desc` prints as `""`.
    - `static void append(File f, String line, long max) throws IOException`. If `f` is at least `max` bytes, rename it
      to `<name>.1`, replacing any old one. Then append the line.
    - Tests: new `app/src/test/java/app/buddy/assistant/A11yWatchTest.java` (see Test plan). Keep static fields free of
@@ -142,6 +149,9 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
      `ensureCheck(Context)`, `check(Context)`, `notice(Context, State)`, `onStartJob` (`check(this); return false;`)
      and `onStopJob` (`false`).
    - Hold the application context only. `lost` is called from a service that is being destroyed.
+   - `processStarted`'s exit lookup, on the log executor: `getHistoricalProcessExitReasons(getPackageName(), 0, 0)`,
+     map it to its process names, `ownIndex(names, Application.getProcessName())`, then `exitText` for that record or
+     the `unavailable` line. A `RuntimeException` there logs `start: last exit error <class>` instead.
    - `JOB_ID` is a fixed constant, for example 2501. There are no other jobs in the app. `CHECK_MS = 40_000`,
      `DEADLINE_MS = 60_000`.
    - `ensureCheck` wraps both `build()` and `schedule()` in a catch of `RuntimeException`; scheduling must never crash
@@ -196,10 +206,10 @@ the job is pending.
 
 | Done-when | Proof |
 |---|---|
-| 1 Enabled-but-unbound is notified within about 1 min; the tap opens Buddy's page | **CI:** `decide(false, true) == DEAD`. **Probe:** the check above (DEAD, timing, kill-restart). **After release:** (a) the update restart must not give a false positive: within 2 min there is no notice, and `a11y.log` shows `start: last exit … PACKAGE_UPDATED(16)` and then `connected (N s …)`. (b) The tap target is proven in row 2. It is the Accessibility list with Buddy's row highlighted, or without the highlight on a non-AOSP Settings. Record which, and see Open questions. **When it recurs:** `a11y.log` has `check: enabled, not bound -> notified`, and Nicholas confirms the notice. |
+| 1 Enabled-but-unbound is notified within about 1 min; the tap opens Buddy's page | **CI:** `decide(false, true) == DEAD`. **Probe:** the check above (DEAD, timing, kill-restart). **After release:** (a) the update restart must not give a false positive: within 2 min there is no notice, and `a11y.log` shows `start: last exit … app.buddy.assistant pid=… PACKAGE_UPDATED(16)` and then `connected (N s …)`. (b) The tap half stays **unmet** until Nicholas's answer to the Open question is in `brief.md` Clarifications. Recording the destination is not proof by itself. With his acceptance, the Verifier checks the clarified wording against what row 2's tap opens (the list, and whether Buddy's row is highlighted). Without it, the Verifier marks the tap half unmet. **When it recurs:** `a11y.log` has `check: enabled, not bound -> notified`, and Nicholas confirms the notice. |
 | 2 Truly disabled gives the "off" text | **CI:** `decide(false, false) == OFF`, with no reply history involved. **After release, timed:** Nicholas switches Buddy off in Settings → Accessibility and stays in Settings, so Buddy isn't in front. One notice appears with the `hub_accessibility_off` text. `a11y.log` has `unbind`/`destroy` and then `check: off -> notified` at most about 65 s later. Nicholas taps it: record the page that opens and whether Buddy's row is highlighted. |
 | 3 Clears on connect, no repeats | **CI:** `decide(true, true) == CLEAR`, `decide(true, false) == CLEAR`. **After release:** continuing row 2, Nicholas switches Buddy back on. The notice is gone within seconds, and `a11y.log` has `connected`. Over the whole run only one notice sounds (the probe run too). |
-| 4 Agent-readable log with times and exit reason | **CI:** `reasonName` (3 → `LOW_MEMORY`, 10 → `USER_REQUESTED`, 16 → `PACKAGE_UPDATED`, 99 → `99`), `exitText` (newline and null description), and `append` rotation in a temp dir (past `max`: `.1` holds the old content, and the new file has only the new line; under `max`: it appends). **After release:** an agent `cat`s `/root/.buddy/a11y.log` and sees timestamped `start: last exit …`, `connected`, `unbind` and `destroy` lines from rows 1-3. |
+| 4 Agent-readable log with times and exit reason | **CI:** `reasonName` (3 → `LOW_MEMORY`, 10 → `USER_REQUESTED`, 16 → `PACKAGE_UPDATED`, 99 → `99`), `ownIndex` (a newer `com.google.android.webview:sandboxed_process0:…` entry before `app.buddy.assistant` → 1; no match → -1; a null entry is skipped), `exitText` (process and pid in the line, newline and null description), and `append` rotation in a temp dir (past `max`: `.1` holds the old content, and the new file has only the new line; under `max`: it appends). **After release:** an agent `cat`s `/root/.buddy/a11y.log` and sees timestamped `start: last exit … app.buddy.assistant pid=…` (or `unavailable`), `connected`, `unbind` and `destroy` lines from rows 1-3. |
 | 5 CI green | The PR's `build.yml` run: `testGithubDebugUnitTest` (includes `A11yWatchTest`), both release builds, `helper-tests`, F-Droid checks. |
 
 ## Risks
@@ -217,14 +227,15 @@ the job is pending.
   so the notice points at a real problem.
 - **Tap target.** A third-party app can't open Buddy's accessibility details page. The tap opens the list, and the
   highlight depends on Settings honoring `:settings:fragment_args_key` (AOSP does; Samsung is unverified). At worst
-  it is the plain list, as in upstream's setup.
+  it is the plain list, as in upstream's setup. Done-when 1's tap half waits on Nicholas (Open questions).
 - **Upstream merge surface:** 1 line in `BuddyApp`, 3 hooks in `BuddyService`, 1 manifest entry and 2 strings.
   `ChatHub` is untouched.
 - **Language.** On a non-English phone the title is English and the body is translated (fork convention).
 
 ## Open questions
-- **For Nicholas (doesn't block coding; needed before verify):** Android lets only system or installer apps open an
-  accessibility service's own page (`OPEN_ACCESSIBILITY_DETAILS_SETTINGS`, `signature|installer`). Done-when 1's
-  "tapping it opens Buddy's accessibility settings" can at best be "opens Settings → Accessibility with Buddy's row
-  highlighted, one more tap to Buddy". Recommended: accept that as meeting the item. The Verifier records what the
-  phone shows.
+- **For Nicholas, via the orchestrator; the answer goes into `brief.md` Clarifications (round 2 F1).** It blocks
+  sign-off of done-when 1's tap half, not coding: no route open to a third-party app reaches Buddy's own page, so the
+  code is the same whatever he answers. Ask: "Android lets only system or installer apps open an accessibility
+  service's own page. Is it OK if tapping the notice opens Settings → Accessibility, with Buddy's row highlighted
+  where your Settings supports it (Samsung may show the plain list), and one more tap opens Buddy?" Recommended: yes.
+  If he says no, no design meets that half; the orchestrator takes it back to him (drop the item or stop the feature).
