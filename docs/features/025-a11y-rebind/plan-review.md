@@ -69,3 +69,11 @@ fields, and `start: last exit of <process> unavailable` when none matches. A new
 own)` does the selection, and CI tests it with a newer WebView renderer entry before Buddy's (→ 1), no match (→ -1)
 and a null entry. `exitText` gains `process` and `pid`. A `RuntimeException` in the lookup logs
 `start: last exit error <class>` rather than crashing the log executor. A decision entry is added.
+
+## Round 3 - Plan Reviewer (gpt-6-astra)
+
+F1 [major] Round 2 F1 remains open: the tap requirement still lacks Nicholas's acceptance - `brief.md:13` still requires "Settings > Accessibility > Buddy in one tap", and `brief.md:25-26` contains no clarification. The implementation in `plan.md:82-87` opens the Accessibility list and requires another tap. The revised acceptance row correctly leaves this half unmet (`plan.md:209`), and the Planner explicitly keeps the finding open (`plan-review.md:58-64`); documenting the outstanding decision does not resolve it. -> The orchestrator must obtain Nicholas's acceptance of the list destination, including the possible absence of highlighting, append his answer to the brief, and align the acceptance row. If he declines, take the unmet requirement back to him before approving the plan. This carries forward the accepted finding; it does not reopen the sound rejection of the protected details action or require another technical redesign round.
+
+Round 2 F2 is resolved in the plan: `plan.md:104-109`, `plan.md:152-154` and `plan.md:212` specify main-process filtering, process/PID logging, unavailable/error handling, and selection tests. This matches the [ActivityManager exit-history contract](https://developer.android.com/reference/android/app/ActivityManager#getHistoricalProcessExitReasons(java.lang.String,%20int,%20int)). No additional blocker or major findings from checking the lifecycle hooks, existing enabled predicate, notification integration, log location, and planned verification. This is a plan review; device timing and notification behavior remain to be tested as specified.
+
+VERDICT: REVISE
