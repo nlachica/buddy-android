@@ -216,6 +216,7 @@ final class CodexLive {
         if (r == null) AudioRoute.use(app); // before the call exists: reads the phone's mode as it was, so another call is seen
         stopCapture(); // an empty queue for the watch's audio
         remote = r;
+        SpeechPause.listen(app); // a live voice call listens the whole time: media stays paused until it ends (#56)
         logStartNew();
         log("start: chat " + s.id + (r != null ? " (watch call)" : ""));
         ses = s;

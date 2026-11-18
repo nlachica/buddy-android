@@ -12,6 +12,25 @@ To ship a change to Buddy's own code (github flavor only), from a chat with Linu
 
 1. Change the code in `/root/.buddy/work/buddy-fork` (or a fresh `gh repo clone nlachica/buddy-android`), normally
    through the feature pipeline and a merged PR.
+   **Release check (mandatory before any version bump or `v*` tag).** Run `tools/release-check.sh` (`--json` for
+   agents). It lists open PRs with CI state, unmerged `feat/*`/`fix/*` branches without a PR, running `pipe` pipelines,
+   other worktrees with unpushed work, and whether official Buddy has a newer release, then prints one
+   `RECOMMENDATION:` line. One release should carry everything that is ready, so act on the outcome:
+   - **Exit 0, "ready: release now"**: go on to step 2. PRs it lists as excluded (failing CI, conflicts, drafts) stay out.
+   - **Exit 10, "merge PRs #a #b, ...then release once"**: merge each ready PR (`gh pr merge <n> -R nlachica/buddy-android
+     --merge`), bring in official Buddy first if it says so ("Bringing in official Buddy"), rerun the check, and only
+     then do steps 2-3 once, for all of it. Never one bump and tag per PR.
+   - **Exit 10, "wait: ..."** (a pipeline is running, a worktree holds unpushed work, CI is pending, a fresh branch has no
+     PR yet): do not bump or tag. Tell Nicholas the recommendation in one line (e.g. "Waiting: pipeline 024 is in
+     code-loop, ~30 min; I'll release after it") and carry on with other work. Release anyway only if Nicholas says
+     "release now": then run the tag commands with `RELEASE_CHECK_OK=1` in front.
+   - **Exit 1**: the check itself failed (gh offline or logged out, git error). Fix that or tell Nicholas; don't tag blind.
+
+   A Claude Code hook (`.claude/hooks/release-gate.sh`) runs `tools/release-check.sh --quiet` (in the repo the command
+   targets: `git -C`, or a `cd` before it) whenever a command creates a tag `v<digit>...` or pushes a tag (`v<digit>...`,
+   `refs/tags/...`, `--tags`; not `--dry-run`, not listing or deleting) and blocks it unless the check exits 0 or
+   `RELEASE_CHECK_OK=1` is set (in the environment, or as a leading assignment of that git command).
+   Only Nicholas's "release now" and the sync Tag step below justify it; never set it just to get past a block.
 2. In `BuildInfo.java` set `VERSION` to `<upstream>-fork.<n>` (e.g. `2.3.7-fork.2`) and `VERSION_CODE` to
    max(fork, upstream) + 1. Android only installs a higher code. `n` restarts at 1 on a new upstream version (the sync
    script sets it).
@@ -51,7 +70,12 @@ Where: a chat with Linux tools (if this chat has none, ask the user to turn them
 5. **Confirm, push, PR.** One `confirm` card: versions, each conflict and its resolution, the review result. It
    authorizes push, PR and publish-if-green. Then push the branch, `gh pr create -R nlachica/buddy-android --base main`,
    `gh pr checks --watch` (every check must pass, the `apk` job's reproducibility step included), `gh pr merge --merge`.
-6. **Tag.** `sha=$(gh pr view <n> -R nlachica/buddy-android --json mergeCommit -q .mergeCommit.oid)`, `git fetch origin`,
+6. **Tag.** First `tools/release-check.sh` (mandatory; see step 1 of "Updating Buddy on the phone"). The sync PR is
+   merged by now, so upstream is no longer newer. Exit 10 for another PR that turned ready meanwhile: it goes into the next
+   release (the sync merge commit is what `--release` checks): say so in one line and put `RELEASE_CHECK_OK=1` in front
+   of the tag commands (the hook would otherwise block them). Exit 10 for a pipeline, worktree or
+   pending CI: wait and tell Nicholas the recommendation in one line, unless he says "release now" (`RELEASE_CHECK_OK=1`).
+   Then `sha=$(gh pr view <n> -R nlachica/buddy-android --json mergeCommit -q .mergeCommit.oid)`, `git fetch origin`,
    `tools/upstream-sync.sh --release "$sha"`, run the tag command it prints, `gh run watch`. Never a prerelease. If
    `--release` refuses, do the way out it prints (already tagged: "Already merged" with that tag; fix forward: a normal
    fork release from current main, checked with `--release` too). Once the sync PR is merged, never redo the upstream
