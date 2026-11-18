@@ -112,3 +112,16 @@
 - Choice: shift 5 (`rotate(log, LOGS_KEPT)`): it keeps 020's naming, needs no pruning, and is easy to name in a check.
   A failed rename is ignored, as today.
 - By: Planner (claude-opus-5-5), plan-review round 2 F1
+
+## 2026-11-18 - Coder: small calls and how it was checked
+- Plan steps 3 and 4 (retry, then the pause-gated move) share `attached()`, `move()` and `poll()`, so they are one
+  commit. Everything else is one commit per step.
+- `Call.voicePeak` and `quiet()` came with step 2; `LiveWatch.QUIET_MS`, `RETRY_MS` and `RETRIES` are package-private
+  constants next to `POLL_MS`, so the tests read them.
+- The watch's `silenced` field prints "no" when `getActiveRecordingConfiguration()` returns null (not recording yet).
+- Checks run here: no Gradle or Android SDK on the phone, so the JVM tests ran with the javac/JUnit script over the real
+  sources (github flavor, 221 tests: all pass but `BypassTest.everyShortLabelOfATapReachesTheDecision`, which hits
+  `android.util.Log.isLoggable` (native) in this harness's stub jar, not Gradle's return-defaults setup, and doesn't
+  touch this feature). The wear sources of this feature (`Call`, `Speaker`) compiled against the old Wearable stubs
+  with no error of their own; the wear build and its tests are CI-only. Device checks D1-D5 are after release.
+- By: Coder (claude-sonnet-5-5)
