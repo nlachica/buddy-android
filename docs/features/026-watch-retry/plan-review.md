@@ -10,3 +10,53 @@ F2 [major] The proposed quiet signal can switch during audible speech - `plan.md
 F3 [minor] Device verification searches for log lines that are not emitted - `plan.md:155-156` requires the last `page voice audible`/`quiet` line before the switch. These transitions are logged directly as `voice audible` / `voice quiet` in `app/src/main/java/app/buddy/assistant/CodexLive.java:737-741`; only calls through the separate JavaScript log bridge acquire the `page ` prefix (`CodexLive.java:748-751`). Also, the first quiet sample can occur up to one meter tick after the last audible sample, while the proposed interval is measured from the latter. -> Use the actual log names and define the one-second check against the chosen quiet signal, accounting for the meter's sampling interval, so a valid switch does not fail the manual check.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - diagnosed, and fixed in `AudioRoute` (plan Design "Auto's fallback route", Step 1, T7, device check D1).
+The W2 call's log (copy at `/tmp/live-w2.log`, 0-~160 s; the rotated original is gone) has no `route:` line at all.
+`live()` logs every device it applies or refuses, a slip, and "no safe device". At call start `applied` is null:
+`noEarpiece("")` is false before the attach, so the first `reconcile()` runs `drop()`. The first `live()` after
+`playing there` (0.52 s) would therefore have logged. So `reconcile()` never took the live branch. Auto fell through
+to `drop()`, which in communication mode is Android's routing, the earpiece. The flag was right (LiveWatchTest:148-152),
+but AudioRoute never acted on it. The branch's guard is `!other && mode is NORMAL or IN_COMMUNICATION && noEarpiece`:
+- `noEarpiece("")` is true after the attach (`took`).
+- The mode passes in a Buddy call on this phone. 018's device log (`/tmp/live-018.log`, 2.3.11-fork.3) has
+  `route: 2:SM-G990W applied` 0.3 s after `playing there`, and again after `connected`.
+- That leaves `other`. It is a latch, set by the first `use()` of an AudioRoute session when the phone isn't in NORMAL
+  mode, and cleared only by `finish()` (AudioRoute.java:238-241, 420). So a session that began during another mode
+  (for example a previous call's WebView that hadn't let go of communication mode yet) keeps the live rule off for the
+  whole call.
+
+The log doesn't record `other`, so D1 confirms it. Smallest fix: the live branch stops reading `other`. A pure
+`AudioRoute.liveRule(mode, noEarpiece)` makes the decision. Ringing and phone calls are still excluded by the mode, and
+`other` keeps guarding the device branch. When `other` is set, the `route: … applied` line gets
+` (session began in another mode)` added, so D1 shows the cause. Tests:
+- `AudioRouteTest.liveRule`.
+- T7 `anAutoCallThatLosesTheWatchUsesTheSpeakerNotTheEarpiece` runs the chain: a drop under Auto, then
+  `noEarpiece("")`, then `liveRule(MODE_IN_COMMUNICATION, …)`, then `liveDevice` picks the speaker over the earpiece,
+  or the buds' SCO when they are connected.
+
+D1 is Auto, no headset, a call started right after a watch call, then a watch drop. It passes on the speaker
+(`dumpsys audio`), never the earpiece, and the buds variant passes on the buds.
+
+F2: accepted, with the threshold in Java rather than a changed page literal (Design "The pause signal", Steps 2-4, T2).
+Each 70 ms tick, the page passes the voice's peak (the meter's `v`, already computed) through the fork's own
+`Buddy.toWatch(v)` call. `LiveWatch.Call` stamps `loudAt` when the peak is above `Gate.AUDIBLE`. That is 0.01, the
+constant `Gate.loud` now uses too, so one constant decides both an utterance and a pause. `quiet()` is
+`now - loudAt >= QUIET_MS`, inside Call. I chose this over setting the page's 0.02 to 0.01 because:
+- 0.02 is upstream's line and also drives Speaking… and the `voice audible/quiet` lines;
+- a JS comparison can't be unit-tested;
+- the whole calculation is now covered through the Fake's clock;
+- `Out` needs no `voiceQuiet()`, and the `CodexLive.lastAudible()` accessor is dropped (`toWatch` and its page call
+  are 017's fork lines).
+
+T2 holds a 0.015 peak every 70 ms past the retry time and through the attach: no retry, no switch. A 0.005 peak
+doesn't hold either. A full 1 s with no peak above 0.01 allows both. Risk 1 is now the meter's sampling: a ~21 ms
+window per 70 ms tick.
+
+F3: accepted - D2 now reads LiveWatch's own numbers: `watch: retry n (quiet X ms)`, and for a retry's move
+`watch: playing there (quiet Y ms)`, with X, Y ≥ 1000. Both are measured from the last tick with a peak above 0.01.
+That is the same signal and clock the decision uses, so there is no tick offset to allow for. The
+`voice audible`/`voice quiet` lines (logged without a `page ` prefix) come from upstream's 0.02 status meter, and D2 no
+longer uses them.
