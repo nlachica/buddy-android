@@ -116,3 +116,11 @@ no exact alarms" sentence (`Schedules.java:677`). If it does, turn on Alarms & r
 card is answered only after B's run has started. The evidence is B's first event time before the time of A's answer,
 plus a `read_screen` of the chat list that shows A working when B starts. The restart from F1 is CI only: on the phone,
 the only clean restart is installing a release.
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] Boot can erase a held run before the service restores it - Suppose B's 08:00 run is saved in `schedules_held` and an unrelated schedule A is paused. On a cold start, `Schedules.Boot.onReceive` can call `sync()` before the accessibility service connects. Syncing A calls `cancel(A)` (`Schedules.java:240-265`). The proposed `keep(c)` then replaces the entire saved set with the still-empty in-memory map. When `serviceStarted` restores it, B is gone. The restart test at `plan.md:207-209` starts directly at restore and misses this ordering. -> Update the persisted set per affected chat ID, so cancelling A or processing its alarm before service startup preserves B. Test a cold process with B saved, a boot sync that cancels A, then service startup. B must start once and its saved entry must clear.
+
+F2 [major] Editing a waiting Schedule can run the replacement message before its first due time - If B's 08:00 message waits for B and the user edits the Schedule to a different message for 17:00, the editor confirms the new next time (`ChatActivity.java:1815-1816`). Saving replaces `ses.schedule` and arms the new alarm without clearing B's waiting key (`ChatHub.java:540-545`, `Schedules.java:262-269`). When B finishes at 09:00, `start()` reads the replacement text from `s.schedule.text` (`Schedules.java:449-450`). The plan keeps only the chat ID across the wait and explicitly leaves `start` unchanged (`plan.md:94-103`), so the 17:00 instruction runs at 09:00 and can run again at 17:00. -> Treat an explicit replacement of the message or its timing as cancellation of the superseded pending run. Clear that chat's pending entry in memory and prefs before arming the replacement. Test that freeing B after the edit cannot dispatch the replacement until its own alarm fires.
+
+VERDICT: REVISE
