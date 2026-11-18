@@ -755,11 +755,18 @@ final class ChatHub {
         for (Sessions.Session s : sessions.all) if (s.running) s.lastEventAt = SystemClock.elapsedRealtime();
     }
 
+    /** A result ends the agent's turn (while the run goes on); a new turn (system/init, assistant) starts the next one. */
+    static void trackTurn(Sessions.Session ses, String type, String subtype) {
+        if ("result".equals(type)) ses.turnOver = ses.running;
+        else if ("assistant".equals(type) || ("system".equals(type) && "init".equals(subtype))) ses.turnOver = false;
+    }
+
     void onEvent(JSONObject ev) {
         Sessions.Session ses = sessions.find(ev.optString("buddy_session", null));
         if (ses == null) return; // unknown chat (deleted, or started outside Buddy)
         ses.lastEventAt = SystemClock.elapsedRealtime();
         String type = ev.optString("type");
+        trackTurn(ses, type, ev.optString("subtype"));
         if (!ses.running && (("system".equals(type) && !"model".equals(ev.optString("subtype"))) || "assistant".equals(type))) startRun(ses);
         switch (type) {
             case "system":
@@ -860,6 +867,9 @@ final class ChatHub {
                     ses.lastReply = r;
                     CodexLive.agentSaid(ses, r);
                 }
+                // notes written during the agent's last non-phone steps: it won't take them, so they go as a new turn
+                String late = turnEndNotes(ses);
+                if (late != null) sendLive(ses, late, true);
                 break;
             }
             case "buddy_pictures": { // Codex: pictures its image tool made, which the reply may not name
@@ -909,6 +919,7 @@ final class ChatHub {
             case "buddy_done":
                 if (ses.running) {
                     ses.running = false;
+                    ses.turnOver = false;
                     ses.status = "";
                     runEnded(ses);
                     if (!ses.lastReply.isEmpty()) {
@@ -921,18 +932,12 @@ final class ChatHub {
                         left = ses.notes.isEmpty() ? null : android.text.TextUtils.join("\n", ses.notes);
                         ses.notes.clear();
                     }
-                    if (left != null && "stopped".equals(ses.outcome)) {
-                        // Stop means stop: no new run; the notes go back into the chat's message box
-                        ses.unsent = ses.unsent == null ? left : ses.unsent + "\n" + left;
-                        add(ses, Bubble.Kind.STEP, app.getString(R.string.hub_note_not_sent));
-                    } else if (left != null) {
+                    if (left != null) {
                         final String msg = left;
                         // keep this post BEFORE the changed() below with no changed() in between: the watch link
                         // (WatchLink) decides a run is over in a post of its own from onChatsChanged, and relies on
                         // this continuation having had its turn by then
-                        main.post(() -> {
-                            if (!ses.running) sendNoteAsMessage(ses, msg);
-                        });
+                        main.post(() -> leftover(ses, msg, -1));
                     }
                 }
                 break;
@@ -979,6 +984,10 @@ final class ChatHub {
         // writing to the agent while paused in the browser's live view: the user is done there
         BuddyService svc = BuddyService.get();
         if (svc != null && svc.pausedForBrowser()) svc.resume();
+        if (liveInput(ses)) { // the turn is over and only a background job keeps the agent alive: it gets this as a new turn
+            sendLive(ses, text, false);
+            return null;
+        }
         synchronized (ses.notes) {
             ses.notes.add(text);
         }
@@ -1004,6 +1013,78 @@ final class ChatHub {
         // the quick free model (OpenCode's own free default took 36 s for a "Hi"), while OpenCode still lists it
         return (plan.isEmpty() || plan.equals("free models")) && Models.has("opencode", "opencode/big-pickle")
                 ? "opencode/big-pickle" : "";
+    }
+
+    /** The agent's turn is over, its process lives on, and the user hasn't stopped it: a message can go to it live. */
+    static boolean liveInput(Sessions.Session ses) {
+        return ses.running && ses.turnOver && !"stopped".equals(ses.outcome);
+    }
+
+    /** At a turn's end: the notes the agent never took, joined and cleared, if they can go live; else null. */
+    static String turnEndNotes(Sessions.Session ses) {
+        if (!liveInput(ses)) return null;
+        synchronized (ses.notes) {
+            if (ses.notes.isEmpty()) return null;
+            String joined = String.join("\n", ses.notes);
+            ses.notes.clear();
+            return joined;
+        }
+    }
+
+    /**
+     * Sends text to the live agent (buddy-run say). note: it is already in the chat (a note), and gets the
+     * "added while working" prefix. If the helper can't hand it over (exit status not 0), leftover decides.
+     */
+    private void sendLive(Sessions.Session ses, String text, boolean note) {
+        if (!note) add(ses, Bubble.Kind.USER, text);
+        ses.turnOver = false; // a turn is starting: later messages are updates to it
+        final int run = ses.runId; // a failed send must not be retried into this same run's closed input
+        String forAgent = note ? "(Added while you were working; if it asks something, answer it:) " + text : text;
+        try {
+            Helper.run(app, code -> {
+                if (code != 0) main.post(() -> leftover(ses, text, run));
+            }, "say", ses.id, forAgent);
+        } catch (Exception e) {
+            leftover(ses, text, run);
+        }
+        changed();
+    }
+
+    static final int LEFT_DROP = 0, LEFT_NOTES = 1, LEFT_UNSENT = 2, LEFT_SEND = 3, LEFT_LIVE = 4;
+
+    /**
+     * Where text the agent never got goes, decided when this runs: LEFT_DROP (the chat is gone), LEFT_NOTES (a run is
+     * going: its next tool result, turn end or end takes it; done here), LEFT_LIVE (a newer run than fromRun, whose
+     * turn is already over: the caller sends it live), LEFT_UNSENT (stopped: back to the message
+     * box; done here) or LEFT_SEND (idle: the caller starts a run with it).
+     */
+    static int placeLeftover(Sessions.Session ses, String text, boolean present, int fromRun) {
+        if (!present) return LEFT_DROP;
+        if (ses.running) {
+            if (ses.runId != fromRun && liveInput(ses)) return LEFT_LIVE;
+            synchronized (ses.notes) {
+                ses.notes.add(text);
+            }
+            return LEFT_NOTES;
+        }
+        if ("stopped".equals(ses.outcome)) {
+            ses.unsent = ses.unsent == null ? text : ses.unsent + "\n" + text;
+            return LEFT_UNSENT;
+        }
+        return LEFT_SEND;
+    }
+
+    /** Text the agent never got (a failed live send, or notes left when its run ended): delivered once, or back in the box. */
+    private void leftover(Sessions.Session ses, String text, int fromRun) {
+        int route = placeLeftover(ses, text, sessions.all.contains(ses), fromRun);
+        if (route == LEFT_UNSENT) {
+            add(ses, Bubble.Kind.STEP, app.getString(R.string.hub_note_not_sent));
+            changed();
+        } else if (route == LEFT_SEND) {
+            sendNoteAsMessage(ses, text);
+        } else if (route == LEFT_LIVE) {
+            sendLive(ses, text, true);
+        }
     }
 
     /** A note that arrived too late for the run: becomes the next message (already shown in the chat). */
@@ -1124,6 +1205,7 @@ final class ChatHub {
 
     private void startRun(Sessions.Session ses) {
         ses.running = true;
+        ses.turnOver = false;
         ses.outcome = null;
         ses.gotText = false;
         ses.lastReply = "";

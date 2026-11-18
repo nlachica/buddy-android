@@ -5,6 +5,7 @@
 #      play: the Play version, which has no Linux tools at all)
 #                                    run the agent on the message in that session, streaming events to the bubble
 #   buddy-run <token> stop <session>       stop that session's running request
+#   buddy-run <token> say <session> <text> send a message to the running Claude Code (exit 3: it takes none, the app keeps the text)
 #   buddy-run <token> reap <session>       end what is left of a run whose helper died, without a word to the chat
 #   buddy-run <token> delete <session>     forget that session
 #   buddy-run <token> prune <id,id,...>    remove the folders of chats not in the list
@@ -34,6 +35,8 @@ post() { # post one JSON event to the bubble
 # Tests (linux/test/run.sh, the runs): events go to a file instead of the app.
 [ -n "${BUDDY_TEST_EVENTS:-}" ] && post() { cat >> "$BUDDY_TEST_EVENTS"; echo >> "$BUDDY_TEST_EVENTS"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+# one user line for Claude Code's streaming input (a uuid makes it report when the line is done)
+user_line() { jq -cn --arg t "$1" --arg u "$2" '{type:"user",uuid:$u,message:{role:"user",content:$t}}'; }
 valid_sid() { [[ "$1" =~ ^[A-Za-z0-9_-]{1,64}$ ]]; }
 # OpenCode 2 (npm @opencode/cli) rather than 1.x (opencode-ai)? 2 needs --standalone, or it leaves a background service
 oc2() { [[ "$(readlink -f "$(command -v opencode)" 2>/dev/null)" == */@opencode/cli/* ]]; }
@@ -249,7 +252,7 @@ case "$CMD" in
     P=$D/sessions/$SID/pid
     if [ -f "$P" ]; then
       R=$(cat "$P")
-      rm -f "$P"
+      rm -f "$P" "$D/sessions/$SID/in" "$D/sessions/$SID/in.sent" "$D/sessions/$SID/in.done"
       jq -cn --arg s "$SID" '{type:"buddy_stopped",buddy_session:$s}' | post
       [[ "$R" =~ ^[0-9]+$ ]] && end_run "$R"
     fi
@@ -263,6 +266,17 @@ case "$CMD" in
       rm -f "$P"
       [[ "$R" =~ ^[0-9]+$ ]] && end_run "$R"
     fi
+    exit 0 ;;
+  say) # (the lock makes this and stream_claude's close exclusive; a line written here is pending until its turn ends)
+    SID=${3:-}; valid_sid "$SID" || exit 2
+    S=$D/sessions/$SID
+    [ -p "$S/in" ] && kill -0 "$(cat "$S/pid" 2>/dev/null)" 2>/dev/null || exit 3
+    exec 9>"$S/in.lock"
+    timeout 5 flock 9 || exit 3
+    [ -p "$S/in" ] || exit 3
+    u=$(cat /proc/sys/kernel/random/uuid)
+    user_line "${4:-}" "$u" | timeout 5 tee "$S/in" >/dev/null 2>&1 || exit 3
+    echo "$u" >> "$S/in.sent"
     exit 0 ;;
   delete)
     SID=${3:-}; valid_sid "$SID" || exit 2
@@ -451,7 +465,9 @@ run_claude() {
   local deny=(--disallowedTools "Agent" "Task")
   [ "$DEV" = rule ] && deny=(--disallowedTools "Agent" "Task" "Bash" "WebFetch" "WebSearch" "Write" "Edit" "NotebookEdit" "Skill")
   [ "$DEV" = 1 ] && tools+=("Bash" "Read" "Write" "Edit" "Glob" "Grep" "Skill")
-  local args=(-p "$MSG" --output-format stream-json --verbose
+  # the message comes on stdin (the FIFO $S/in, see stream_claude), so a later one can follow while jobs are pending
+  export CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1
+  local args=(-p --input-format stream-json --output-format stream-json --verbose
     --mcp-config "$mcp" --strict-mcp-config
     --allowedTools "${tools[@]}" "${deny[@]}"
     --append-system-prompt "$SYSTEM")
@@ -472,14 +488,52 @@ run_claude() {
   cd "$W" && "${keyenv[@]}" claude "${args[@]}" 2>"$S/last-error.log"
 }
 
+# Claude Code reads its messages from the FIFO $S/in (fd 3 here, the only writer besides `say`), so a message can reach it
+# after its turn ended while a background job keeps it alive. The input is closed, and Claude Code exits, only when it
+# says nothing is pending: idle, no job listed, and every line written to it reported completed. $S/in.sent lists the
+# uuids written, $S/in.done the completed ones. The lock $S/in.lock makes a close and a `say` exclusive.
+fifo_reset() { rm -f "$S/in" "$S/in.sent" "$S/in.done" "$S/in.lock"; }
 stream_claude() {
+  trap '' PIPE
+  local line type sub state ntask cu sid u idle=0 bg=0 st=0 cl=0 gated=0 open=0 skip=0
+  if [ -p "$S/in" ]; then
+    : > "$S/in.sent"; : > "$S/in.done"
+    exec 3>"$S/in"; open=1
+    u=$(cat /proc/sys/kernel/random/uuid)
+    echo "$u" >> "$S/in.sent"
+    user_line "$MSG" "$u" >&3 2>/dev/null
+  fi
+  close_input() { # [force]: close unless a line is still pending
+    exec 9>"$S/in.lock"
+    if timeout 5 flock 9 || [ -n "${1:-}" ]; then
+      if [ -n "${1:-}" ] || ! grep -vxF -f "$S/in.done" "$S/in.sent" | grep -q .; then
+        rm -f "$S/in"; exec 3>&-; open=0
+      fi
+    fi
+    exec 9>&-
+  }
   while IFS= read -r line; do
     [ -z "$line" ] && continue
     [ "$line" = "$AGENT_END" ] && break
-    printf '%s' "$line" | tag | post
-    sid=$(printf '%s' "$line" | jq -r 'select(.session_id != null) | .session_id' 2>/dev/null)
-    [ -n "$sid" ] && printf '%s' "$sid" > "$S/claude-session"
+    IFS='|' read -r type sub state ntask cu sid < <(printf '%s' "$line" | jq -r '[.type // "", .subtype // "", .state // "",
+      (if .subtype == "background_tasks_changed" then (.tasks | length | tostring) else "" end), .command_uuid // "",
+      .session_id // ""] | join("|")' 2>/dev/null)
+    case "$type/$sub" in
+      system/session_state_changed) st=1; skip=1; [ "$state" = idle ] && idle=1 || idle=0 ;;
+      command_lifecycle/*) cl=1; skip=1; [ "$state" = completed ] && echo "$cu" >> "$S/in.done" ;;
+      system/task_notification) idle=0 ;;
+      system/background_tasks_changed) idle=0; bg=$ntask ;;
+      result/*) # a Claude Code without the state events: close now, as before
+        if [ "$gated" = 0 ]; then gated=1; [ "$st$cl" != 11 ] && [ "$open" = 1 ] && close_input force; fi ;;
+    esac
+    if [ "$skip" = 0 ]; then # (the state events are only for this loop)
+      printf '%s' "$line" | tag | post
+      [ -n "$sid" ] && printf '%s' "$sid" > "$S/claude-session"
+    fi
+    skip=0
+    [ "$open" = 1 ] && [ "$idle" = 1 ] && [ "${bg:-0}" = 0 ] && close_input
   done
+  [ "$open" = 1 ] && close_input force
 }
 
 # ---------------------------------------------------------------------- Codex
@@ -1063,11 +1117,13 @@ tools (call_mcp_tool, ServerName \"phone\") and finish the user's request."
     name=Codex
   else
     if ! have claude; then event buddy_error "Claude Code isn't installed yet. Install it in Buddy's Settings."; exit 0; fi
-    ended run_claude | stream_claude
+    fifo_reset; mkfifo "$S/in"
+    ended run_claude <"$S/in" | stream_claude
     status=${PIPESTATUS[0]}
     if [ "$status" -ne 0 ] && grep -q -i 'no conversation found' "$S/last-error.log" 2>/dev/null; then
       rm -f "$S/claude-session"   # old session is gone; retry as a new conversation
-      ended run_claude | stream_claude
+      fifo_reset; mkfifo "$S/in"
+      ended run_claude <"$S/in" | stream_claude
       status=${PIPESTATUS[0]}
     fi
     name="Claude Code"

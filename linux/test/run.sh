@@ -13,7 +13,7 @@ H=$(mktemp -d)
 trap 'rm -rf "$H"' EXIT
 # buddy-run sets its own PATH (Alpine's), which has $HOME/bin first: the tools it uses go there, wherever they are here
 mkdir -p "$H/bin"
-for t in jq cat sed sort paste find rm mv mkdir tail head grep awk pgrep wc tee ln basename readlink env timeout sleep; do
+for t in jq cat sed sort paste find rm mv mkdir tail head grep awk pgrep wc tee ln basename readlink env timeout sleep flock mkfifo; do
   p=$(command -v "$t") && ln -s "$p" "$H/bin/$t"
 done
 # Stand-in for the run cases (the cases of feature 002): one agent under all five names that dies the way $BUDDY_FAKE says.
@@ -25,7 +25,27 @@ case ${1:-} in inspect|--version) exit 0 ;; esac
 echo $$ >>"$BUDDY_FAKE_DIR/pids"
 echo '{"type":"system","session_id":"abc"}'
 bg() { sleep 60 & echo $! >>"$BUDDY_FAKE_DIR/pids"; }
+# Claude Code's streaming input (feature 023): reads its lines from stdin, reports states and lifecycles as the real one does
+J1='[{"id":"j1"}]'
+st() { echo '{"type":"system","subtype":"session_state_changed","state":"'$1'"}'; }
+lc() { echo '{"type":"command_lifecycle","command_uuid":"'$2'","state":"'$1'"}'; }
+txt() { jq -cn --arg t "$1" '{type:"assistant",message:{content:[{type:"text",text:$t}]}}'; }
+res() { echo '{"type":"result","subtype":"success","result":"ok"}'; }
+tasks() { echo '{"type":"system","subtype":"background_tasks_changed","tasks":'$1'}'; }
+jobend() { echo '{"type":"system","subtype":"task_notification"}'; tasks '[]'; }
+rd() { IFS= read -r L || exit 0; U=$(jq -r .uuid <<<"$L"); T=$(jq -r .message.content <<<"$L"); lc queued $U; lc started $U; }
+turn() { st running; echo '{"type":"system","subtype":"init"}'; txt "$1"; eval "${3:-:}"; res; [ -n "${2:-}" ] && lc completed $2; st idle; }
+waitf() { local i; for i in $(seq 300); do [ -e "$BUDDY_FAKE_DIR/$1" ] && return; sleep 0.1; done; }
 case $BUDDY_FAKE in
+  noinput) rd; turn "$T" $U; cat >/dev/null ;;
+  legacy) rd; echo '{"type":"system","subtype":"init"}'; txt "$T"; res; cat >/dev/null ;;
+  queued) rd; st running; echo '{"type":"system","subtype":"init"}'; txt "$T"; waitf go; res; lc completed $U; st idle
+    waitf go2; rd; turn "$T" $U 'tasks "$J1"'
+    rd; turn "$T" $U; jobend; turn notified
+    cat >/dev/null ;;
+  notify) rd; turn "$T" $U 'tasks "$J1"'; waitf go; jobend; waitf go2; turn notified "" 'tasks "$J1"'
+    rd; turn "$T" $U jobend
+    cat >/dev/null ;;
   orphan) bg ;;
   killed) bg; kill -9 $$ ;;
   error) echo '{"type":"result","subtype":"error_during_execution","is_error":true,"result":"Rate limited"}'; exit 1 ;;
@@ -160,6 +180,50 @@ rc=$?
 [ "$rc" != 75 ] && [ "$rc" != 124 ] && problem="exit status $rc, not 75"
 kill -9 "$busy" 2>/dev/null
 finish claude_busy "$problem"
+
+# Live input (feature 023): a message sent with `say` while Claude Code is idle with a job pending reaches it.
+# Both gaps are 7 s, longer than a quiet-wait close would last: the input must stay open on Claude Code's word alone.
+waitev() { # <pattern> <count> [tenths of a second]: wait for that many events matching
+  local i c
+  for i in $(seq "${3:-150}"); do c=$(grep -c "$1" "$H/events" 2>/dev/null); [ "${c:-0}" -ge "$2" ] && return 0; sleep 0.1; done
+  return 1
+}
+say() { HOME=$H bash ../buddy-run test say run "$1" >/dev/null 2>&1; }
+live_case() { # <fake>: start the wrapper on the stand-in, ready when its first text is out
+  rm -f "$H/go" "$H/go2" # earlier cases' released gates
+  HOME=$H BUDDY_FAKE=$1 bash ../buddy-run test ask run claude 0 hi >"$H/out" 2>&1 &
+  w=$!
+  problem=""
+  waitev '"text":"hi"' 1 || problem="the stand-in agent did not start"
+}
+live_end() { # <case>: the wrapper ends soon after the last result; then there is no input left to say to
+  gone "$w" 100 || { problem="${problem:-the wrapper did not end}"; kill -9 "$w" 2>/dev/null; }
+  say late; [ $? = 3 ] || problem="${problem:-a say after the end did not exit 3}"
+  finish "$1" "$problem"
+}
+# a line that got in before the first (job-less) idle waits 7 s, then its turn starts a job; a later line reaches the agent before the job ends
+live_case queued
+say A || problem="${problem:-say A failed}"
+touch "$H/go"
+waitev '"type":"result"' 1 || problem="${problem:-no first result}"
+sleep 7; touch "$H/go2"
+waitev '"type":"result"' 2 || problem="${problem:-no second result}"
+say B || problem="${problem:-say B failed}"
+waitev '"type":"result"' 4 || problem="${problem:-no fourth result}"
+live_end claude_queued
+# a job's notification held 7 s starts a job of its own; a line sent then still reaches the agent
+live_case notify
+waitev '"type":"result"' 1 || problem="${problem:-no first result}"
+touch "$H/go"; sleep 7
+[ "$(grep -c '"type":"result"' "$H/events")" = 1 ] || problem="${problem:-the notification turn ran before its gate was released}"
+touch "$H/go2"
+waitev '"type":"result"' 2 || problem="${problem:-no second result}"
+say ping || problem="${problem:-say ping failed}"
+waitev '"type":"result"' 3 || problem="${problem:-no third result}"
+live_end claude_notify
+# a run that never lists a job closes its input at its first idle; a Claude Code without the state events at its first result
+run_case claude_noinput noinput claude
+run_case claude_legacy legacy claude
 
 echo "$n fixtures and runs, $failed failed"
 [ "$n" -gt 0 ] && [ "$failed" -eq 0 ]

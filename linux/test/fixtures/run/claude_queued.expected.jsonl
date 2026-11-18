@@ -1,0 +1,17 @@
+{"buddy_session":"run","session_id":"abc","type":"system"}
+{"buddy_session":"run","subtype":"init","type":"system"}
+{"buddy_session":"run","message":{"content":[{"text":"hi","type":"text"}]},"type":"assistant"}
+{"buddy_session":"run","result":"ok","subtype":"success","type":"result"}
+{"buddy_session":"run","subtype":"init","type":"system"}
+{"buddy_session":"run","message":{"content":[{"text":"A","type":"text"}]},"type":"assistant"}
+{"buddy_session":"run","subtype":"background_tasks_changed","tasks":[{"id":"j1"}],"type":"system"}
+{"buddy_session":"run","result":"ok","subtype":"success","type":"result"}
+{"buddy_session":"run","subtype":"init","type":"system"}
+{"buddy_session":"run","message":{"content":[{"text":"B","type":"text"}]},"type":"assistant"}
+{"buddy_session":"run","result":"ok","subtype":"success","type":"result"}
+{"buddy_session":"run","subtype":"task_notification","type":"system"}
+{"buddy_session":"run","subtype":"background_tasks_changed","tasks":[],"type":"system"}
+{"buddy_session":"run","subtype":"init","type":"system"}
+{"buddy_session":"run","message":{"content":[{"text":"notified","type":"text"}]},"type":"assistant"}
+{"buddy_session":"run","result":"ok","subtype":"success","type":"result"}
+{"buddy_session":"run","text":"","type":"buddy_done"}
