@@ -163,3 +163,7 @@
 - F5: `pump` calls `hub.changed()` after `start`, not before: a listener (a bound rule) can no longer take the chat between removing the one-shot and sending it.
 - Still unrun here (no JVM on this device, PaX), as in round 1.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-18 - Orchestrator: code accepted after round 3
+- F1 (test compile): fixed (throws Exception).
+- F2 (a queued scheduler pump can start a run right after a watch request ends) and F3 (a BUSY-refused occurrence lost if Buddy dies in the 5 s retry window) are narrow races; deferred as follow-ups, not blockers for fixing the hours-long drops seen on 2026-11-17.

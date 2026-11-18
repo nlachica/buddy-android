@@ -126,7 +126,7 @@ public class SchedulesWaitTest {
         assertTrue("before the new alarm", sup < hub.indexOf("Schedules.set(app, ses)", sup));
     }
 
-    @Test public void savingWithoutChangingTheRunKeepsTheWaitingOne() {
+    @Test public void savingWithoutChangingTheRunKeepsTheWaitingOne() throws Exception {
         Schedules.Plan old = new Schedules.Plan();
         old.text = "check in";
         Schedules.Plan same = old.copy();
