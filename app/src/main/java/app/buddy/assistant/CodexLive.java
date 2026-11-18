@@ -722,10 +722,13 @@ final class CodexLive {
                 else LiveWatch.pcm(b); // a phone call whose voice is on the watch (017)
             }
 
-            /** 017, a phone call: bit 1 = the voice plays on the watch (mute here, tap it), bit 2 = the mic is closed. */
+            /**
+             * 017, a phone call: bit 1 = the voice plays on the watch (mute here, tap it), bit 2 = the mic is closed.
+             * voicePeak: the voice's peak this tick (LiveWatch's pause, 026).
+             */
             @JavascriptInterface
-            public int toWatch() {
-                return web == mine && remote == null ? LiveWatch.toWatch() : 0;
+            public int toWatch(float voicePeak) {
+                return web == mine && remote == null ? LiveWatch.toWatch(voicePeak) : 0;
             }
 
             /** Loudness of the microphone or the voice (0..1), for the bar's waveform; voice: the voice is audible. */
@@ -995,7 +998,7 @@ final class CodexLive {
             + "    timer = setInterval(() => { const h = heard(), v = said(), voice = v > 0.02;\n"
             + "      Buddy.level(Math.min(1, Math.max(h, v) * 3), voice); vMax = Math.max(vMax, v); keepPlaying(); wake();\n"
             // half-duplex while the voice is on the watch: the phone mic would hear the watch speaker (Java says when it reopens)
-            + "      if (!rem) { const w = Buddy.toWatch(), on = (w & 1) !== 0, m = (w & 2) === 0;\n"
+            + "      if (!rem) { const w = Buddy.toWatch(v), on = (w & 1) !== 0, m = (w & 2) === 0;\n"
             + "        if (on !== fwd) route(on);\n"
             + "        if (sendTrack && sendTrack.enabled !== m) { sendTrack.enabled = m; L('mic ' + (m ? 'open' : 'closed')); } }\n"
             + "    }, 70);\n"

@@ -17,7 +17,7 @@ import java.util.function.Consumer;
  * it is unit-tested through {@link Call}. Calls started from the watch have a Remote (007) and never come here.
  */
 final class LiveWatch {
-    static final long POLL_MS = 500, TAIL_MS = 300, FAIL_TAIL_MS = 1500, ANSWER_MS = 30_000;
+    static final long POLL_MS = 500, TAIL_MS = 300, FAIL_TAIL_MS = 1500, ANSWER_MS = 30_000, QUIET_MS = 1000;
 
     private static volatile Call call;
 
@@ -69,10 +69,15 @@ final class LiveWatch {
         if (k != null) k.pcm(b);
     }
 
-    /** What the page does with the voice: bit 1 = it plays on the watch, bit 2 = the mic is closed. */
-    static int toWatch() {
+    /**
+     * What the page does with the voice: bit 1 = it plays on the watch, bit 2 = the mic is closed. voicePeak: the
+     * voice's peak this tick (0..1), which says when it is quiet (the pause a retry waits for, 026).
+     */
+    static int toWatch(float voicePeak) {
         Call k = call;
-        return k == null ? 0 : k.toWatch();
+        if (k == null) return 0;
+        k.voicePeak(voicePeak);
+        return k.toWatch();
     }
 
     /**
@@ -89,7 +94,7 @@ final class LiveWatch {
         private Object turn;
         /** cur: the open reading that takes audio now. drain: the finished reading whose answer isn't here yet. Never both. */
         private ReadQueue.Stream cur, drain;
-        private long openAt, endedAt;
+        private long openAt, endedAt, loudAt;
 
         Call(Out out) {
             this.out = out;
@@ -302,6 +307,16 @@ final class LiveWatch {
             }
         }
 
+        /** The voice's peak this tick (bridge thread): audible by the gate's own threshold stamps the time. */
+        synchronized void voicePeak(float p) {
+            if (p > Gate.AUDIBLE) loudAt = out.now();
+        }
+
+        /** No audible voice for QUIET_MS (never reset: an old stamp only reads as quiet). */
+        private boolean quiet() {
+            return out.now() - loudAt >= QUIET_MS;
+        }
+
         synchronized int toWatch() {
             boolean closed = fed || drain != null || !held.isEmpty() || out.now() < openAt;
             return (watch ? 1 : 0) | (closed ? 2 : 0);
@@ -314,9 +329,11 @@ final class LiveWatch {
         private long quiet = HANGOVER + 1;
 
         /** Peak above 0.01 of full scale: the watch Speaker's AUDIBLE. */
+        static final double AUDIBLE = 0.01;
+
         static boolean loud(byte[] pcm16) {
             for (int i = 0; i + 1 < pcm16.length; i += 2) {
-                if (Math.abs((short) ((pcm16[i] & 0xff) | (pcm16[i + 1] << 8))) > 0.01 * 32768) return true;
+                if (Math.abs((short) ((pcm16[i] & 0xff) | (pcm16[i + 1] << 8))) > AUDIBLE * 32768) return true;
             }
             return false;
         }
