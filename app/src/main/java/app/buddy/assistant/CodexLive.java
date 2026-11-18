@@ -351,6 +351,7 @@ final class CodexLive {
                 end(app.getString(R.string.dictation_chatgpt_no_connect, app.getString(R.string.dictation_stage_connecting)));
                 return;
             }
+            if (remote != null && now - inLogAt >= 10_000) logWatchIn(now); // 026: counts at the phone's end of the watch link
             if (!sent && heard.length() > 0 && now - lastHeard > PAUSE_MS) utterance("pause");
             if (ses.running) lastActivity = now; // the agent working counts: its reply is still to come
             if (now - lastActivity > IDLE_MS) {
@@ -876,10 +877,32 @@ final class CodexLive {
     /** Watch audio for the call (any thread; the array is kept): only while r is the current call's Remote. */
     static void push(Remote r, byte[] pcm) {
         if (r == null || r != remote) return;
+        final int peak = LiveWatch.Gate.peak(pcm);
         synchronized (chunks) {
             chunks.add(pcm);
-            while (chunks.size() > 125) chunks.poll(); // the same 5 s cap as the phone's own recording
+            inFrames++;
+            inPeak = Math.max(inPeak, peak);
+            while (chunks.size() > 125) { // the same 5 s cap as the phone's own recording
+                chunks.poll();
+                inDropped++; // the page didn't pull
+            }
         }
+    }
+
+    /** What push() got from the watch since the last line (026): frames, loudest sample, frames the 5 s cap threw away. */
+    private static int inFrames, inPeak, inDropped;
+    private static long inLogAt;
+
+    private static void logWatchIn(long now) {
+        int n, p, d;
+        synchronized (chunks) {
+            n = inFrames;
+            p = inPeak;
+            d = inDropped;
+            inFrames = inPeak = inDropped = 0;
+        }
+        inLogAt = now;
+        log(String.format(java.util.Locale.ROOT, "watch in 10 s: %d frames, peak %.3f, %d dropped", n, p / 32768.0, d));
     }
 
     /** Whether r is the Remote of the call that is on. */
@@ -902,7 +925,9 @@ final class CodexLive {
         recording = false;
         synchronized (chunks) {
             chunks.clear();
+            inFrames = inPeak = inDropped = 0;
         }
+        inLogAt = SystemClock.elapsedRealtime();
     }
 
     /**

@@ -680,6 +680,15 @@ public class LiveWatchTest {
     }
 
     @Test
+    public void gatePeakIsTheLoudestSample() {
+        assertEquals(1200, LiveWatch.Gate.peak(new byte[]{0, 0, (byte) 500, (byte) (500 >> 8), (byte) -1200, (byte) (-1200 >> 8), 30, 0}));
+        assertEquals(32768, LiveWatch.Gate.peak(new byte[]{0, (byte) 0x80}));
+        assertEquals(0, LiveWatch.Gate.peak(new byte[0]));
+        assertTrue(LiveWatch.Gate.loud(block(500)));
+        assertFalse(LiveWatch.Gate.loud(block(300)));
+    }
+
+    @Test
     public void noEarpiece() {
         assertFalse(c.noEarpiece("watch")); // no call yet
         f.node = null;

@@ -362,10 +362,16 @@ final class LiveWatch {
         static final double AUDIBLE = 0.01;
 
         static boolean loud(byte[] pcm16) {
+            return peak(pcm16) > AUDIBLE * 32768;
+        }
+
+        /** The loudest sample's magnitude (0..32768). */
+        static int peak(byte[] pcm16) {
+            int m = 0;
             for (int i = 0; i + 1 < pcm16.length; i += 2) {
-                if (Math.abs((short) ((pcm16[i] & 0xff) | (pcm16[i + 1] << 8))) > AUDIBLE * 32768) return true;
+                m = Math.max(m, Math.abs((short) ((pcm16[i] & 0xff) | (pcm16[i + 1] << 8))));
             }
-            return false;
+            return m;
         }
 
         boolean keep(byte[] pcm16) {
