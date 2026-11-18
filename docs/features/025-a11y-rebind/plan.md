@@ -39,8 +39,9 @@ Sources: `research.md` is empty for this feature. The facts come from `research-
 - **Service lost.** `BuddyService.onUnbind` (a new override) and `onDestroy` call `A11yWatch.lost`.
 - Both log the event and make sure a check is pending.
 
-**The check runs as a one-shot JobScheduler job.** `setMinimumLatency(40 s)` and no other constraint, so it runs about
-40-60 s later.
+**The check runs as a one-shot JobScheduler job.** `setMinimumLatency(40 s)` and `setOverrideDeadline(60 s)`, no other
+constraint. Android treats both as best effort: Doze or an OEM's deep sleep can still delay the job (Risks), so the
+Test plan measures the timing on a device instead of assuming it.
 - *Why a job and not `Handler.postDelayed`:* once the accessibility binding is gone, nothing keeps Buddy's process up
   unless its UI is in front. A cached process is frozen or killed (Android's freezer, Samsung's freecess), so a
   posted Runnable would wait until something thaws the process. That happens exactly on the "service lost" path,
@@ -50,16 +51,14 @@ Sources: `research.md` is empty for this feature. The facts come from `research-
   or running is still pending. So the process start that the job itself causes doesn't schedule another job, and two
   triggers close together share one check.
 
-**The check** (`check`, on the main thread from `onStartJob`) decides with a pure function
-`decide(bound, setUp, enabled)`:
+**The check** (`check`, on the main thread from `onStartJob`) decides with a pure function `decide(bound, enabled)`:
 - `bound`: `BuddyService.get() != null`.
-- `setUp`: `Prefs.hadReply`. Chats can't run without the service, so a reply means the service has worked before.
-  This keeps a fresh install in onboarding from being nagged; setup's own UI covers that case.
 - `enabled`: `SetupState.accessibilityEnabled`, upstream's own predicate.
+- No setup or reply-history gate (round 1 F2). An outage before the first reply is still an outage. A fresh install
+  on API 33+ posts nothing until notifications are allowed.
 
 Results:
 - `CLEAR` when bound: cancel the notification.
-- `NONE` when not bound and not set up: do nothing.
 - `DEAD` when not bound and enabled.
 - `OFF` when not bound and not enabled.
 
@@ -79,13 +78,15 @@ Results:
 - `setOnlyAlertOnce(true)`, `setAutoCancel(false)`, not ongoing. It stays as a reminder until the service connects,
   and the user can swipe it away.
 - `nm.notify` is wrapped against `SecurityException`, and nothing is posted when notifications are off.
-- The content intent is `PendingIntent.getActivity(…, FLAG_IMMUTABLE | FLAG_UPDATE_CURRENT)` with `NEW_TASK`, opening:
-  - `Settings.ACTION_ACCESSIBILITY_DETAILS_SETTINGS` (API 31+) with `Intent.EXTRA_COMPONENT_NAME` = Buddy's flattened
-    `BuddyService` component, when `SDK_INT >= 31` and it resolves. AOSP's details page reads the extra as a string
-    and falls back to the general page on a bad one.
-  - Otherwise `Settings.ACTION_ACCESSIBILITY_SETTINGS`, which upstream's setup uses too.
-- A `<queries>` entry for the details action makes `resolveActivity` truthful. The handler may be a package with no
-  launcher entry, such as Samsung's accessibility app, which the existing LAUNCHER query wouldn't make visible.
+- The content intent is `PendingIntent.getActivity(…, FLAG_IMMUTABLE | FLAG_UPDATE_CURRENT)` with `NEW_TASK`, opening
+  `Settings.ACTION_ACCESSIBILITY_SETTINGS`, the page upstream's setup opens too. It carries the string extra
+  `":settings:fragment_args_key"` = Buddy's flattened `BuddyService` component.
+  - AOSP's `SettingsPreferenceFragment` reads that extra from the intent and highlights the matching row. A service
+    row's key is `componentName.flattenToString()`.
+  - Other Settings apps ignore the extra. Either way it is one tap to the list, and one more tap opens Buddy's page.
+- Why not the details page: `android.settings.ACCESSIBILITY_DETAILS_SETTINGS` is `@SystemApi`. Settings guards it with
+  `OPEN_ACCESSIBILITY_DETAILS_SETTINGS` (`signature|installer`), so a tap from Buddy would fail with a
+  SecurityException even though `resolveActivity` finds the activity (round 1 F3).
 - A notification tap counts as the user's own launch, so the background-start limits don't apply.
 
 **"No repeats while pending".**
@@ -121,13 +122,13 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
 - A periodic job (15 min): catches the case where nothing ever starts the process, but that is beyond the brief's
   "after process start". A force-stop cancels jobs anyway.
 - Refactoring `ChatHub`'s message into a shared helper: one line saved, at the cost of upstream merge surface.
-- A new pref "service was bound once" as the gate: misses the first outage right after updating to this release.
-  `hadReply` is already true on every phone that has used Buddy.
+- A gate on `Prefs.hadReply` or a "bound once" pref: either hides real outages (round 1 F2).
+- The accessibility details page: needs a `signature|installer` permission (round 1 F3).
 
 ## Steps
 1. **Pure core and tests.** New `app/src/main/java/app/buddy/assistant/A11yWatch.java`, holding only
    `public final class A11yWatch extends JobService` and its pure statics, with no Android calls:
-   - `enum State {NONE, CLEAR, DEAD, OFF}` and `static State decide(boolean bound, boolean setUp, boolean enabled)`.
+   - `enum State {CLEAR, DEAD, OFF}` and `static State decide(boolean bound, boolean enabled)`.
    - `static String reasonName(int code)`.
    - `static String exitText(int reason, int status, int importance, String desc)`. Newlines in `desc` become spaces;
      a null `desc` prints as `""`.
@@ -141,17 +142,19 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
      `ensureCheck(Context)`, `check(Context)`, `notice(Context, State)`, `onStartJob` (`check(this); return false;`)
      and `onStopJob` (`false`).
    - Hold the application context only. `lost` is called from a service that is being destroyed.
-   - `JOB_ID` is a fixed constant, for example 2501. There are no other jobs in the app. `CHECK_MS = 40_000`.
-   - `ensureCheck` catches `RuntimeException` from `schedule`; scheduling must never crash `Application.onCreate`.
+   - `JOB_ID` is a fixed constant, for example 2501. There are no other jobs in the app. `CHECK_MS = 40_000`,
+     `DEADLINE_MS = 60_000`.
+   - `ensureCheck` wraps both `build()` and `schedule()` in a catch of `RuntimeException`; scheduling must never crash
+     `Application.onCreate`. If `build()` rejects the deadline on some API, the Coder drops it and records that in
+     `decisions.md`.
+   - `notice`'s content intent: `Settings.ACTION_ACCESSIBILITY_SETTINGS` with the string extra
+     `":settings:fragment_args_key"` = `new ComponentName(c, BuddyService.class).flattenToString()` (Design).
    - Manifest:
      - `<service android:name=".A11yWatch" android:permission="android.permission.BIND_JOB_SERVICE"
        android:exported="false" />` next to `NotificationWatcher`.
-     - In `<queries>`, `<intent><action android:name="android.settings.ACCESSIBILITY_DETAILS_SETTINGS" /></intent>`.
    - Strings, in English only (the fork's convention, see the comment at `strings.xml:243`), under a `<!-- 025
      (fork) … -->` comment: `a11y_channel_name` "Accessibility service" and `a11y_notice_title` "Buddy can't reach the
      phone".
-   - Check the `EXTRA_COMPONENT_NAME` type against AOSP Settings' `AccessibilityDetailsSettingsFragment`, which reads
-     it with `getStringExtra`. If it differs, follow AOSP and note it in `decisions.md`.
 3. **Hooks in upstream files** (one line each, so syncs stay easy):
    - `BuddyApp.onCreate`: `A11yWatch.processStarted(this);` after `ctx = this`.
    - `BuddyService.onServiceConnected`: `A11yWatch.connected(this);` right after `instance = this`.
@@ -167,31 +170,61 @@ pattern as `CodexLive`'s `live.log`, so agents read it as `/root/.buddy/a11y.log
 
 ## Test plan
 Phone-app code reaches the device only after merge, tag and `update_buddy`. `install_apk` refuses Buddy's own APK
-(solutions/android/buddy-fork-verify §4). So each item names CI, after-release, or "when it recurs".
+(solutions/android/buddy-fork-verify §4). So each item names CI, probe (before release), after-release, or "when it
+recurs". Timing is always read from `a11y.log` timestamps: the trigger line (`start:`, `unbind` or `destroy`) to the
+`check:` line must be at most about 65 s (60 s deadline plus slack). A miss fails the row. The fix is then a different
+scheduling mechanism or a timing change agreed with Nicholas, not a waiver.
+
+**Probe check (before release, required).** It proves the DEAD half of row 1, the timing, and a process killed while
+the job is pending.
+- Build the probe per solutions §3:
+  - `A11yWatch.java` copied unchanged except for the package.
+  - Stubs for `BuddyService.get()`, `SetupState.accessibilityEnabled` and `Linux.root`, which points at the probe's
+    files dir. The log is read with `run-as`; the probe is a debug build.
+  - An accessibility service with the three hooks, and an `Application` that calls `processStarted`.
+- Nicholas switches the probe's service on once and allows its notifications.
+- Then, via `phone_shell`:
+  1. `pm disable <probe>/<service>`. It stays in Enabled but is no longer Bound; `dumpsys accessibility` shows this.
+     This also kills the probe, so the hooks may not run.
+  2. `am start` the probe, press Home, and record `dumpsys jobscheduler <probe>`, which shows the pending job with its
+     latency and deadline.
+  3. `am kill <probe>` at once.
+- Expect: the job restarts the probe, which is a second `start:` line, and one DEAD notice. The delay from the first
+  `start:` line to `check: enabled, not bound -> notified` must be at most about 65 s.
+- Then `pm enable` the component. Expect `connected` and the notice gone.
+- Finally, uninstall the probe (with a confirm).
 
 | Done-when | Proof |
 |---|---|
-| 1 Enabled-but-unbound is notified within about 1 min; the tap opens Buddy's page | **CI:** `decide(false, true, true) == DEAD`. **After release:** (a) the update restart itself must not give a false positive. Within 2 min there is no notice, and `a11y.log` shows `start: last exit … PACKAGE_UPDATED(16)` then `connected (N s …)`. (b) The OFF run in row 2 proves the same job, timing, notice and tap target; only the text differs. **When it recurs:** `a11y.log` has `check: enabled, not bound -> notified`, and Nicholas confirms the notice and the tap. Until then the DEAD half of row 1 stays `pending`, giving `VERDICT: PARTIAL`. Optional earlier proof is a probe app (solutions §3) with its own accessibility service, which Nicholas switches on once. The agent `pm disable`s the probe's service component, so it stays enabled but is unbound, then starts the probe's activity and expects the DEAD notice in 40-60 s. It then `pm enable`s the component and expects the notice to clear. |
-| 2 Truly disabled gives the "off" text | **CI:** `decide(false, true, false) == OFF`, `decide(false, false, *) == NONE`. **After release:** Nicholas switches Buddy off in Settings → Accessibility and stays in Settings, so the process isn't in front. Within about 1 min one notice appears with the `hub_accessibility_off` text. Tapping it opens Buddy's own accessibility page, or the general page if the phone lacks the details page; record which. `a11y.log` has `unbind`, `destroy` and `check: off -> notified`. |
-| 3 Clears on connect, no repeats | **CI:** `decide(true, *, *) == CLEAR`. **After release:** continuing row 2, Nicholas switches Buddy back on from that page. The notice is gone within seconds, and `a11y.log` has `connected`. Over the whole run only one notice sounds. |
-| 4 Agent-readable log with times and exit reason | **CI:** `reasonName` (3 → `LOW_MEMORY`, 10 → `USER_REQUESTED`, 16 → `PACKAGE_UPDATED`, 99 → `99`), `exitText` (newline and null description), and `append` rotation in a temp dir (past `max`: `.1` holds the old content, the new file has only the new line; under `max`: it appends). **After release:** an agent `cat`s `/root/.buddy/a11y.log` and sees timestamped `start: last exit …`, `connected`, `unbind` and `destroy` lines from rows 1-3. |
+| 1 Enabled-but-unbound is notified within about 1 min; the tap opens Buddy's page | **CI:** `decide(false, true) == DEAD`. **Probe:** the check above (DEAD, timing, kill-restart). **After release:** (a) the update restart must not give a false positive: within 2 min there is no notice, and `a11y.log` shows `start: last exit … PACKAGE_UPDATED(16)` and then `connected (N s …)`. (b) The tap target is proven in row 2. It is the Accessibility list with Buddy's row highlighted, or without the highlight on a non-AOSP Settings. Record which, and see Open questions. **When it recurs:** `a11y.log` has `check: enabled, not bound -> notified`, and Nicholas confirms the notice. |
+| 2 Truly disabled gives the "off" text | **CI:** `decide(false, false) == OFF`, with no reply history involved. **After release, timed:** Nicholas switches Buddy off in Settings → Accessibility and stays in Settings, so Buddy isn't in front. One notice appears with the `hub_accessibility_off` text. `a11y.log` has `unbind`/`destroy` and then `check: off -> notified` at most about 65 s later. Nicholas taps it: record the page that opens and whether Buddy's row is highlighted. |
+| 3 Clears on connect, no repeats | **CI:** `decide(true, true) == CLEAR`, `decide(true, false) == CLEAR`. **After release:** continuing row 2, Nicholas switches Buddy back on. The notice is gone within seconds, and `a11y.log` has `connected`. Over the whole run only one notice sounds (the probe run too). |
+| 4 Agent-readable log with times and exit reason | **CI:** `reasonName` (3 → `LOW_MEMORY`, 10 → `USER_REQUESTED`, 16 → `PACKAGE_UPDATED`, 99 → `99`), `exitText` (newline and null description), and `append` rotation in a temp dir (past `max`: `.1` holds the old content, and the new file has only the new line; under `max`: it appends). **After release:** an agent `cat`s `/root/.buddy/a11y.log` and sees timestamped `start: last exit …`, `connected`, `unbind` and `destroy` lines from rows 1-3. |
 | 5 CI green | The PR's `build.yml` run: `testGithubDebugUnitTest` (includes `A11yWatchTest`), both release builds, `helper-tests`, F-Droid checks. |
 
 ## Risks
-- **Job latency.** Doze or an OEM's deep sleep can delay the job past 1 min. Nicholas's Buddy is unrestricted and in
-  the exempt standby bucket (5), so it runs on time there. On other phones the notice comes late, never wrong.
+- **Job latency.** The minimum latency and the deadline are both best effort. Doze, an OEM's deep sleep or
+  system-health throttling can delay the job past 1 min. Nicholas's Buddy is unrestricted and in the exempt standby
+  bucket (5), which should help, but only the timed checks above count as evidence. On other phones the notice can
+  come late, never wrong.
 - **No process start, no check.** If nothing starts Buddy (no UI, alarm, notification listener or boot), nothing is
   detected. This is accepted: the brief anchors detection on process start, and the first app open catches it within
   a minute.
 - **Slow binding at boot** can give a brief false notice. It clears itself on connect (row 3), and the `connected (N s
   …)` lines show whether 40 s needs raising.
-- **A deliberately disabled service** gets one notice per process start or service loss, and each can be swiped away.
-  Buddy can't run chats without the service, so this nag points at a real problem.
-- **Details page missing or ignoring the extra.** The tap falls back to the general accessibility page: two taps
-  instead of one. Row 2 records which one Nicholas's phone does.
-- **Upstream merge surface:** 1 line in `BuddyApp`, 3 hooks in `BuddyService`, 2 manifest entries and 2 strings.
+- **A deliberately disabled service, or a fresh install with notifications allowed before setup finishes**, gets one
+  notice per process start or service loss, and each can be swiped away. Buddy can't run chats without the service,
+  so the notice points at a real problem.
+- **Tap target.** A third-party app can't open Buddy's accessibility details page. The tap opens the list, and the
+  highlight depends on Settings honoring `:settings:fragment_args_key` (AOSP does; Samsung is unverified). At worst
+  it is the plain list, as in upstream's setup.
+- **Upstream merge surface:** 1 line in `BuddyApp`, 3 hooks in `BuddyService`, 1 manifest entry and 2 strings.
   `ChatHub` is untouched.
 - **Language.** On a non-English phone the title is English and the body is translated (fork convention).
 
 ## Open questions
-None blocking. Every branch has a recommended answer, recorded in `decisions.md`.
+- **For Nicholas (doesn't block coding; needed before verify):** Android lets only system or installer apps open an
+  accessibility service's own page (`OPEN_ACCESSIBILITY_DETAILS_SETTINGS`, `signature|installer`). Done-when 1's
+  "tapping it opens Buddy's accessibility settings" can at best be "opens Settings → Accessibility with Buddy's row
+  highlighted, one more tap to Buddy". Recommended: accept that as meeting the item. The Verifier records what the
+  phone shows.

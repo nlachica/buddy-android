@@ -10,3 +10,37 @@ F2 [major] The reply-history gate silently excludes required outage cases - `pla
 F3 [major] The details-page constant is unavailable to this app's SDK build - `plan.md:83` specifies `Settings.ACTION_ACCESSIBILITY_DETAILS_SETTINGS` as an API 31+ public constant, but AOSP declares it `@hide` and `@SystemApi` ([Settings.java](https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/core/java/android/provider/Settings.java#439)). Buddy uses the ordinary SDK (`app/build.gradle.kts:18`, compileSdk 36), so that Java reference will not compile; an SDK version guard does not fix symbol resolution. -> Use the literal action string `"android.settings.ACCESSIBILITY_DETAILS_SETTINGS"` in the existing helper, retaining the resolver check, queries entry and general-settings fallback, and describe it as an optional platform action rather than a public API guarantee. The planned flattened string extra is correct: AOSP's [AccessibilityDetailsSettingsFragment](https://android.googlesource.com/platform/packages/apps/Settings/+/refs/heads/master/src/com/android/settings/accessibility/AccessibilityDetailsSettingsFragment.java) reads `Intent.EXTRA_COMPONENT_NAME` with `getStringExtra`. Verify the actual Buddy details destination on Nicholas's phone; falling back to the list remains degraded behavior, not proof of the one-tap done-when item.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - The job now also sets `setOverrideDeadline(60_000)` next to the 40 s minimum, and `build()` sits inside
+the same try as `schedule()`. Risks keeps the Doze/OEM caveat and no longer treats the exempt bucket as proof. The Test
+plan now requires two timed device checks with the code in the background, timed from `a11y.log` timestamps (trigger
+line to `check:` line, at most about 65 s), and records the pending job with `dumpsys jobscheduler`:
+(a) before release, a probe app runs `A11yWatch` unchanged. Its process is started, sent to the background and
+`am kill`ed while the job is pending. The job must restart it and post the DEAD notice. This also proves the DEAD half
+of row 1 without waiting for a recurrence.
+(b) after release, Buddy's own OFF run in row 2.
+If either misses the window, the Verifier fails the row, and the fix is a different scheduling mechanism or a change
+to the timing requirement agreed with Nicholas. The plan does not assume the timing holds.
+
+F2: accepted - The `hadReply` gate is removed. The decision is now `decide(bound, enabled)` with states
+`CLEAR/DEAD/OFF`, and `NONE` is gone. CI now asserts DEAD and OFF with no reply history, because there is no history
+input left. A superseding entry is in `decisions.md`. Fresh installs aren't special-cased: on API 33+ nothing is posted
+until notifications are allowed, and once they are, an off service really does stop Buddy working (Risks).
+
+F3: accepted, with a different fix - The literal string would compile, but it fails when tapped. AOSP Settings'
+`Settings$AccessibilityDetailsSettingsActivity` declares
+`android:permission="android.permission.OPEN_ACCESSIBILITY_DETAILS_SETTINGS"` (packages/apps/Settings
+`AndroidManifest.xml`), and core declares that permission `signature|installer` ("Not for use by third-party
+applications", frameworks/base `core/res/AndroidManifest.xml`). Buddy can't hold it. `resolveActivity` doesn't check
+permissions, so the planned resolver check would pick the details page, and the tap would fail with a
+SecurityException. The plan drops the details action and its `<queries>` entry. The tap opens public
+`Settings.ACTION_ACCESSIBILITY_SETTINGS`, the page upstream's setup opens, with the string extra
+`:settings:fragment_args_key` set to Buddy's flattened `BuddyService` component.
+AOSP's `SettingsPreferenceFragment` reads that extra from the intent and highlights the matching row. A service row's
+key is `componentName.flattenToString()` (`AccessibilityServicePreference`). Other Settings apps ignore the extra.
+The tap therefore opens the Accessibility list with Buddy's row highlighted, and one more tap opens Buddy's page.
+Because a third-party app can't open the details page at all, done-when 1's "opens Buddy's accessibility settings"
+can only be met this way. This is raised as an Open question for Nicholas (it doesn't block coding), and the Verifier
+records what Nicholas's phone shows.

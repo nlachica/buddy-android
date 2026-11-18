@@ -58,3 +58,27 @@
   connects (connect cancels it), and a dismissal holds until the next trigger. The new title and channel name are
   English only (the fork's convention).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Supersedes "Notify only once Buddy has been used": no `hadReply` gate
+- Options: keep `Prefs.hadReply` as the gate; a new "bound once" pref; no gate.
+- Choice: no gate; the check is `decide(bound, enabled)`. Plan review round 1 F2: the gate hid real outages that
+  happen before a first reply, and the brief has no such restriction. On API 33+ a fresh install posts nothing until
+  notifications are allowed, and an off service really does stop Buddy working, so the notice is accurate.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Supersedes "The tap opens the accessibility details page": the list, with Buddy's row highlighted
+- Options: `android.settings.ACCESSIBILITY_DETAILS_SETTINGS` (literal string); `ACTION_ACCESSIBILITY_SETTINGS`;
+  the same with `:settings:fragment_args_key`.
+- Choice: `ACTION_ACCESSIBILITY_SETTINGS` with `:settings:fragment_args_key` = Buddy's flattened `BuddyService`
+  component. The details action is `@SystemApi`, and Settings guards its activity with
+  `OPEN_ACCESSIBILITY_DETAILS_SETTINGS` (`signature|installer`). `resolveActivity` would still find it, and the tap
+  would then fail. AOSP's `SettingsPreferenceFragment` highlights the row whose key matches the extra, and a service
+  row's key is its flattened component. Other Settings apps ignore the extra. There is no `<queries>` entry.
+- By: Planner (claude-opus-5-5), plan review round 1 F3
+
+## 2026-11-18 - The job gets a 60 s override deadline; timing is measured, not assumed
+- Options: minimum latency only; add `setOverrideDeadline(60_000)`; another mechanism.
+- Choice: 40 s minimum plus a 60 s deadline. Both are best effort, so a probe check before release (including a
+  process killed while the job is pending) and Buddy's OFF run after release time it from `a11y.log`. A miss fails
+  the row and reopens the mechanism.
+- By: Planner (claude-opus-5-5), plan review round 1 F1
