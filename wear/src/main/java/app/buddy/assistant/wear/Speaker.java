@@ -169,7 +169,7 @@ final class Speaker {
         return w;
     }
 
-    private static int peak(byte[] b, int n) {
+    static int peak(byte[] b, int n) {
         int m = 0;
         for (int i = 0; i + 1 < n; i += 2) m = Math.max(m, Math.abs((short) ((b[i] & 0xff) | (b[i + 1] << 8))));
         return m;
