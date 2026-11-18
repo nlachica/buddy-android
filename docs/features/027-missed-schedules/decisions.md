@@ -156,3 +156,10 @@
 - F3: the scheduler's hub listener runs `pump` posted (`main.post(look)`), so the watch and notification-rule listeners see the run end before the next one starts.
 - F4: documented, not stored: a restart starts the hour again (GUIDE.md). Storing expiries would turn the held set into a map for a rare case.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-18 - Code-review round 2: a refusal belongs to the occurrence that was sent
+- F2/F3: `Schedules.start` hands `ChatHub.sendScheduled` a `busy` callback holding that occurrence (the Schedule's plan, copied, or the agent's own message). `helperGone` runs it on BUSY before its "chat idle / new run" return, so an old helper that finishes during the 5 s delay doesn't lose the run. The callback (`Schedules.busy`) uses `retryKey`: the one-shot goes back into `later` and waits under its own key; the Schedule waits only if it is still there, not paused and `sameRun` as sent. Supersedes round 1's `Schedules.busy(c, s)`.
+- F4: the scheduler's listener posts twice (`lookLater`), so its pump runs after the watch's end check posted in the same notification, whichever listener is registered first. Limit: it assumes the watch's check is a single post, as now.
+- F5: `pump` calls `hub.changed()` after `start`, not before: a listener (a bound rule) can no longer take the chat between removing the one-shot and sending it.
+- Still unrun here (no JVM on this device, PaX), as in round 1.
+- By: Coder (claude-sonnet-5-5)

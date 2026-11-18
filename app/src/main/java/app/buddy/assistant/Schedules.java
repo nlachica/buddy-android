@@ -409,6 +409,7 @@ public final class Schedules extends BroadcastReceiver {
     }
 
     private static final Runnable look = Schedules::pump;
+    private static final Runnable lookLater = () -> main.post(look);
 
     /** Starts what waits, skips what can't run, gives up on what waited too long. */
     private static void pump() {
@@ -439,12 +440,13 @@ public final class Schedules extends BroadcastReceiver {
                 waiting.remove(key);
                 keep(app, key);
                 if (l != null) {
-                    s.later.remove(l); // sent once, whatever happens now
+                    s.later.remove(l); // sent once, whatever happens now (put back if the helper refuses it, see busy)
                     hub.sessions.save(s);
-                    hub.changed();
                 }
                 if (skip != null) notice(app, s, app.getString(R.string.schedule_skipped_title, s.label()), skip);
                 else start(s, l);
+                // after start has claimed the chat: a listener may start a run of its own at once (a bound rule's)
+                if (l != null) hub.changed();
             }
             main.removeCallbacks(look);
             if (!waiting.isEmpty()) main.postDelayed(look, LOOK_MS);
@@ -500,15 +502,27 @@ public final class Schedules extends BroadcastReceiver {
     }
 
     /**
-     * fork 027: the helper refused a scheduled run (BUSY): an earlier run of this chat, from before Buddy restarted, is
-     * still going. The Schedule waits again and starts once that run ends. shortcut: an agent's own message isn't
-     * kept for this (it was taken out of its chat's later), so it is lost as before; upgrade if that ever happens.
+     * fork 027: the key to wait under again after the helper refused a scheduled run (BUSY: an earlier run of this
+     * chat, from before Buddy restarted, is still going), or null if that run is no longer wanted. l: the agent's own
+     * message that was sent, or null for the Schedule, then plan is the copy sent: still wanted if the chat's Schedule is
+     * there, not paused and unchanged in what it sends (an edit or a pause ended its wait).
      */
-    static void busy(Context c, Sessions.Session s) {
-        if (s.schedule == null) return;
-        waiting.put(s.id, SystemClock.elapsedRealtime() + WAIT_MS);
-        keep(c, s.id);
-        listen(c);
+    static String retryKey(Sessions.Session s, Later l, Plan plan) {
+        if (l != null) return s.id + "/" + l.id;
+        return s.schedule != null && !s.schedule.paused && s.schedule.sameRun(plan) ? s.id : null;
+    }
+
+    /** fork 027: the helper refused the run sent for (s, l, plan) (see retryKey): it waits again, starts once the earlier run ends. */
+    private static void busy(Sessions.Session s, Later l, Plan plan) {
+        ChatHub hub = ChatHub.get(app);
+        String key = retryKey(s, l, plan);
+        if (key == null || hub.sessions.find(s.id) != s) return; // changed or deleted meanwhile
+        if (l != null) { // taken out of its chat's later when sent
+            s.later.add(l);
+            hub.sessions.save(s);
+        }
+        waiting.put(key, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(app, key);
         main.post(look);
     }
 
@@ -554,7 +568,8 @@ public final class Schedules extends BroadcastReceiver {
                     .append("a problem, or something for them to do.\n");
         }
         prompt.append('\n').append(text);
-        String err = ChatHub.get(app).sendScheduled(s, text, prompt.toString());
+        Plan sent = l == null ? s.schedule.copy() : null;
+        String err = ChatHub.get(app).sendScheduled(s, text, prompt.toString(), () -> busy(s, l, sent));
         if (err != null) {
             notice(app, s, app.getString(R.string.schedule_skipped_title, s.label()), err);
             return;
@@ -594,10 +609,11 @@ public final class Schedules extends BroadcastReceiver {
                 }
             }
             // fork 027: after the other listeners saw this run end (the watch's, a notification rule's), not before:
-            // else a waiting task starts in the chat while they still count it as the old run's
+            // else a waiting task starts in the chat while they still count it as the old run's. Two posts, so
+            // after the end check the watch posts in this same notification, whichever listener came first
             if (!waiting.isEmpty()) {
-                main.removeCallbacks(look);
-                main.post(look);
+                main.removeCallbacks(lookLater);
+                main.post(lookLater);
             }
         }
 

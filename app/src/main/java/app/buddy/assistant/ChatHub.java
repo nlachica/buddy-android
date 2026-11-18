@@ -275,9 +275,9 @@ final class ChatHub {
      * A scheduled task's run (see Schedules): the user's saved message, shown as theirs and marked "Scheduled", with
      * the chat's own settings (Linux tools included). The agent gets it with a line saying when and why it came.
      */
-    String sendScheduled(Sessions.Session ses, String text, String prompt) {
+    String sendScheduled(Sessions.Session ses, String text, String prompt, Runnable busy) {
         if (ses.running) return app.getString(R.string.schedule_skip_running);
-        return send(ses, text, null, prompt, true);
+        return send(ses, text, null, prompt, true, false, busy);
     }
 
     /** A helper's one run (see Helpers): the chat shows its task, the agent gets it with the helper's rules. */
@@ -296,6 +296,12 @@ final class ChatHub {
     /** rule: a notification rule's run (someone else's message): no shell, files or web. */
     private String send(final Sessions.Session ses, String text, List<String> files, String prompt, boolean scheduled,
                         boolean rule) {
+        return send(ses, text, files, prompt, scheduled, rule, null);
+    }
+
+    /** busy: what to do if the helper refuses this run as BUSY (fork 027: a scheduled run is put back, see Schedules). */
+    private String send(final Sessions.Session ses, String text, List<String> files, String prompt, boolean scheduled,
+                        boolean rule, Runnable busy) {
         if (ses.running) {
             if (files != null && !files.isEmpty()) return app.getString(R.string.hub_still_working_attachments);
             return addNote(ses, text);
@@ -320,7 +326,7 @@ final class ChatHub {
         final int[] run = {-1}; // this run's id, once it has started
         try {
             // a rule's run works for someone else's message: no shell, files or web, even with Linux tools on
-            Helper.runFor(app, ses.id, code -> main.postDelayed(() -> helperGone(ses, run[0], code), HELPER_GONE_MS),
+            Helper.runFor(app, ses.id, code -> main.postDelayed(() -> helperGone(ses, run[0], code, busy), HELPER_GONE_MS),
                     "ask", ses.id, ses.backend, rule ? "rule" : devArg(ses), forAgent,
                     model(ses), hasFiles ? android.text.TextUtils.join(",", files) : "", ses.effort, fresh ? "fresh" : "");
         } catch (Exception e) {
@@ -371,14 +377,14 @@ final class ChatHub {
      * outright (Android freeing memory, Buddy's Linux crashing): then the chat stayed "working" for good, and a chat
      * waiting for it as its sub-agent with it. The run ends here, as failed.
      */
-    private void helperGone(Sessions.Session ses, int runId, int code) {
+    private void helperGone(Sessions.Session ses, int runId, int code, Runnable busy) {
+        // fork 027: a refusal is about the occurrence that was sent, whatever the chat does by now (the earlier run
+        // may have ended meanwhile, and the Schedule must still start)
+        if (code == Helper.BUSY && busy != null) busy.run();
         if (!ses.running || ses.runId != runId) return;
         // the chat's earlier run is still going (this helper only said so): that run's own end ends the chat's work,
         // and until then Stop must still reach it
-        if (code == Helper.BUSY) {
-            if (ses.scheduledRun) Schedules.busy(app, ses); // fork 027: a scheduled run isn't lost to it
-            return;
-        }
+        if (code == Helper.BUSY) return;
         // with how it ended, for a report: 137 is a kill from outside (Android ending an app's child processes)
         // 137: killed from outside, which on a phone is Android ending an app's child processes when there are too
         // many (confirmed on a Pixel 10 Pro with sub-agents, issue #50): say what lets them run
@@ -1099,7 +1105,7 @@ final class ChatHub {
     private void sendNoteAsMessage(Sessions.Session ses, String text) {
         final int[] run = {-1}; // this run's id, once it has started (as in send)
         try {
-            Helper.runFor(app, ses.id, code -> main.postDelayed(() -> helperGone(ses, run[0], code), HELPER_GONE_MS),
+            Helper.runFor(app, ses.id, code -> main.postDelayed(() -> helperGone(ses, run[0], code, null), HELPER_GONE_MS),
                     "ask", ses.id, ses.backend, devArg(ses),
                     "(Added while you were working; if it asks something, answer it:) " + text, model(ses), "", ses.effort);
         } catch (Exception e) {

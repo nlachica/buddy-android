@@ -146,21 +146,56 @@ public class SchedulesWaitTest {
     }
 
     @Test public void aRefusedRunWaitsForTheEarlierOneThenStartsOnce() throws Exception {
-        // busy() puts the Schedule back in waiting; its chat is working (the earlier run) until that ends
+        // busy() puts the occurrence back in waiting; its chat is working (the earlier run) until that ends
         b.running = true;
         waiting.put("b", T0 + H);
         assertEquals(Schedules.Due.WAIT, look("b", false, false, true, T0 + 2 * H));
         b.running = false;
         assertEquals(Schedules.Due.START, look("b", false, false, true, T0 + 2 * H + 1000));
         assertFalse(waiting.containsKey("b"));
-        assertTrue(src("ChatHub.java").contains("Schedules.busy(app, ses)"));
+        // the refusal is handled before the "chat is idle or has a new run" return: the earlier run may end first
+        String hub = src("ChatHub.java");
+        int gone = hub.indexOf("private void helperGone");
+        assertTrue(hub.indexOf("busy.run()", gone) > 0 && hub.indexOf("busy.run()", gone) < hub.indexOf("if (!ses.running", gone));
+    }
+
+    @Test public void aRefusedRunIsRetriedAsWhatWasSentAndOnlyIfStillWanted() {
+        Schedules.Plan sent = new Schedules.Plan();
+        sent.text = "17:00 report";
+        Schedules.Later oneShot = new Schedules.Later("x", T0, "08:00 reminder");
+        // the one-shot is refused in a chat with a different Schedule: it waits under its own key, not the Schedule's
+        b.schedule = sent.copy();
+        assertEquals("b/x", Schedules.retryKey(b, oneShot, null));
+        // the Schedule is refused: wanted while unchanged (options aside), not after an edit, a pause or its removal
+        assertEquals("b", Schedules.retryKey(b, null, sent));
+        b.schedule.quiet = true;
+        assertEquals("b", Schedules.retryKey(b, null, sent));
+        b.schedule.text = "other";
+        assertEquals(null, Schedules.retryKey(b, null, sent));
+        b.schedule = sent.copy();
+        b.schedule.paused = true;
+        assertEquals(null, Schedules.retryKey(b, null, sent));
+        b.schedule = null;
+        assertEquals(null, Schedules.retryKey(b, null, sent));
     }
 
     @Test public void aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd() throws Exception {
+        // posted twice, so after the end check the watch posts in the same notification, whichever listener is first
         String s = src("Schedules.java");
+        assertTrue(s.contains("lookLater = () -> main.post(look)"));
         int l = s.indexOf("hubListener");
-        assertTrue("posted, not run inside the notification", s.indexOf("main.post(look)", l) > 0
-                && !s.substring(l, s.indexOf("private static void listen")).contains("pump();\n        }\n\n        @Override\n        public void onMessage"));
+        String listener = s.substring(l, s.indexOf("private static void listen"));
+        assertTrue(listener.contains("main.post(lookLater)"));
+        assertFalse(listener.contains("pump()"));
+    }
+
+    @Test public void aListenerStartingARunCannotTakeTheChatFromTheOneShotBeingSent() throws Exception {
+        // the change notification comes after start() has claimed the chat, not before
+        String s = src("Schedules.java");
+        int pump = s.indexOf("private static void pump()");
+        int start = s.indexOf("else start(s, l);", pump);
+        assertTrue(start > 0 && s.indexOf("hub.changed()", start) > start && s.indexOf("hub.changed()", start) < s.indexOf("main.removeCallbacks(look)", pump));
+        assertFalse(s.substring(pump, start).contains("hub.changed()"));
     }
 
     private static String src(String name) throws Exception {

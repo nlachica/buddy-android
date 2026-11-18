@@ -37,3 +37,11 @@ F5 [major] A queued notification rule can take the chat between the idle check a
 Validation at `ff3baf4`: all four changed production classes compiled against the cached Android and app classes. All six tests in `ReviewChatTest` and `ElementIdsTest` passed. `SchedulesWaitTest` failed to compile. The callback findings come from tracing the production code. The plan's device checks remain pending after release.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+- F1: fixed. `aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd` rewritten (no `src()` call left without `throws Exception`; the other tests that call it already declare it). CI is the check; I couldn't compile here.
+- F2: fixed. The refusal callback carries the dispatched occurrence (`Schedules.start` -> `sendScheduled(..., busy)`). A one-shot goes back into `later` and waits under its own key `chat/id`; a Schedule waits only if `retryKey` says it is still there, unpaused and `sameRun` as sent. Test: `aRefusedRunIsRetriedAsWhatWasSentAndOnlyIfStillWanted` (one-shot beside a different Schedule, edit, pause, removal).
+- F3: fixed. `helperGone` runs the callback on BUSY before the idle/new-run return, so the old helper finishing first no longer loses the run. Test: source-order check in `aRefusedRunWaitsForTheEarlierOneThenStartsOnce` (the 5 s timing needs a device).
+- F4: fixed. The scheduler listener posts `lookLater`, which posts `look`: it runs after the watch's end check whichever listener registered first. Test: source check (`aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd`); no Handler test on the JVM.
+- F5: fixed. `hub.changed()` moved after `start` in `pump`. Test: source-order check `aListenerStartingARunCannotTakeTheChatFromTheOneShotBeingSent`.
+- Not run: no JVM starts on this device, so nothing was compiled or tested here. Re-run CI.
