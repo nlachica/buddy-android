@@ -47,3 +47,28 @@
   headset that came mid-call), so no try is used up. A setting change sets `retryAt = 0`: its own `decide()` is the
   fresh decision (018's rule), and its attempt is neither counted nor pause-gated.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Auto's fallback route: the live rule doesn't depend on the voice session's `other` latch
+- Options: re-read `other` at each call start; clear the latch in `afterLive`; take `other` out of the live branch's
+  condition (pure `AudioRoute.liveRule(mode, noEarpiece)`).
+- Choice: take it out. W2's log has no `route:` line in the whole call, so `live()` never ran. `noEarpiece("")` was
+  true after the attach, and the mode passes in a Buddy call on this phone (018's log applied the speaker), which
+  leaves the latch. It is set when an AudioRoute session begins outside NORMAL mode and kept until `finish()`, and with
+  it Auto fell through to `drop()`, which is the earpiece. `noEarpiece` is only true during Buddy's own phone live call,
+  and the mode check still keeps ringing and phone calls out. `use()` can't tell a call start from dictation, and
+  `afterLive` runs after a call, not before one, so the other two options don't hold. `live()`'s log line notes
+  "(session began in another mode)" so the device check can confirm the cause. Cost: another app's VoIP call already
+  on when Buddy's call starts is no longer left alone (plan Risk 7).
+- By: Planner (claude-opus-5-5), plan-review round 1 F1
+
+## 2026-11-18 - The pause signal is the voice's peak, passed through `toWatch(v)`, against the gate's threshold (replaces the "`lastAudible`, read through `Out.voiceQuiet()`" entry above)
+- Options: the page's `voice` flag (`v > 0.02`) through `CodexLive.lastAudible`; the same with the page literal
+  changed to 0.01 (review F2's suggestion); the meter's peak passed to Java in the fork's per-tick `Buddy.toWatch(v)`,
+  compared with `Gate.AUDIBLE` (0.01) in `LiveWatch.Call`.
+- Choice: the peak through `toWatch`. 0.02 let speech between 0.01 and 0.02 count as a pause, which breaks "never
+  mid-utterance". The page literal is upstream's and drives Speaking… and the `voice audible/quiet` lines, and a JS
+  comparison can't be unit-tested. With the peak, one Java constant decides utterances and pauses, the calculation runs
+  on the Fake's clock, `Out` gets no new method, CodexLive gets no accessor, and only 017's fork lines change. The retry
+  and the retry's move log the quiet time (`retry n (quiet X ms)`, `playing there (quiet Y ms)`), so the device check
+  reads the same number the decision used.
+- By: Planner (claude-opus-5-5), plan-review round 1 F2/F3

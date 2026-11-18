@@ -285,7 +285,23 @@ No upstream lines change. `toWatch`, its page call, `AudioRoute` and `LiveWatch`
 
 ## Open questions
 
-None blocking. Defaults recorded in decisions.md that Nicholas may overrule after trying:
+**Blocking, for the brief's "watch-started call hears nothing" section (added while this round was being answered;
+not planned yet).** Everything above covers the retry and the Auto fallback route only. The new section needs facts
+first, and one answer from Nicholas:
+1. *Status (Nicholas).* `CodexLive.status()` is already the one status source. The phone's bar (`onStatus`,
+   `statusText()`) and the watch (`Remote.status(t)` → wear `Call.status`, shown by `CallActivity:61`) get the same
+   string. Phone calls also show "Working on it…" while the chat runs: W2's log at 31.48, 57.79, 119.12 and 171.00 s.
+   So "mirror the phone's status exactly, no new logic" already holds. "Listening… while the call is idle even if
+   the chat is busy" would mean moving `ses.running` below the listening case in that one shared precedence, and the
+   phone would change too. Is that what he wants, or does he want something else changed?
+2. *Why the watch mic sends silence (Researcher).* diagnosis-watchcall.md names two candidates and proves neither: the
+   half-duplex gate (`wear Call.java:246`, `sp.audibleNow()`), and the VOICE_COMMUNICATION source. Before planning a
+   fix, read the wear Speaker's `audible`/`audibleUntil` path (`Speaker.java:69, 122`) for a way it stays true on a
+   silent stream. Check whether Galaxy Watch is known to return near-silence from VOICE_COMMUNICATION. And decide
+   whether brief items (1) and (4), the counters and 5 rotated logs, ship first so a device call can settle it, or
+   whether the fix can be chosen now.
+
+**Not blocking.** Defaults recorded in decisions.md that Nicholas may overrule after trying:
 - the count is per call and isn't reset by a successful return (a 4th drop in one call stays on the phone);
 - a refusal at call start (busy or old watch app) also arms retries;
 - an Auto call where the watch never took the voice keeps Android's routing (018), so it can still use the earpiece.
