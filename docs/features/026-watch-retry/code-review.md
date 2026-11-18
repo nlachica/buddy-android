@@ -1,2 +1,14 @@
 # Code review: 026-watch-retry
 <!-- Rounds: "## Round N - Code Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Coder response (round N)" -->
+
+## Round 1 - Code Reviewer (gpt-6-astra)
+
+F1 [minor] Watch counters split the boundary frame across reporting intervals - `wear/src/main/java/app/buddy/assistant/wear/Call.java:253-269`: the current read increments `reads` and updates `peak`, then the five-second snapshot logs and resets everything before that read increments `sent` or `gated`. With 125 successful ungated reads at the first boundary, the line reports `read 125, sent 124, gated 0`; the next interval inherits the missing sent count without its read or peak. This slightly misaligns the diagnostic evidence intended to locate lost audio, although it does not change playback or capture. -> Move the log/reset block before all current-read counter updates, so each read, its peak and its sent/gated classification belong to the same interval. Keep logging reachable when frames are gated or reads return zero.
+
+Reviewed `main...HEAD` at `8a7b182`, the brief, final plan, decisions, plan-review history, touched files and connected channel/audio/status paths. There were no earlier code-review rounds. No blocker or major finding remains in the planned stage-1 implementation. Retry timing, the per-call cap, rearming after failed finds, quiet gating at both attempt and attach, cancellation/stale-turn handling, and phone playback while a retry waits match the plan. The Auto routing change preserves the speaker/headset selection and mode exclusions. The same existing status string still reaches both phone and watch. No additional security or YAGNI finding.
+
+Validation: ran `/tmp/buddy-build-026/check.sh github` against this checkout. All 40 tests in `AudioRouteTest`, `LiveWatchTest` and `CodexLiveTest` passed as part of the full run: 221 tests, 220 passed. The sole failure is unchanged `BypassTest.everyShortLabelOfATapReachesTheDecision`, with `UnsatisfiedLinkError` from native `android.util.Log.isLoggable` in the local Android jar, matching the Coder's documented harness limitation. This is javac/JUnit with generated resources, Wearable stubs and an API-36-call substitution in a temporary source copy, not a Gradle/Android build. `git diff --check main...HEAD` reports only trailing whitespace in the verification template; no style finding raised.
+
+Approval covers the planned stage-1 code, not completion of the expanded brief. CI and device checks D1-D5 were not run here. In particular, D1 must confirm the inferred Auto routing fix, D4a must provide microphone evidence, and D4b's two successful watch-started spoken exchanges remain mandatory before closing the feature. The microphone source/gate are intentionally unchanged pending those measurements, as the approved plan requires.
+
+VERDICT: APPROVE
