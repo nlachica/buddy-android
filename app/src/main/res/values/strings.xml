@@ -235,6 +235,9 @@
     <string name="update_action">Update</string>
     <!-- Notification button: stop update notifications. Keep short. -->
     <string name="update_mute">Don\'t notify me</string>
+    <!-- 025 (fork) Only in English, like the other fork-only strings; the notice's body is hub_accessibility_dead / _off. -->
+    <string name="a11y_channel_name">Accessibility service</string>
+    <string name="a11y_notice_title">Buddy can\'t reach the phone</string>
     <!-- "Settings" = Buddy's own Settings tab (its Update notices switch). -->
     <string name="update_muted">No more update notices. Turn them back on in Settings.</string>
     <string name="update_checking">Checking for updates…</string>

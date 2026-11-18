@@ -11,6 +11,7 @@ public class BuddyApp extends Application {
     public void onCreate() {
         super.onCreate();
         ctx = this;
+        A11yWatch.processStarted(this);
     }
 
     static Context context() {
