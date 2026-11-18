@@ -140,3 +140,6 @@
   - One cache per chat would need cleanup when a chat ends.
   - The cost is an extra `read_screen` when two chats drive screens at once.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Orchestrator: plan accepted after round 3, with the two round-3 findings as coder must-dos
+- Round 3 found two real edge cases, both small and local: (F1) persist held runs per chat id so a boot-time cancel of another schedule can't wipe them; (F2) editing a chat's Schedule clears that chat's waiting run before arming the new one. Coder implements both with the tests the reviewer named. Keep everything else as planned; no further scope.
