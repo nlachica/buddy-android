@@ -267,6 +267,15 @@ final class AudioRoute {
         return ownMode;
     }
 
+    /**
+     * 017's live rule: while Buddy's phone call holds the mode (noEarpiece), the route is live()'s. Not gated on the
+     * session latch `other`: a session that began in another mode would otherwise send Auto to drop(), the earpiece
+     * (026, the W2 log).
+     */
+    static boolean liveRule(int mode, boolean noEarpiece) {
+        return noEarpiece && (mode == AudioManager.MODE_NORMAL || mode == AudioManager.MODE_IN_COMMUNICATION);
+    }
+
     @TargetApi(31)
     private static void reconcile() {
         AudioManager am = app.getSystemService(AudioManager.class);
@@ -274,8 +283,7 @@ final class AudioRoute {
         boolean live = CodexLive.on();
         afterLive(mode);
         sawLive |= live;
-        if (!other && (mode == AudioManager.MODE_NORMAL || mode == AudioManager.MODE_IN_COMMUNICATION)
-                && LiveWatch.noEarpiece(Prefs.audioDevice(app))) {
+        if (liveRule(mode, LiveWatch.noEarpiece(Prefs.audioDevice(app)))) {
             live(am);
             return;
         }
@@ -342,7 +350,7 @@ final class AudioRoute {
             String k = key(ct[j], cn[j]);
             if (k.equals(applied)) return true;
             boolean ok = am.setCommunicationDevice(comm.get(j));
-            CodexLive.log("route: " + k + (ok ? " applied" : " refused"));
+            CodexLive.log("route: " + k + (ok ? " applied" : " refused") + (other ? " (session began in another mode)" : ""));
             if (ok) {
                 applied = k;
                 appliedAt = now;

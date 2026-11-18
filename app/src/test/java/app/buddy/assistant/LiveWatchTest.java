@@ -4,6 +4,9 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
+import android.media.AudioDeviceInfo;
+import android.media.AudioManager;
+
 import org.junit.Test;
 
 import java.util.ArrayList;
@@ -450,6 +453,24 @@ public class LiveWatchTest {
         assertEquals(2, c.toWatch());
         f.advance(1);
         assertEquals(0, c.toWatch());
+    }
+
+    @Test
+    public void anAutoCallThatLosesTheWatchUsesTheSpeakerNotTheEarpiece() {
+        final int earpiece = AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, speaker = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+                sco = AudioDeviceInfo.TYPE_BLUETOOTH_SCO, a2dp = AudioDeviceInfo.TYPE_BLUETOOTH_A2DP;
+        f.saved = "";
+        Reading r = onWatch();
+        utterance();
+        r.events.broken(true);
+        assertEquals(0, c.toWatch() & 1);
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, c.noEarpiece("")));
+        // no headset: the speaker (the watch's SCO isn't one); buds connected: their call device
+        assertEquals(1, AudioRoute.liveDevice(new int[]{earpiece, speaker, sco}, new String[]{"Earpiece", "Speaker", "Watch4"},
+                new int[]{speaker}, new String[]{"Speaker"}, new java.util.HashSet<>()));
+        assertEquals(3, AudioRoute.liveDevice(new int[]{earpiece, speaker, sco, sco},
+                new String[]{"Earpiece", "Speaker", "Watch4", "Buds2"}, new int[]{speaker, a2dp},
+                new String[]{"Speaker", "Buds2"}, new java.util.HashSet<>()));
     }
 
     @Test
