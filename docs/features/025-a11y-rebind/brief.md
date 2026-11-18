@@ -16,7 +16,7 @@ Buddy's accessibility service ends up 'enabled but not bound': on 2026-11-18 dum
 
 ## Done when
 <!-- testable items; the Verifier checks each one -->
-- [ ] Enabled-but-unbound is detected within ~1 min of process start and shows one notification; tapping it opens Buddy's accessibility settings.
+- [ ] Enabled-but-unbound is detected within ~1 min of process start and shows one notification; tapping it opens Settings > Accessibility (Buddy one more tap).
 - [ ] Truly disabled (not in Enabled) shows the same notification with the right text.
 - [ ] The notification clears itself once the service connects; no repeats while it's pending.
 - [ ] Connect/unbind/destroy events with timestamps (and last exit reason) are logged to a file agents can read.
@@ -24,3 +24,5 @@ Buddy's accessibility service ends up 'enabled but not bound': on 2026-11-18 dum
 
 ## Clarifications
 <!-- Nicholas's later answers, dated, appended -->
+
+2026-11-18 (orchestrator, on Nicholas's standing "decide the small things"): Android doesn't let an app open its own accessibility detail page, so the notification opens Settings > Accessibility (installed apps list) and Buddy is one more tap. Accepted.

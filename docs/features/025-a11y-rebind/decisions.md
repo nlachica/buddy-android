@@ -90,3 +90,4 @@
   renderers), so a newer renderer exit could stand in for Buddy's. The line names the record's process and pid, and
   says `unavailable` when no Buddy record is left. A pure `ownIndex` keeps the selection testable on the JVM.
 - By: Planner (claude-opus-5-5), plan review round 2 F2
+- Orchestrator: list destination accepted (see brief); plan approved as of round 3.
