@@ -49,3 +49,57 @@
 - Choice: leave it alone. "Another task" still fits the one case left, the chat's own previous run. GUIDE.md ships to
   agents as /root/.buddy/GUIDE.md, so it gets the fork's sentence (AGENTS.md: upstream's text plus the fork's sentence).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - A task whose own chat is working waits for it, however long (replaces "The task's own chat keeps today's behaviour")
+- Options:
+  - (a) Keep today's behaviour: skip a recurring task at once, and give up an agent's own message after an hour.
+  - (b) Wait for the own chat for an hour at most.
+  - (c) Wait with no deadline, restarting the task's hour on each look while its chat works.
+  - (d) Send into a 023 live chat whose turn is over.
+  - (e) Ask Nicholas to narrow the brief to idle destinations.
+- Choice: (c), because the brief's done-when says "(on time if its chat is idle), never dropped", and its goal says
+  "at least run as soon as possible and never be dropped" (plan-review F1).
+  - (a) and (b) still drop the task.
+  - Restarting the hour matters: a Stop that ends a long run would otherwise give the task up at once, during Stop's
+    minute.
+  - (d) is a new delivery path that the brief doesn't need.
+  - (e) isn't needed: the brief is clear enough.
+  - GUIDE.md's fork sentence now also says that a run waits for its chat instead of being skipped.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Two times of one chat that both wait still become one run
+- Options: keep upstream's merge (`fire`: `waiting.put(id, ...)`); queue each time as its own run.
+- Choice: keep it. It's upstream's deliberate behaviour and GUIDE.md documents it. Both are the same saved message in
+  the same chat, and the one run starts after both times, so the message is not dropped. A second run straight after
+  the first would only repeat it (plan-review F1, last point).
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Test seam: `Schedules.due(waiting, key, session, paused, stopped, online, now)` (replaces `waits(...)`)
+- Options:
+  - `waits(...)` as before: a boolean of the conditions only.
+  - `due(...)` over the waiting map: START, WAIT or GIVE_UP, and it takes the key out of the map when the task starts
+    or is given up.
+  - Robolectric around `pump()`.
+- Choice: `due(...)`.
+  - It holds the whole decision `pump()` makes for a key, so a JVM test can run it pass by pass over a real map (plan-review F2):
+    - B starts on the first pass beside a running A;
+    - B waits past the old hour while it runs itself;
+    - B starts once when it is free.
+  - The key-to-session lookup stays upstream's unchanged code.
+  - The source guard stays, for upstream syncs.
+  - Robolectric would be a new framework for one test.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-18 - Smart review reads the calling chat's request
+- Options:
+  - leave `reviewContext()` on `latestRunning()`, a bug that already exists with two chats;
+  - pass the calling chat (`McpServer.CALLER_CHAT`) and use its session, mapping a sub-agent or helper to its parent,
+    with no caller falling back to `latestRunning()`;
+  - a new per-call context object.
+- Choice: the calling chat, with the parent mapping and the fallback.
+  - This feature makes a scheduled run beside another chat routine. With Smart review, an unattended run's taps would
+    otherwise be judged against the other chat's request, and the other way round (plan-review F3).
+  - The caller id already exists on the tool's thread, so the fix is a few lines and a pure `ChatHub.reviewed(...)`
+    that a JVM test covers.
+  - The parent mapping and the fallback keep today's rules for sub-agents and outside sessions.
+- By: Planner (claude-opus-5-5)

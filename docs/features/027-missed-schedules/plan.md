@@ -3,28 +3,26 @@
 ## Goal
 When another chat is busy for over an hour, scheduled messages are dropped or run hours late. On 2026-11-17 the 07:30
 brief went out at 10:31, and the curator's 08:00 run didn't happen at all (`audit-excerpt.md` §4). The fix: a due
-scheduled message runs at its time in its own chat, whatever other chats are doing, and is never dropped because of
-them. Use the smallest native change.
+scheduled message runs at its time in its own chat, whatever other chats are doing. If its own chat is working, it runs
+as soon as that chat is free. It is never dropped because a chat is busy. Use the smallest native change.
 
 **Done when:**
 1. A scheduled message that comes due while another chat is busy still runs. It runs on time if its own chat is idle,
    and it is never dropped.
 2. A test covers it, and CI is green.
 
-"Idle" means the chat has no agent running (`!s.running`). This applies to both kinds of scheduled message: a chat's
+"Idle" means the chat has no agent running (`!s.running`). Both kinds of scheduled message are covered: a chat's
 Schedule, and the agent's own `schedule_message`.
 
 **Non-goals:**
 - Notification rules' runs. `Triggers.pump` also waits for other chats (`Triggers.java:366`), but these are not
   scheduled messages.
-- The task's own chat being busy. That behaviour stays as it is:
-  - A recurring task whose chat is still working is skipped, with a notification.
-  - An agent's own message waits up to an hour for its chat's run to end. Since 023, that includes a chat whose turn is
-    over but whose process lives on.
-
-  It's a candidate follow-up (see decisions).
+- Two times of the same chat that both wait becoming one run (`Schedules.java:350-352`). This is upstream's design and
+  GUIDE.md documents it. One run of the same message starts after both times, so nothing is dropped.
+- Sending into a chat whose turn is over but whose process lives on (023 `ChatHub.liveInput`). The task waits until
+  the chat is free.
 - A screen lock between chats.
-- The one-hour limit for a pause, Stop or no internet.
+- The one-hour limit for a pause, Stop or no internet. It stays, but now counts from when the task's own chat is free.
 - Any string changes.
 
 ## Design
@@ -32,87 +30,147 @@ Schedule, and the agent's own `schedule_message`.
 (`Schedules.java:444-447`). `busy()` starts with `hub.runningCount() > 0`, which counts every Buddy chat that is
 running (`Sessions.java:256`). Since 023, a chat stays `running` for as long as its agent process lives, background
 jobs included (`ChatHub.liveInput`, `ChatHub.java:1019`). So an orchestrator chat waiting on `pipe` jobs holds every
-schedule for hours. After `WAIT_MS` (1 h) the task is skipped with `schedule_skip_busy`.
+schedule for hours, and after `WAIT_MS` (1 h) `pump()` skips the task with `schedule_skip_busy`. Separately, a
+recurring task whose own chat is working is skipped at once (`Schedules.java:419`, `schedule_skip_running`).
 
-**The change.** The wait reads only the due task's own chat and Buddy's own state:
+**The change.** All of the start, wait and give-up decision for one waiting task moves into one pure static that
+`pump()` calls with the session it found from the key's chat id:
 
 ```java
-// fork 027: other chats at work, and their cards, no longer hold a due task up (see the feature's decisions)
-static boolean waits(Sessions.Session s, boolean paused, boolean stopped, boolean online) {
-    return s.running || paused || stopped || !online;
+/** fork 027: what one look at a due task does (see due). */
+enum Due { START, WAIT, GIVE_UP }
+
+/**
+ * fork 027: one look at a due task (key in waiting, s its chat). If its own chat is at work, the task waits for it,
+ * however long, and its hour starts again, so it is never dropped for that. A pause, Stop's minute or no internet
+ * make it wait, an hour at most, and then it is given up. Otherwise it starts. Other chats at work and cards waiting
+ * for the user don't hold it up: they did, and on pipeline days the morning's tasks were dropped. START and GIVE_UP
+ * take the key out of waiting.
+ */
+static Due due(Map<String, Long> waiting, String key, Sessions.Session s, boolean paused, boolean stopped,
+               boolean online, long now) {
+    if (s.running) {
+        waiting.put(key, now + WAIT_MS);
+        return Due.WAIT;
+    }
+    boolean held = paused || stopped || !online;
+    Long until = waiting.get(key);
+    if (held && until != null && now < until) return Due.WAIT;
+    waiting.remove(key);
+    return held ? Due.GIVE_UP : Due.START;
 }
 ```
 
-- `pump()` calls `waits(s, svc.paused(), svc.controlRevoked() != null, online())` where it called `busy(hub, svc)`, and
-  `busy()` is deleted.
-- `s.running` keeps the one wait the old global count gave the due chat itself. The comment at `Schedules.java:420`
-  says it: an agent's own message waits for its chat to finish. A recurring task whose chat runs is still skipped
-  before this line (`schedule_skip_running`).
-- Two conditions leave the wait:
-  - `hub.runningCount() > 0`, the bug.
-  - `svc.bubble().confirming()`. A card can only be another chat's or session's at this point. Taps are already
-    refused while a card shows (`Tools.java:1784`, `2133`), and cards from several chats queue (`Bubble.java:103`).
-- Pause, Stop's minute and no internet still make a task wait, for an hour at most, as before.
+In `pump()`:
+- The skip chain keeps only Buddy's service being off and the agent not being signed in. The
+  `s.running && l == null ? schedule_skip_running` branch goes.
+- Then `due(waiting, key, s, svc.paused(), svc.controlRevoked() != null, online(), now)` decides: `WAIT` continues the
+  loop, `GIVE_UP` sets `skip = schedule_skip_busy`, and `START` falls through to `start(s, l)` as today.
+- `busy()` is deleted.
 
-**Why it is safe to run beside other chats.** Buddy already runs chats side by side with no lock on the screen:
-- the user's own chats,
-- sub-agents,
-- outside sessions over MCP.
+What changes:
+- **Other chats at work** (`runningCount() > 0`) no longer hold a task up. This is the bug.
+- **A card waiting for the user** (`bubble().confirming()`) no longer holds a task up. At this point the card can only
+  be another chat's or session's: the task's own chat would be running. Taps are already refused while a card shows
+  (`Tools.java:1784`, `2133`), and cards from several chats queue (`Bubble.java:103`).
+- **The task's own chat at work** now makes both kinds wait for it, with no deadline, instead of skipping a recurring
+  task at once or giving up an agent's own message after an hour. Each look resets its hour. Without that, a Stop that
+  ends a long run would make the task give up at once (Stop's minute, past an old deadline).
+- **Unchanged:** pause, Stop's minute and no internet (an hour at most), the service and sign-in skips, `fire` (two times
+  becoming one run), `fireLater`, `start`, and `sendScheduled`'s own check.
 
-`busy()` only kept the scheduler from adding one more. Most scheduled tasks use Linux tools or the background browser;
-background-mode chats have their own display. A pause holds every screen tool (`Tools.call0` → `awaitResume`), and
-outward-facing actions still need approval cards.
+**Smart review reads the calling chat** (plan-review F3). Once a scheduled run works beside another chat, Smart review
+must not read the other chat's request. Today `Tools.review` asks `ChatHub.reviewContext()`, which takes
+`latestRunning()`, the chat with the newest event (`ChatHub.java:961`). The calling chat is already known on the tool's
+thread (`McpServer.CALLER_CHAT`, also read at `Tools.java:671`). The fix:
+- `Tools.review` reads `McpServer.CALLER_CHAT.get()` before posting to the main thread and calls
+  `reviewContext(chat)`.
+- `reviewContext(String chat)` starts from `reviewed(sessions.all, chat)`. When that is null, it uses
+  `latestRunning()` as today.
+- A new pure `static Sessions.Session reviewed(List<Sessions.Session> all, String chat)` returns:
+  - the session with that id;
+  - for a sub-agent or a helper (`!parent.isEmpty()`), its parent, which is today's rule ("those work for their
+    parent");
+  - null for a null or unknown id (an agent outside Buddy's chats keeps today's behaviour).
+
+**Why running beside other chats is safe enough.** Buddy already runs chats side by side, with no lock on the screen:
+the user's own chats, sub-agents, and outside sessions over MCP. `busy()` only kept the scheduler from adding one more.
+Most scheduled tasks use Linux tools or the background browser, and background-mode chats have their own display. A
+pause holds every screen tool (`Tools.call0` → `awaitResume`). Outward-facing actions still need approval cards, and with
+the change above Smart review judges each chat against its own request.
 
 **Alternatives considered:**
 - Skip the wait only for background-mode chats: Linux-only tasks (the brief, the curator) in normal chats would still
   be dropped.
-- Wait only while the control chip shows (`svc.controlActive()`): the chip stays on while any chat runs once any phone
-  tool was used, so it's true for hours on pipeline days.
+- Wait only while the control chip shows (`svc.controlActive()`): once any phone tool has been used, the chip stays on
+  while any chat runs, so it's true for hours on pipeline days.
 - Keep the wait but start anyway after the hour: still hours late.
 - Run scheduled tasks one at a time among themselves: a long scheduled run would again delay or drop the next.
-- Robolectric to test `pump()` end to end: a new test framework for one test.
-- A prompt line telling the scheduled agent that another chat is working: the brief doesn't need it.
+- Keep an own-chat deadline, such as giving up after an hour: the brief says never dropped.
+- Send into a 023 live chat whose turn is over: that's a new delivery path, and the brief only asks for as soon as
+  possible.
+- Robolectric to test `pump()` end to end: a new test framework for one test. `due()` holds the whole decision.
 
 ## Steps
-1. **`app/src/main/java/app/buddy/assistant/Schedules.java`** (commit `fix(027): other chats don't hold scheduled tasks
-   up`):
-   - Replace `busy(ChatHub, BuddyService)` and its javadoc (lines 440-447) with the package-private static
-     `waits(Sessions.Session s, boolean paused, boolean stopped, boolean online)` above. Its javadoc names the waits
-     left and says why other chats and cards are gone, with a `fork 027` marker for upstream-sync reviewers.
-   - In `pump()` (line 420), call `waits(s, svc.paused(), svc.controlRevoked() != null, online())`. Keep the comment
-     about the agent's own message.
-   - Class javadoc, lines 38-40. It currently says "another chat at work, a pause or no internet make it wait, for an
-     hour at most". It becomes "a pause, Stop or no internet make it wait, for an hour at most; other chats at work
-     don't".
-   - Nothing else changes: the `WAIT_MS` cap, the skip texts, `fire`, `fireLater` and `start`.
-2. **`app/src/test/java/app/buddy/assistant/SchedulesWaitTest.java`** (commit `test(027): scheduled task wait`). The
-   class comment says "027: a due scheduled task waits only for its own chat, a pause, Stop or no internet".
-   - `otherChatAtWorkDoesNotHoldATaskUp`:
-     - Build `Sessions.Session pipeline` with `running = true`, and an idle `Sessions.Session brief`.
-     - A comment says that `hub.runningCount()` over these two is 1, which made the old `busy()` hold `brief`. It isn't
-       asserted, because `Sessions` needs a Context.
-     - Assert `assertFalse(Schedules.waits(brief, false, false, true))`.
-   - `ownChatAtWorkWaits`: with `brief.running = true`, assert `waits(...)` is true. This is an agent's own message in
-     a chat still working, and it must not regress.
-   - `pauseStopOrOfflineWait`: each of `paused`, `stopped` and `!online` alone makes `waits(...)` true.
-   - `oldWaitsDoNotComeBack`: read `src/main/java/app/buddy/assistant/Schedules.java`, as ChatScrollTest does. Assert
-     it contains no `runningCount(` and no `confirming(`. The message says an upstream sync brought back the wait for
-     other chats, and points to feature 027.
-3. **`docs/GUIDE.md`** line 58 (Scheduled tasks), in the same commit as step 1 or its own `docs(027)` commit. Add the
-   fork's sentence after upstream's text: "(In the nlachica fork, other chats at work don't hold a scheduled task up:
-   it starts at its time beside them; only a pause, Stop or no internet make it wait.)" GUIDE.md also ships to agents
-   as `/root/.buddy/GUIDE.md`.
+1. **`Schedules.java`, plus the new `app/src/test/java/app/buddy/assistant/SchedulesWaitTest.java`.** Commit:
+   `fix(027): only a task's own chat holds it up, and it is never dropped for that`.
+   - Add `enum Due` and `due(...)` as above, package-private, with the `fork 027` javadoc.
+   - In `pump()` (lines 417-423):
+     - Drop the `schedule_skip_running` branch from the skip chain.
+     - Call `due(...)` as described, and replace the comment at line 420 with `// fork 027: see due()`. Keep the
+       `waiting.remove(key)` at line 424 for the service and sign-in skips.
+   - Delete `busy()` and its javadoc (lines 440-447).
+   - Class javadoc, lines 38-40, becomes: "An agent that isn't signed in or Buddy's service being off skips the task,
+     with a notification. A pause, Stop or no internet make it wait, for an hour at most. Its own chat still working
+     makes it wait until the chat is done (fork 027: other chats at work don't hold it up)."
+   - `SchedulesWaitTest` has the class comment "027: a due scheduled task waits only for its own chat (however long), a
+     pause, Stop or no internet". Sessions are built as in TurnTrackTest: `a` is the pipeline and `b` the task's chat.
+     Each test runs `Schedules.due` over its own `LinkedHashMap` and does each case for key `b` (a Schedule) and
+     `b/x` (the agent's own message):
+     - `anotherChatAtWorkDoesNotHoldATaskUp`: `a.running`, `b` idle, the waiting key due now. The first look gives
+       `START`, and the key is gone from the map. A comment says the old `busy()` held this task, because
+       `runningCount()` was 1.
+     - `ownChatAtWorkWaitsPastTheHourThenStartsOnce`: `a` and `b` running, deadline `t0 + 1 h`. Looks at `t0` and at
+       `t0 + 3 h` give `WAIT`, and the key is still there. Then `b.running = false` while `a` keeps running: the look
+       at `t0 + 3 h + 1 s` gives `START`, and the key is gone.
+     - `theHourCountsFromWhenItsChatIsFree`: `b` running at `t0 + 3 h`, then idle and stopped at `t0 + 3 h + 1 s` gives
+       `WAIT`, not `GIVE_UP`.
+     - `pauseStopOrOfflineWaitAnHourAtMost`: `b` idle, and each of paused, stopped and offline alone. Before the
+       deadline: `WAIT`. At or after it: `GIVE_UP`, and the key is gone.
+     - `oldWaitsDoNotComeBack`: read `src/main/java/app/buddy/assistant/Schedules.java` as ChatScrollTest does, and
+       assert it contains no `runningCount(`, no `confirming(` and no `schedule_skip_running`. The message says an
+       upstream sync brought back a wait or skip that feature 027 removed, and points to the feature folder.
+2. **`ChatHub.java`, `Tools.java`, plus the new `app/src/test/java/app/buddy/assistant/ReviewChatTest.java`.** Commit:
+   `fix(027): Smart review reads the calling chat's request`.
+   - `ChatHub`: add `reviewed(...)` as above, with a `fork 027` javadoc. `reviewContext()` becomes
+     `reviewContext(String chat)`: `Sessions.Session latest = reviewed(sessions.all, chat); if (latest == null) latest
+     = latestRunning();`. The rest is unchanged. Its javadoc names the calling chat.
+   - `Tools.review` (line 1831): `String chat = McpServer.CALLER_CHAT.get();` before `svc.runOnMain`, and
+     `reviewContext(chat)` inside it. The only caller is line 1837.
+   - `ReviewChatTest` (class comment "027: Smart review reads the calling chat's request, not the newest chat's"):
+     - `a` and `b` are running, and `a.lastEventAt` is newer. `reviewed(all, "b")` is `b`.
+     - A sub-agent `c` with `parent = "b"`: `reviewed(all, "c")` is `b`.
+     - `reviewed(all, null)` and `reviewed(all, "gone")` are null, so the caller falls back to `latestRunning()`,
+       today's outside-session behaviour.
+3. **`docs/GUIDE.md`** line 58 (Scheduled tasks), as its own `docs(027)` commit. Add the fork's sentence after
+   upstream's text: "(In the nlachica fork, a run whose chat is still working waits for it to finish instead of being
+   skipped, and other chats at work don't hold a scheduled task up: it starts at its time beside them. Only a pause,
+   Stop or no internet make it wait, for an hour at most.)" GUIDE.md also ships to agents as `/root/.buddy/GUIDE.md`.
 
 ## Test plan
 There is no local Android SDK on the phone, so CI runs the unit tests. Phone-app code only reaches the device after
-merge, tag and `update_buddy`: `install_apk` refuses Buddy's own APK (solutions/android/buddy-fork-verify §4). A probe
-app isn't practical, because `pump()` is tied to ChatHub, BuddyService and the alarms. So each row is CI or
-after-release, and the after-release rows stay `pending` with `VERDICT: PARTIAL` until the release is installed.
+merge, tag and `update_buddy`: `install_apk` refuses Buddy's own APK (solutions/android/buddy-fork-verify §4). So each
+row is CI or after-release, and the after-release rows stay `pending` with `VERDICT: PARTIAL` until the release is
+installed. `Schedules` loads in a JVM test: with `isReturnDefaultValues`, `Looper.getMainLooper()` returns null, and
+the stubbed `Handler` constructor doesn't throw.
+
+The phone checks hold a chat working with a question card (`ask` left unanswered), not with long foreground commands,
+which the no-long-foreground hook blocks.
 
 | Done-when | Proof |
 |---|---|
-| 1 Due while another chat is busy: still runs, on time if its chat is idle, never dropped | **CI:** `SchedulesWaitTest`. `otherChatAtWorkDoesNotHoldATaskUp` covers an idle chat beside a running one: it doesn't wait, so `pump()` starts it on the same pass. `oldWaitsDoNotComeBack` fails if `runningCount(` or `confirming(` returns to `Schedules.java`. `ownChatAtWorkWaits` and `pauseStopOrOfflineWait` show the waits that remain. **After release, on the phone:** (a) Chat A, with Linux tools on, runs a foreground `sleep 600`, so A shows working. (b) In idle chat B, the agent calls `schedule_message in_minutes=2` "say the time from `date`". Expect B's Scheduled message to start within about 1 min of its `at` (exact alarms allowed) while A still shows working, and no "Scheduled task skipped" notification. Before the fix it waited for A. (c) No regression: in chat C the agent calls `schedule_message in_minutes=1` to itself, then runs a foreground `sleep 180`. Expect the message to start within about 30 s after C's run ends, not during it, and not dropped. **When it recurs:** the next morning with pipeline chats running, the 07:30 brief and the 08:00 curator run at their times. Evidence: `wa-sync/data/brief-date` mtime, and the first prompt time in the curator's transcript. The day's run count is close to 34 of 34. |
-| 2 Test covers it; CI green | The PR's `build.yml` run: `testGithubDebugUnitTest` (includes `SchedulesWaitTest`), the github and fdroid release builds, the wear build and tests, `helper-tests`, and the F-Droid/reproducibility checks. |
+| 1 Due while another chat is busy: still runs, on time if its chat is idle, never dropped | **CI:** `SchedulesWaitTest`. It covers an idle chat starting on the first look beside a running one, an own chat at work holding both kinds past the old hour and then starting once, the hour counting from when the chat is free, and the waits that remain. `oldWaitsDoNotComeBack` guards against an upstream sync bringing the old waits back. `ReviewChatTest` covers Smart review reading the right chat once runs overlap. **After release, on the phone:** (a) Chat A's agent calls `ask` and the card stays open, so A shows working. In idle chat B, the agent calls `schedule_message in_minutes=2` "say the time from `date`" and its turn ends. Expect B's Scheduled message to start within about 1 min of its `at` while A's card is still open, with no "Scheduled task skipped" notification. Then answer A's card. Before the fix, B waited for A. (b) In chat C, the agent calls `schedule_message in_minutes=1` to itself, then `ask`. Leave the card for about 3 min, then answer. Expect nothing to start in C while the card is open, then the message to start within about 30 s of C's run ending, not dropped. (c) Chat D's options → Schedule, at a time 2 min ahead. D's agent calls `ask`, and the card stays past that time, then is answered. Expect the scheduled run to start right after D's run ends, with no "skipped: still working" notification. Before the fix it was skipped at once. **When it recurs:** the next morning with pipeline chats running, the 07:30 brief and the 08:00 curator run at their times. Evidence: the `wa-sync/data/brief-date` mtime, and the first prompt time in the curator's transcript. The day's run count is close to 34 of 34. |
+| 2 Test covers it; CI green | The PR's `build.yml` run: `testGithubDebugUnitTest` (includes `SchedulesWaitTest` and `ReviewChatTest`), the github and fdroid release builds, the wear build and tests, `helper-tests`, and the F-Droid/reproducibility checks. |
 
 ## Risks
 - **Two agents on the real screen at once.** A scheduled run that uses the screen while another chat drives it can
@@ -120,21 +178,24 @@ after-release, and the after-release rows stay `pending` with `VERDICT: PARTIAL`
   by these:
   - taps are refused while a card shows;
   - outward-facing actions need approval cards;
+  - Smart review now judges each chat against its own request;
   - background mode avoids it.
 
   Accepted: the brief asks for "regardless of other chats".
+- **A long-lived own chat holds its task that long.** A chat kept running by background jobs (023) holds its own
+  scheduled task until the process ends, possibly hours. The brief asks for "as soon as possible", which this is.
+  A waiting task costs a look on the main thread every 30 s, and no wake lock is held meanwhile.
+- **Longer waits are in memory.** If Buddy's process dies while a task waits, that wait is lost, as it is today. An
+  agent's own message is set again whenever its alarms are, for example at boot ("one whose time passed ... comes at
+  once"). Waits can now be longer, so this is a bit more exposed. Out of scope.
 - **More processes at once.** A schedule now starts beside pipeline sessions, so Android's phantom-process killer
   (exit 137, issue #50) gets more likely. A killed run shows as failed with its reason, which is visible, unlike
-  today's silent skip. Two schedules due at the same minute now run together too.
-- **Upstream sync.** `Schedules.java` is upstream's file, so an upstream change to `busy()` will conflict, or could
-  bring the global wait back. `oldWaitsDoNotComeBack` turns CI red, and the `fork 027` marker tells the sync
-  resolver to keep `waits()`.
-- **Notification wording.** `schedule_skip_busy` still says "another task, a pause, or no internet". "Another task"
-  now only means the chat's own previous run. Left as is on purpose (18 translations).
+  today's silent skip.
+- **Upstream sync.** `Schedules.java`, `ChatHub.java` and `Tools.java` are upstream's files. `oldWaitsDoNotComeBack`
+  turns CI red if the old waits come back, and the `fork 027` markers tell the sync resolver to keep `due()` and
+  `reviewed()`.
+- **Notification wording.** `schedule_skip_busy` still says "another task, a pause, or no internet". It is now only
+  shown after an hour of pause, Stop or no internet. Left as is on purpose (18 translations).
 
 ## Open questions
 None blocking.
-
-For Nicholas, later: a recurring task whose own chat is still working is still skipped. That includes a chat kept
-alive by background jobs (023). Say if you want that case to wait and run too. It would be a follow-up, not this
-feature.

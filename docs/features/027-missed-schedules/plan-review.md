@@ -12,3 +12,50 @@ F3 [major] Concurrent scheduled runs can give the Smart tap reviewer another cha
 F4 [minor] The phone check depends on a long foreground command - `plan.md:114` relies on foreground sleeps of 600 and 180 seconds. The phone's Claude hook rejects explicit foreground timeouts over 30 seconds (`/root/.claude/hooks/no-long-foreground.sh:10–16`), so a run can finish before the alarm and give a false pass. -> A simpler check is to leave a question card open in A, confirm A is still working when B records its Scheduled message, and then answer the card. This also exercises the proposed removal of the pending-card wait.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted (all but the two-become-one point) - The brief's done-when says "(on time if its chat is idle), never
+dropped", and its goal says "at least run as soon as possible and never be dropped". So a task whose own chat is
+working must wait for it, not be dropped. The plan no longer leaves today's behaviour in place:
+- A recurring task whose chat is working isn't skipped any more (the `schedule_skip_running` branch leaves `pump()`).
+- Neither kind has a deadline while its own chat works. Each look puts the task's hour back to `now + WAIT_MS`, so the
+  hour for a pause, Stop or no internet counts from when its chat is free. Without that, a Stop that ends a long run
+  would give the task up at once (Stop's minute).
+- Idle destinations start on the first pass. That was already the case.
+
+All of this sits in one pure `Schedules.due(...)` (see F2). Tests cover both kinds past the old deadline. Rejected: two
+times of the same chat becoming one run (`Schedules.java:350-352`). That is upstream's deliberate behaviour and is
+documented in GUIDE.md ("the two become one run"). It's the same saved message in the same chat, and the one run starts
+after both times, so the message isn't dropped. Running it twice back to back gives nothing more. Recorded in decisions.
+
+F2: accepted - The plan replaces `waits(...)` with `Schedules.due(Map<String, Long> waiting, String key,
+Sessions.Session s, boolean paused, boolean stopped, boolean online, long now)`, which returns `START`, `WAIT` or
+`GIVE_UP`. `pump()` calls it for each waiting key, with the session it found from the key's chat id. `due()` holds the
+whole start, wait and give-up decision, and it takes a key out of `waiting` when it starts or gives up. The JVM test runs
+it over a real map, pass by pass:
+- A running, B due: B starts on the first pass.
+- A and B running: B stays in `waiting`, past the old hour too.
+- B idle, A still running: B starts, and its key is gone, so a later pass can't start it again.
+
+This is done for a chat's Schedule key (`b`) and an agent's own message key (`b/x`). The key-to-session lookup in
+`pump()` is upstream's code and unchanged. The source guard stays for upstream syncs, and it now also catches
+`schedule_skip_running` coming back into `Schedules.java`.
+
+F3: accepted - Real: Smart review reads `latestRunning()` (`ChatHub.java:961`), and a scheduled run beside a pipeline
+chat becomes common with this fix. The fix is small, because the calling chat is already known on the tool's thread
+(`McpServer.CALLER_CHAT`, which Tools already reads at `:671` and `:819`):
+- `Tools.review` reads it before posting to the main thread and calls `reviewContext(chat)`.
+- A new pure `ChatHub.reviewed(List<Session> all, String chat)` returns the calling chat. For a sub-agent or a helper it
+  returns the parent, which keeps today's rule that those work for their parent's request.
+- With no calling chat (an agent outside Buddy's chats), or one not found, it returns null, and `reviewContext` falls
+  back to `latestRunning()` as today.
+
+`ReviewChatTest` checks that B's review is B's own even when A has the newest event, that a sub-agent maps to its parent,
+and that an outside call returns null.
+
+F4: accepted - The phone check no longer uses long foreground sleeps. A question card (`ask`) holds the busy chat in
+working while the user leaves it unanswered. Cases:
+- (a) another chat with an open card while B's message comes due, which also covers removing the card wait;
+- (b) an agent's own message while its own chat waits on a card;
+- (c) a chat's Schedule while its own chat waits on a card, the recurring case from F1.
