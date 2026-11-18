@@ -23,3 +23,6 @@ x
 
 ## Clarifications
 <!-- Nicholas's later answers, dated, appended -->
+
+## Added by Nicholas mid-run (in scope)
+When the watch drops mid-call and the setting is Auto, the voice fell back to the earpiece (hold-to-ear speaker). Auto's fallback must prefer the loudspeaker (or a connected headset) over the earpiece. Acceptance: after a watch drop with Auto and no headset, audio plays on the speakerphone, not the earpiece; a test covers it.
