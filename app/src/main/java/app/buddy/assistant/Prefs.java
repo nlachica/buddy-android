@@ -606,6 +606,15 @@ final class Prefs {
         if (busy ? s.add(chat) : s.remove(chat)) sp(c).edit().putStringSet("busy_chats", s).commit();
     }
 
+    /** fork 027: chats whose Schedule's run waits (see Schedules.keep): it still runs after a restart of Buddy. */
+    static java.util.Set<String> heldSchedules(Context c) {
+        return new java.util.HashSet<>(sp(c).getStringSet("schedules_held", new java.util.HashSet<>()));
+    }
+
+    static void setHeldSchedules(Context c, java.util.Set<String> held) {
+        sp(c).edit().putStringSet("schedules_held", held).commit();
+    }
+
     /** The API key services (see Providers), as JSON, without their keys. */
     static String providers(Context c) {
         return sp(c).getString("providers", "[]");

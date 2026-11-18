@@ -20,6 +20,7 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Calendar;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -35,9 +36,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * At its time the task starts, also with the phone locked: the background browser and Linux tools work without the
  * screen, and a partial wake lock lets the run finish with the screen off. Only when the agent needs the screen while
  * the phone is locked does the run wait (see awaitUnlock): a notification asks the user to unlock (with "Wake the
- * phone for this task" the screen comes on too, see WakeActivity), and after an hour without that the run stops. A chat that's still working, an agent that isn't signed in, or Buddy's service being
- * off skips the task, with a notification; another chat at work, a pause or no internet make it wait, for an hour at
- * most. Main thread, except awaitUnlock (a phone tool's thread).
+ * phone for this task" the screen comes on too, see WakeActivity), and after an hour without that the run stops.
+ * agent that isn't signed in, or Buddy's service being off skips the task, with a notification. A pause, Stop or no
+ * internet make it wait, for an hour at most. Its own chat still working makes it wait until the chat is done (fork
+ * 027: other chats at work don't hold it up). Main thread, except awaitUnlock (a phone tool's thread).
  *
  * The agent can schedule messages to itself too (schedule_message, see agentTool): "check the price again tomorrow at
  * 9". Each is sent once, into its own chat, and runs like a scheduled task; the chat lists them above its composer,
@@ -105,6 +107,11 @@ public final class Schedules extends BroadcastReceiver {
             p.quiet = quiet;
             p.paused = paused;
             return p;
+        }
+
+        /** fork 027: the same message at the same times, so a run already waiting for the old plan is still due. */
+        boolean sameRun(Plan o) {
+            return o != null && text.equals(o.text) && days == o.days && java.util.Arrays.equals(minutes, o.minutes);
         }
 
         JSONObject toJson() {
@@ -219,7 +226,10 @@ public final class Schedules extends BroadcastReceiver {
     /** How long a task waits for Buddy to be free, or a run for the user to unlock, before giving up. */
     private static final long WAIT_MS = 3600_000L, LOOK_MS = 30_000L, UNLOCK_WAIT_MS = 45_000L;
     private static final Handler main = new Handler(Looper.getMainLooper());
-    /** Tasks whose time came while Buddy was busy: chat id → when they're given up (elapsedRealtime). Main thread. */
+    /**
+     * Tasks whose time came while Buddy was busy: chat id → when they're given up (elapsedRealtime). Main thread.
+     * (fork 027: its chats' Schedules are kept in Prefs too, see keep)
+     */
     private static final Map<String, Long> waiting = new LinkedHashMap<>();
     /** Chats in a scheduled task's run (the phone tools look them up from their own threads). */
     private static final Set<String> running = ConcurrentHashMap.newKeySet();
@@ -284,6 +294,7 @@ public final class Schedules extends BroadcastReceiver {
     static void cancel(Context c, String id) {
         c.getSystemService(AlarmManager.class).cancel(alarm(c, id, 0));
         waiting.remove(id);
+        keep(c, id);
         clearNotice(c, id);
     }
 
@@ -350,6 +361,7 @@ public final class Schedules extends BroadcastReceiver {
         // an earlier time of this chat may still wait (several times a day): one run does for both, and it gets
         // this time's full hour before it is given up
         waiting.put(id, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(c, id);
         listen(c);
         pump();
     }
@@ -359,6 +371,7 @@ public final class Schedules extends BroadcastReceiver {
         if (s.schedule == null || waiting.containsKey(s.id)) return;
         app = c.getApplicationContext();
         waiting.put(s.id, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(c, s.id);
         listen(c);
         pump();
     }
@@ -396,6 +409,7 @@ public final class Schedules extends BroadcastReceiver {
     }
 
     private static final Runnable look = Schedules::pump;
+    private static final Runnable lookLater = () -> main.post(look);
 
     /** Starts what waits, skips what can't run, gives up on what waited too long. */
     private static void pump() {
@@ -406,29 +420,33 @@ public final class Schedules extends BroadcastReceiver {
             long now = SystemClock.elapsedRealtime();
             for (String key : new ArrayList<>(waiting.keySet())) {
                 Long until = waiting.get(key);
+                Sessions.Session s = chat(hub.sessions.all, key);
                 int slash = key.indexOf('/');
-                Sessions.Session s = hub.sessions.find(slash < 0 ? key : key.substring(0, slash));
                 Later l = s == null || slash < 0 ? null : later(s, key.substring(slash + 1));
                 if (until == null || s == null || (slash < 0 ? s.schedule == null : l == null)) {
                     waiting.remove(key);
+                    keep(app, key);
                     continue;
                 }
                 BuddyService svc = BuddyService.get();
                 String skip = svc == null ? app.getString(R.string.rules_log_no_service) // its server is how the agent works
                         : !SetupState.signedIn(app, s.backend) ? app.getString(R.string.rules_log_not_signed_in, s.brainName())
-                        : s.running && l == null ? app.getString(R.string.schedule_skip_running) : null;
-                if (skip == null && busy(hub, svc)) { // the agent's own message waits for its chat to finish, too
-                    if (now < until) continue;
-                    skip = app.getString(R.string.schedule_skip_busy);
+                        : null;
+                if (skip == null) { // fork 027: see due()
+                    Due d = due(waiting, key, s, svc.paused(), svc.controlRevoked() != null, online(), now);
+                    if (d == Due.WAIT) continue;
+                    if (d == Due.GIVE_UP) skip = app.getString(R.string.schedule_skip_busy);
                 }
                 waiting.remove(key);
+                keep(app, key);
                 if (l != null) {
-                    s.later.remove(l); // sent once, whatever happens now
+                    s.later.remove(l); // sent once, whatever happens now (put back if the helper refuses it, see busy)
                     hub.sessions.save(s);
-                    hub.changed();
                 }
                 if (skip != null) notice(app, s, app.getString(R.string.schedule_skipped_title, s.label()), skip);
                 else start(s, l);
+                // after start has claimed the chat: a listener may start a run of its own at once (a bound rule's)
+                if (l != null) hub.changed();
             }
             main.removeCallbacks(look);
             if (!waiting.isEmpty()) main.postDelayed(look, LOOK_MS);
@@ -437,13 +455,89 @@ public final class Schedules extends BroadcastReceiver {
         }
     }
 
+    /** fork 027: what one look at a due task does (see due). */
+    enum Due { START, WAIT, GIVE_UP }
+
     /**
-     * Another chat at work (they'd share the screen), a pause, Stop's minute, a card waiting for the user or no
-     * internet: the task waits, as notification rules' runs do.
+     * fork 027: one look at a due task (key in waiting, s its chat). If its own chat is at work, the task waits for it,
+     * however long, and its hour starts again, so it is never dropped for that. A pause, Stop's minute or no internet
+     * make it wait, an hour at most, and then it is given up. Otherwise it starts. Other chats at work and cards waiting
+     * for the user don't hold it up: they did, and on pipeline days the morning's tasks were dropped. START and GIVE_UP
+     * take the key out of waiting.
      */
-    private static boolean busy(ChatHub hub, BuddyService svc) {
-        return hub.runningCount() > 0 || svc.paused() || (svc.bubble() != null && svc.bubble().confirming())
-                || svc.controlRevoked() != null || !online();
+    static Due due(Map<String, Long> waiting, String key, Sessions.Session s, boolean paused, boolean stopped,
+                   boolean online, long now) {
+        if (s.running) {
+            waiting.put(key, now + WAIT_MS);
+            return Due.WAIT;
+        }
+        boolean held = paused || stopped || !online;
+        Long until = waiting.get(key);
+        if (held && until != null && now < until) return Due.WAIT;
+        waiting.remove(key);
+        return held ? Due.GIVE_UP : Due.START;
+    }
+
+    /**
+     * fork 027: the stored ids of waiting Schedules once id's key in waiting changed. Per chat, not the whole map: a
+     * boot-time cancel of another chat's schedule, before restore, must leave a stored run alone.
+     */
+    static Set<String> kept(Set<String> stored, Map<String, Long> waiting, String id) {
+        Set<String> out = new HashSet<>(stored);
+        if (waiting.containsKey(id)) out.add(id);
+        else out.remove(id);
+        return out;
+    }
+
+    /** fork 027: Buddy started again: the Schedules stored as waiting wait again, with their hour (see keep). */
+    static void restore(Map<String, Long> waiting, Set<String> held, long now) {
+        for (String id : held) waiting.putIfAbsent(id, now + WAIT_MS);
+    }
+
+    /** fork 027: a Schedule's wait survives a restart of Buddy; an agent's own message does, in its chat's later. */
+    private static void keep(Context c, String id) {
+        if (id.indexOf('/') >= 0) return;
+        Set<String> stored = Prefs.heldSchedules(c), now = kept(stored, waiting, id);
+        if (!now.equals(stored)) Prefs.setHeldSchedules(c, now);
+    }
+
+    /**
+     * fork 027: the key to wait under again after the helper refused a scheduled run (BUSY: an earlier run of this
+     * chat, from before Buddy restarted, is still going), or null if that run is no longer wanted. l: the agent's own
+     * message that was sent, or null for the Schedule, then plan is the copy sent: still wanted if the chat's Schedule is
+     * there, not paused and unchanged in what it sends (an edit or a pause ended its wait).
+     */
+    static String retryKey(Sessions.Session s, Later l, Plan plan) {
+        if (l != null) return s.id + "/" + l.id;
+        return s.schedule != null && !s.schedule.paused && s.schedule.sameRun(plan) ? s.id : null;
+    }
+
+    /** fork 027: the helper refused the run sent for (s, l, plan) (see retryKey): it waits again, starts once the earlier run ends. */
+    private static void busy(Sessions.Session s, Later l, Plan plan) {
+        ChatHub hub = ChatHub.get(app);
+        String key = retryKey(s, l, plan);
+        if (key == null || hub.sessions.find(s.id) != s) return; // changed or deleted meanwhile
+        if (l != null) { // taken out of its chat's later when sent
+            s.later.add(l);
+            hub.sessions.save(s);
+        }
+        waiting.put(key, SystemClock.elapsedRealtime() + WAIT_MS);
+        keep(app, key);
+        main.post(look);
+    }
+
+    /** fork 027: editing a chat's Schedule ends the run of the old one that waits (before the new one is armed). */
+    static void supersede(Context c, String id) {
+        waiting.remove(id);
+        keep(c, id);
+    }
+
+    /** fork 027: the chat a waiting key is for: "chat" (its Schedule) or "chat/message" (the agent's own message). */
+    static Sessions.Session chat(List<Sessions.Session> all, String key) {
+        int slash = key.indexOf('/');
+        String id = slash < 0 ? key : key.substring(0, slash);
+        for (Sessions.Session s : all) if (s.id.equals(id)) return s;
+        return null;
     }
 
     private static void start(Sessions.Session s, Later l) {
@@ -474,7 +568,8 @@ public final class Schedules extends BroadcastReceiver {
                     .append("a problem, or something for them to do.\n");
         }
         prompt.append('\n').append(text);
-        String err = ChatHub.get(app).sendScheduled(s, text, prompt.toString());
+        Plan sent = l == null ? s.schedule.copy() : null;
+        String err = ChatHub.get(app).sendScheduled(s, text, prompt.toString(), () -> busy(s, l, sent));
         if (err != null) {
             notice(app, s, app.getString(R.string.schedule_skipped_title, s.label()), err);
             return;
@@ -513,7 +608,13 @@ public final class Schedules extends BroadcastReceiver {
                     WakeActivity.close();
                 }
             }
-            if (!waiting.isEmpty()) pump();
+            // fork 027: after the other listeners saw this run end (the watch's, a notification rule's), not before:
+            // else a waiting task starts in the chat while they still count it as the old run's. Two posts, so
+            // after the end check the watch posts in this same notification, whichever listener came first
+            if (!waiting.isEmpty()) {
+                main.removeCallbacks(lookLater);
+                main.post(lookLater);
+            }
         }
 
         @Override
@@ -530,7 +631,9 @@ public final class Schedules extends BroadcastReceiver {
     /** The service started (after boot, an update, or being switched on): alarms are set again (main thread). */
     static void serviceStarted(Context c) {
         listen(c);
+        restore(waiting, Prefs.heldSchedules(c), SystemClock.elapsedRealtime()); // fork 027
         sync(c);
+        pump();
     }
 
     // --------------------------------------------------- the screen while locked

@@ -28,6 +28,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
+import java.util.Objects;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -41,6 +42,9 @@ final class Tools {
     private final BuddyService svc;
     private final Object lock = new Object();
     private final List<AccessibilityNodeInfo> lastNodes = new ArrayList<>();
+    /** fork 027: the screen key and display of the read_screen that made lastNodes (this Tools is shared by all chats). */
+    private String readKey;
+    private int readDisplay;
     private final BrowserTools browser;
     private final PhoneTools phone;
     private final SettingsTool settings;
@@ -1110,6 +1114,8 @@ final class Tools {
         synchronized (lock) {
             for (AccessibilityNodeInfo n : lastNodes) n.recycle();
             lastNodes.clear();
+            readKey = screenKey();
+            readDisplay = display();
             List<AccessibilityWindowInfo> windows = windows();
             boolean keyboard = false;
             String app = null; // the app in front, for its tips
@@ -1304,10 +1310,17 @@ final class Tools {
         return dot >= 0 ? s.substring(dot + 1) : s;
     }
 
+    /** fork 027: does this call's chat and display match those of the read_screen that made the element ids? */
+    static boolean sameRead(String readKey, int readDisplay, String key, int display) {
+        return Objects.equals(readKey, key) && readDisplay == display;
+    }
+
     private AccessibilityNodeInfo node(JSONObject a) {
         if (!a.has("element")) return null;
         int id = a.optInt("element", -1);
         synchronized (lock) {
+            if (!sameRead(readKey, readDisplay, screenKey(), display()))
+                throw new IllegalArgumentException("Element ids are from another chat's read_screen. Call read_screen again.");
             if (id < 0 || id >= lastNodes.size())
                 throw new IllegalArgumentException("Unknown element " + id + ". Call read_screen again.");
             AccessibilityNodeInfo n = AccessibilityNodeInfo.obtain(lastNodes.get(id));
@@ -1833,8 +1846,9 @@ final class Tools {
         String app = frontName();
         final String[][] ctx = new String[1][];
         final CountDownLatch got = new CountDownLatch(1);
+        final String chat = McpServer.CALLER_CHAT.get(); // fork 027: this call's chat, not the newest one
         svc.runOnMain(() -> {
-            ctx[0] = ChatHub.get(svc).reviewContext();
+            ctx[0] = ChatHub.get(svc).reviewContext(chat);
             got.countDown();
         });
         got.await(2, TimeUnit.SECONDS);
