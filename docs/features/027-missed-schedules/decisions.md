@@ -143,3 +143,9 @@
 
 ## 2026-11-18 - Orchestrator: plan accepted after round 3, with the two round-3 findings as coder must-dos
 - Round 3 found two real edge cases, both small and local: (F1) persist held runs per chat id so a boot-time cancel of another schedule can't wipe them; (F2) editing a chat's Schedule clears that chat's waiting run before arming the new one. Coder implements both with the tests the reviewer named. Keep everything else as planned; no further scope.
+
+## 2026-11-18 - The stored set is kept per chat id, and editing a Schedule ends its waiting run (plan-review round 3)
+- Options: (a) `keep()` writes the whole derived set (plan step 2 as first written); (b) update the stored set one chat id at a time, `kept(stored, waiting, id)`, called wherever that id's key in `waiting` changes; and for the edit, (c) leave the waiting run, or (d) `Schedules.supersede(c, id)` from `ChatHub.setSchedule` before the new alarm is armed.
+- Choice: (b), because a boot-time `sync()` can cancel another chat's schedule before `serviceStarted` restores, and (a) would then overwrite a stored run with the still-empty map. (d), because `start()` reads the replacement text, so the old run would send the new message early.
+- Coder notes: `held(...)` from the plan is not needed (`kept` replaces it). `pump()` calls `keep` where a key leaves `waiting`; `fire` and `runNow` after their put; `cancel` after its remove. A restored key whose chat or schedule is gone is dropped by `pump()` as before. Agent messages ("chat/message") are never stored: `keep` ignores keys with `/`.
+- By: Coder (claude-sonnet-5-5)
