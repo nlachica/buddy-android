@@ -45,3 +45,13 @@ VERDICT: REVISE
 - F4: fixed. The scheduler listener posts `lookLater`, which posts `look`: it runs after the watch's end check whichever listener registered first. Test: source check (`aWaitingTaskStartsAfterTheOtherListenersSawTheRunEnd`); no Handler test on the JVM.
 - F5: fixed. `hub.changed()` moved after `start` in `pump`. Test: source-order check `aListenerStartingARunCannotTakeTheChatFromTheOneShotBeingSent`.
 - Not run: no JVM starts on this device, so nothing was compiled or tested here. Re-run CI.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+F1 [blocker] The scheduler tests still fail to compile - `app/src/test/java/app/buddy/assistant/SchedulesWaitTest.java:144` calls `src("ChatHub.java")`, which declares `throws Exception`. The enclosing test is `savingWithoutChangingTheRunKeepsTheWaitingOne` at line 129. CI run 44262324900 and local Java 17 both fail on this call at HEAD `8e7b255`. -> Add `throws Exception` to that test method and rerun CI. With just that declaration in a temporary copy, all 20 tests across the three feature test classes passed locally.
+
+F2 [major] A pending scheduler callback can still take over a watch request - `app/src/main/java/app/buddy/assistant/Schedules.java:615` removes only `lookLater`. An earlier chat update can already have posted `look`. If the main queue processes `buddy_done` and then that pending `look`, the watch's newly posted end check runs third. The scheduler starts the waiting run in the now-idle chat. `WatchLink.java:347` sees it running and keeps forwarding its replies to the watch. The same ordering is possible with the 30-second poll at `Schedules.java:452`. -> End the previous watch request explicitly when a scheduled user message starts in its chat. Test with a pump already queued behind `buddy_done` and ahead of the watch end check. Assert the watch receives completion and no scheduled reply.
+
+F3 [major] A refused occurrence is lost if Buddy restarts before the retry callback - `app/src/main/java/app/buddy/assistant/Schedules.java:440` clears the stored Schedule key, or removes and saves the one-shot at line 443, before the helper accepts the message. If a surviving helper refuses the dispatch as BUSY and Android kills Buddy during the five-second delay at `ChatHub.java:329`, the callback holding the occurrence disappears. At the next startup there is neither a held key to restore nor a one-shot to rearm. -> Keep the occurrence recoverable until helper acceptance and identify the dispatch so recovery can avoid replaying accepted work. Test a restart after BUSY but before its callback, followed by the old helper finishing. Both kinds of message should run once.
+
+VERDICT: REVISE
