@@ -62,7 +62,7 @@ final class ClaudeDictation {
                 if (listener != l) return;
                 main.post(() -> startHolding(l));
             } catch (Exception e) {
-                main.post(() -> end(l, app.getString(R.string.dictation_claude_start_failed, e.getMessage())));
+                main.post(() -> { if (listener == l) end(l, app.getString(R.string.dictation_claude_start_failed, e.getMessage())); }); // a cancelled tap already got onEnd
             }
         }, "claude-dictation").start();
         return null;
