@@ -80,3 +80,44 @@
   timing (`prepare` stops MicServer about 1.5 s after `/voice hold`). If that proves Part A's wait is the cause fix,
   Part B adds no code.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - A session is ready only once voice mode is on (replaces "drop the session" above)
+- Options: (a) `session.finish(); session = null;` at the voice-wait timeout only (round 1); (b) the same at both
+  startup timeouts (plan review round 2 F2); (c) clear `sessionLang` with `session = null`, drop its assignment at line
+  194, and set it only after the `Hold space to record` wait succeeds.
+- Choice: (c). Round 2 F2: under (a), a prompt timeout at line 200 left a live session with `sessionLang` set, so the
+  next same-language tap skipped `/voice hold`. (c) covers every throw (both timeouts, PREP, interrupt) with fewer
+  lines than (b), and leaves upstream's line 200 unchanged. The existing line 181 finishes the half-started session on
+  the next call. Cost: that session keeps running until then, as it already does after upstream's prompt timeout.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - A cancelled attempt's start error is dropped
+- Options: (a) in `listen`'s catch, `if (listener == l) end(l, …)`; (b) `if (listener != l) return;` at the top of
+  `end()`; (c) leave it.
+- Choice: (a). Round 2 F3: A4's 15 s wait makes it likely that a cancelled tap's error arrives during the next tap,
+  and `end()` then stops the shared microphone and hides the bar. `cancel()` already sent that listener `onEnd(null)`.
+  (a) changes one line on the only path concerned, whereas (b) changes a shared method's meaning and (c) keeps the bug.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Echo guard matches Buddy's command only (replaces the `/voice` prefix entry above)
+- Options: (a) `startsWith("/voice")`; (b) `(t + " ").startsWith("/voice hold ")` on the normalized text.
+- Choice: (b). Round 2 F4: (a) blanks real box text like `/voicemail`. Buddy only ever sends `/voice hold`, and its
+  typed and echoed forms both match (b). Positive fixture T11.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Proof for the startup-failure fixes: device fault checks, no unit test
+- Options: (a) a seam for `ensureSession`/`listen` so JUnit can drive them; (b) a diff check plus device fault checks
+  with a one-shot stand-in `claude` (the symlink points at a script that fakes a bare box N times, then execs the real
+  binary).
+- Choice: (b). The repo has no Robolectric, and these methods need `Linux.exec`, a pty and a Looper. A seam would grow
+  upstream's diff, against the brief. (b) runs the real code on the phone after release: D1 covers a failed warm-up
+  followed by a tap, and D2 covers cancel plus immediate retry.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - The cause test is a working/failing pair on the phone (refines "Gate for Part B")
+- Options: (a) pty only, with a WAV at MicServer's socket, comparing Buddy's timings on 2.1.328; (b) on the phone with
+  Buddy at fork.4 and only the CLI swapped (2.1.326 against 2.1.328), with the pty used only to record screens.
+- Choice: (b). Round 2 F1: (a) bypasses the microphone and routing (026), and a longer wait helping on 328 doesn't
+  explain why 326 worked. (b) holds Buddy fixed and uses the real input path. If both CLIs fail, the next comparison
+  is the phone's Live-call state (Q3). If no failing setup is found, Nicholas decides (Q5).
+- By: Planner (claude-opus-5-5)

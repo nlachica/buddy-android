@@ -1,8 +1,9 @@
 # Plan: 028-dictation-echo
 
 **Status: BLOCKED on research for Part B (the cause).** Part A (the safety net) is final; it was revised for plan-review
-round 1 (F2-F5). Nicholas's clarification in `brief.md` says to find the regression first, so the Researcher answers
-Q1-Q4 below. The Planner then adds Part B, which must meet `## Part B acceptance`. Coding starts on both parts together.
+rounds 1 (F2-F5) and 2 (F2-F4). Nicholas's clarification in `brief.md` says to find the regression first, so the
+Researcher answers Q1-Q4 below. The Planner then adds Part B, which must meet `## Part B acceptance`. Coding starts on
+both parts together.
 
 Sources: `brief.md` (with Nicholas's clarification), `diagnosis.md` (stands in for research; `research.md` is empty),
 `app/src/main/java/app/buddy/assistant/ClaudeDictation.java`, and the facts below.
@@ -13,16 +14,17 @@ the dictated words. Talk worked before 2026-11-18. Something that changed then i
 (027), or Claude CLI 2.1.327/328. The echo scrape in `ClaudeDictation.promptText()` is only the symptom.
 - **Part B, the cause:** find the regression and fix it (blocked: Open questions).
 - **Part A, the safety net:** the smallest change to upstream code. `promptText` reads only the real input box (the
-  `❯` line under a `─` rule) and rejects `/voice` echo text. `ensureSession` waits, bounded, for voice mode on instead
-  of a fixed 1500 ms sleep. A unit test drives it through a screen-text seam.
+  `❯` line under a `─` rule) and rejects the `/voice hold` echo. `ensureSession` waits, bounded, for voice mode on
+  instead of a fixed 1500 ms sleep, and a session counts as ready only after voice mode is on. A unit test drives the
+  parser through a screen-text seam.
 
 Done when: (1) `promptText` never returns the `/voice` echo and returns the real box text; (2) `ensureSession` waits for
 voice mode on, bounded; (3) unit test, CI green; and, from the clarification, (4) the regression's cause is found and fixed.
 
 Non-goals: no change to holding, `finish`, `readResult`, `busy()`, end-of-speech or MicServer timing beyond what Part B
-proves necessary. No new error string and no retry loop when voice mode doesn't come on: the session is dropped and the
-existing start-failed path reports it (A4). No refactor of upstream's prompt-wait loop. CodexDictation, user-facing
-strings and settings stay untouched.
+proves necessary. No new error string and no retry loop when voice mode doesn't come on: the session is not marked
+ready and the existing start-failed path reports it (A4). No refactor of upstream's prompt-wait loop. CodexDictation,
+user-facing strings and settings stay untouched.
 
 ## Facts found while planning (for the Researcher)
 - **The CLI rewords `/voice hold`'s output every release.** From `/root/.claude/projects/-root-dictation/*.jsonl`
@@ -49,7 +51,8 @@ strings and settings stay untouched.
   (`CodexLive.java:253`), and only `CodexLive.end` clears it (`:268`).
 
 ## Design, Part A (safety net; final)
-One production file, about 18 changed lines, plus one new test file. No method renamed or moved.
+One production file, about 18 changed lines, plus one new test file. No method renamed or moved, and `end()` and
+upstream's prompt-wait (lines 196-200) are unchanged.
 1. **Seam.** `static String promptText()` becomes
    `return session == null ? "" : promptText(session.emulator.screenText());`. The body moves into a new
    package-private, pure `static String promptText(String screen)`. Callers stay unchanged.
@@ -57,19 +60,29 @@ One production file, about 18 changed lines, plus one new test file. No method r
    starts with `─` (the box's top rule). The loop runs `i > 0`, and nothing found means `""`. The rest is unchanged.
    Upstream already uses `─` (U+2500) for the box's bottom edge. The diagnosis confirmed the layout on 2.1.327 and 2.1.328.
 3. **Echo text guard.** Normalize first (`replaceAll("\\s+", " ").trim()`), then return `""` if the text contains
-   `ALSA lib` or `keep holding` (upstream's guard) **or** starts with `/voice`. The `/voice hold` command, typed or echoed
-   with its `⎿` output, always starts with `/voice`. The guard does not look at the output's wording, so dictated words
-   such as "Hold space to record a memo" pass (round 1 F2).
-4. **Wait for voice mode.** In `ensureSession` (line 203), replace `Thread.sleep(1500)` with a loop shaped like
-   upstream's prompt wait. It reuses `until` = now + 15 000 ms and loops while not timed out, not `session.exited`, and
-   the screen lacks `Hold space to record`, sleeping 200 ms each time. Then, if the screen still lacks it,
-   `session.finish(); session = null;` and `throw new Exception(c.getString(R.string.dictation_claude_code_no_start))`.
-   Otherwise `clearPrompt()` as before. The throw goes through the existing paths: `listen` shows
-   `dictation_claude_start_failed` and `prepare` ignores it. `session = null` makes `ready()` false, so the next tap
-   starts a fresh session. (`finish()` only hangs up; `exited` turns true later.) Without this, a session whose voice
-   mode never came on would be reused for every later tap (round 1 F3). The wait looks for `Hold space to record`, the
-   only part of the output that is the same across 325-328. The brief's `Turned on voice mode` is one CLI release old
-   (see Facts). If the inferences in Facts hold, this wait is also the cause fix.
+   `ALSA lib` or `keep holding` (upstream's guard) **or** `(t + " ").startsWith("/voice hold ")`. That matches only
+   Buddy's own command: typed (`/voice hold`) or echoed with its `⎿` output (`/voice hold ⎿ …`). Box text such as
+   `/voicemail` or `/voice holder` passes (round 2 F4). So do dictated words such as "Hold space to record a memo"
+   (round 1 F2), because the guard ignores the output's wording.
+4. **Wait for voice mode; ready only once it is on.** In `ensureSession`:
+   - line 182: `session = null;` becomes `session = null; sessionLang = null;`.
+   - line 194: `sessionLang = lang;` is removed.
+   - line 203: `Thread.sleep(1500)` becomes a loop shaped like upstream's prompt wait. It reuses `until` = now
+     + 15 000 ms and loops while not timed out, not `session.exited`, and the screen lacks `Hold space to record`,
+     sleeping 200 ms each time. If the screen still lacks it, `throw new Exception(c.getString(R.string.dictation_claude_code_no_start))`.
+     Otherwise `sessionLang = lang;` then `clearPrompt()` as before.
+
+   So `ready()` (and line 180's reuse) holds only for a session whose voice mode came on. Any throw before that leaves
+   `sessionLang` null: either timeout, PREP, or an interrupt. The next `ensureSession` (a tap or a chat opening) then
+   finishes the half-started session at the existing line 181 and starts afresh, `/voice hold` included (round 1 F3,
+   round 2 F2). The throw goes through the existing paths: `listen` shows `dictation_claude_start_failed` and `prepare`
+   ignores it. The wait looks for `Hold space to record`, the only part of the output that is the same across 325-328.
+   The brief's `Turned on voice mode` is one CLI release old (see Facts). If the inferences in Facts hold, this wait is
+   also the cause fix.
+5. **A stale attempt's error stays out of the next tap.** Line 65: `main.post(() -> end(l, …))` becomes
+   `main.post(() -> { if (listener == l) end(l, …); })`. A cancelled attempt already got `onEnd(null)` from `cancel()`.
+   Before this change its late start error (now possible after A4's 15 s wait) stopped the shared microphone and hid
+   the voice bar of the tap that replaced it (round 2 F3).
 
 Alternatives, one line each:
 - Take the last `❯` and return `""` unless it is boxed: same size, but a `❯` menu line below the box would blank real text.
@@ -78,6 +91,10 @@ Alternatives, one line each:
 - Wait for any `⎿` output line under `❯ /voice hold`: independent of the wording, but depends on two glyphs and the echo layout.
 - Feed real bytes through `TermEmulator` in the test: `TermSession`'s constructor is private and a string seam is enough.
 - On timeout, carry on with the session (the old plan): a session with voice mode off is reused forever (F3).
+- On each timeout, `session.finish(); session = null;` (the round 1 answer, and round 2 F2's suggestion): it touches
+  both throws, and misses other throws. Setting `sessionLang` last covers every exit with fewer lines.
+- Guard on `end()` itself (`if (listener != l) return;`): same size, but it changes a shared method's meaning.
+- Guard on `startsWith("/voice")`: it blanks `/voicemail` (round 2 F4).
 - One `waitFor(text)` helper for both waits: it rewrites upstream's existing loop, which makes the merge diff bigger.
 
 ## Design, Part B (the cause; blocked)
@@ -93,13 +110,15 @@ To be designed from the Researcher's answers. The candidates, most likely first:
 
 ## Part B acceptance (from plan-review round 1 F1)
 Part B is coded only once research gives it all three:
-1. **A named cause**, isolated by changing one variable at a time (Q1): only the CLI version, or only Buddy's timing
-   with the CLI fixed.
+1. **A named cause**, from a working/failing pair that differs in one thing only (Q1): the CLI version with Buddy at
+   fork.4, on the phone through the real microphone and routing; or, if both CLIs fail, Buddy's call/route state
+   (Q3). A longer wait that helps on 2.1.328 does not count as a cause on its own (round 2 F1).
 2. **The smallest fix** for that cause, as Steps here. If it is Part A's wait itself, this section says so and Part B
    adds no code.
-3. **A repro check** that runs Buddy's flow on the CLI that broke, with a WAV through a stand-in MicServer.
-   Before the fix it shows the echo or "no speech"; after it, the WAV's words. On the phone, the device check in the
-   Test plan, on that CLI.
+3. **A repro check that repeats the failing setup.** Before the fix, that setup gives the echo or "no speech"; after
+   it, the spoken words. For a CLI cause the setup is Buddy's flow in a pty on the CLI that broke, with a WAV through a
+   stand-in MicServer, plus the device check on that CLI. For a routing cause it is the same phone state, after the
+   release.
 
 ## Steps
 0. Researcher answers Q1-Q4. Planner adds Part B's steps here and checks them against `## Part B acceptance`.
@@ -108,10 +127,11 @@ Part B is coded only once research gives it all three:
 2. **Test first.** Add `app/src/test/java/app/buddy/assistant/ClaudeDictationTest.java` (JUnit 4, same package, style
    of `LeftoverTest`; real `❯` U+276F, `─` U+2500, `⎿` U+23BF). Run it against step 1's code and note the red cases
    (expected: T1, T5, T6, T9).
-3. **Fix `promptText(String)`** (Design A2-A3). All pass, T10 included. Commit the test and the fix together:
+3. **Fix `promptText(String)`** (Design A2-A3). All pass, T10 and T11 included. Commit the test and the fix together:
    `fix(028): dictation reads only Claude Code's input box`, naming step 2's red cases.
-4. **Wait for voice mode** (Design A4), with a one-line comment on the wait and one on the drop. Commit
-   `fix(028): wait for voice mode before dictating`.
+4. **Wait for voice mode** (Design A4), with a one-line comment on the wait and one on why `sessionLang` is set last.
+   Commit `fix(028): wait for voice mode before dictating`.
+4b. **Stale error guard** (Design A5), line 65 only. Commit `fix(028): a cancelled start's error leaves the next tap alone`.
 5. **Part B steps** (from step 0).
 6. **Run the tests.** The `buddy-fork-026` harness checkout is gone. Use a copy of the harness pointed at this
    worktree, with its own output and `gen` directories (not Gradle; the known local `BypassTest…isLoggable` failure
@@ -136,23 +156,36 @@ Part B is coded only once research gives it all three:
 | T3 | same echo, then an empty box | `""` | same |
 | T4 | box text wrapped over two lines | both lines joined by one space | same |
 | T5 | box holding `❯ /voice hold` (typed, not run) | `""` | `/voice hold` |
-| T6 | rule directly above the echo `❯ /voice hold` + `⎿` line, no box below (box rule passes, `/voice` guard rejects) | `""` | the echo |
+| T6 | rule directly above the echo `❯ /voice hold` + `⎿` line, no box below (box rule passes, `/voice hold` guard rejects) | `""` | the echo |
 | T7 | box holding `ALSA lib …` / `keep holding` | `""` | same |
 | T8 | `""` screen; a `❯` on line 0 | `""` | same |
 | T9 | T1 with 2.1.326's wording `Voice mode is on (hold). Hold space to record.` | `""` | the echo |
 | T10 | same echo, then a box holding `❯ Hold space to record a memo` | `Hold space to record a memo` | same |
+| T11 | same echo, then a box holding `❯ /voicemail`; again with `❯ /voice holder` | `/voicemail`; `/voice holder` | same |
 
 Done-when proof:
-1. **Echo never returned; box text returned:** T1, T5, T6, T9, then T2, T4 and T10. Gate: `ClaudeDictationTest` by
+1. **Echo never returned; box text returned:** T1, T5, T6, T9, then T2, T4, T10 and T11. Gate: `ClaudeDictationTest` by
    name in the local harness, then CI `testGithubDebugUnitTest`.
-2. **Bounded wait:** in the diff, the poll for `Hold space to record` is bounded at 15 s and stops on `session.exited`.
-   On timeout it calls `session.finish()`, sets `session = null` and throws `dictation_claude_code_no_start`; otherwise
-   it calls `clearPrompt()`. The unit test does not cover the timeout branch: `ensureSession` needs `Linux.exec` and a
-   pty, and a seam for it would grow upstream's diff. The diff check above is the proof.
+2. **Bounded wait; ready only once voice is on:** in the diff, the poll for `Hold space to record` is bounded at 15 s
+   and stops on `session.exited`. On timeout it throws `dictation_claude_code_no_start`; otherwise it sets
+   `sessionLang = lang` and calls `clearPrompt()`. `sessionLang` is cleared next to `session = null` and assigned
+   nowhere else, and `listen`'s catch calls `end` only `if (listener == l)`. No unit test covers these branches:
+   `listen`/`ensureSession` need `Linux.exec`, a pty and a Looper (no Robolectric here), and a seam would grow upstream's
+   diff.
    **Device check** after merge + tag + `update_buddy` (fork code can't reach the phone sooner):
    `voice_input=claude`, force-stop Buddy, open a chat with an **empty draft**, tap the mic within 2 s, say a sentence.
    The **sent user message** is that sentence, not the echo (Talk sends on `onFinal`, `ChatActivity.java:1936-1940`).
    Do it 3 times, once right after Linux off/on. A silent tap shows the "no speech" toast and **adds no message**.
+   **Fault checks** (same release): a one-shot stand-in for `claude`. Point `/root/.local/bin/claude` at a script that
+   execs the real `versions/<ver>` binary, unless a counter file is above 0. In that case it decrements the counter,
+   prints a bare box (`─` rule, `❯ `, `─` rule) and `exec sleep 120`, so voice mode never comes on. Restore the symlink
+   afterwards. Unarmed, it passes through, so other `claude` runs are unaffected.
+   - **D1, failed warm-up then a same-language tap** (round 2 F2, round 1 F3): arm 1 start, force-stop Buddy, open a
+     chat (its warm-up gets the stand-in and fails silently at ~15 s), wait 20 s, tap and say a sentence. The sentence
+     is sent.
+   - **D2, cancel and immediate retry** (round 2 F3): arm 1 start, kill the hidden session (the process whose cwd is
+     `/root/dictation`), tap, cancel within 10 s, tap again at once and say a sentence. The sentence is sent, no
+     "couldn't start" toast appears, and the voice bar stays up until it is sent.
    These rows stay `pending` (`VERDICT: PARTIAL`) until the release.
 3. **CI green:** the local harness run, then every PR check, the `apk` job included.
 4. **Cause fixed:** Part B acceptance item 3 (the repro check, before and after), plus the device check on the CLI
@@ -163,7 +196,9 @@ Done-when proof:
   wrong text. Upstream's bottom-rule check already depends on `─`. The device check catches it.
 - **The CLI drops `Hold space to record`**: every fresh session fails after 15 s with "Claude voice couldn't start:
   Claude Code didn't start", and the next tap retries from scratch. It is loud and fixed by changing one string. This
-  is the cost of F3's drop, which is better than reusing a session whose voice mode is off.
+  is the cost of "ready only once voice is on", which is better than reusing a session whose voice mode is off.
+- **A session that failed to start keeps running** until the next tap or chat opening finishes it (line 181). This
+  already happens after upstream's prompt timeout. It is one idle process.
 - **A slow cold start (>15 s for `/voice hold`)** fails the first tap. The next tap starts afresh with warm caches. The
   diagnosis measured 3-4 s.
 - **The lock is held longer**: `ensureSession` is `synchronized`, so `listen` waits for `prepare`'s ~3-4 s. That is
@@ -171,17 +206,22 @@ Done-when proof:
 - **The local harness is not Gradle**: CI is the real compile and test.
 
 ## Open questions (blocking Part B; for the Researcher)
-- **Q1. A controlled comparison, one variable at a time.** Drive Buddy's exact flow in a pty: `settings.json` with
-  `voiceEnabled: true`, `/voice hold`, space held from 1.5 s after it. Feed audio through a stand-in for MicServer on
-  `127.0.0.1:8766` (`MicServer.PORT`; the `linux/arecord` stand-in connects to it with a token) that serves a WAV of a
-  known sentence. Record the screen at each step: before voice is on, while recording, while transcribing, after.
-  Record the text `promptText` would read.
-  (a) **Only the CLI changes:** get 2.1.326 (native installer or npm) and run it against 2.1.328. Is voice mode on before
-  `/voice hold` in 326 and off in 328? Where does 327+ read `voiceEnabled`? Which state loses the box `❯`?
-  (b) **Only Buddy's timing changes, CLI 2.1.328 fixed** (also the fallback if 2.1.326 can't be found): `prepare`'s
-  timing (MicServer stopped 1.5 s after `/voice hold`, then a tap), `listen`'s timing (MicServer up the whole time), and
-  Part A's wait. Which one gives the echo or "no speech", and which gives the sentence?
-  The answer names the cause, its smallest fix, and the repro for `## Part B acceptance`.
+- **Q1. A working/failing pair that differs in one thing only** (round 2 F1).
+  (a) **On the phone, Buddy fixed at fork.4, only the CLI changes.** Get 2.1.326 (`claude install 2.1.326`, or npm
+  `@anthropic-ai/claude-code@2.1.326`). Point `/root/.local/bin/claude` at it, force-stop Buddy, and Talk 3 times as in
+  the device check. Then do the same with 2.1.328, and restore the symlink (until then, every `claude` start on the phone uses it). Confirm which CLI ran from the newest
+  `/root/.claude/projects/-root-dictation/*.jsonl` (`version` field). This runs through the real microphone and
+  routing. Nicholas taps and speaks.
+  (b) **If 326 works and 328 fails (CLI cause):** drive Buddy's flow in a pty on both: `settings.json` with
+  `voiceEnabled: true`, `/voice hold`, space held from 1.5 s after it, audio from a stand-in for MicServer on
+  `127.0.0.1:8766` (`MicServer.PORT`; `linux/arecord` connects to it with a token) serving a WAV of a known sentence.
+  Record the screen and the text `promptText` would read: before voice is on, while recording, while transcribing,
+  after. Is voice mode on before `/voice hold` in 326 and off in 328? Does `prepare` stopping MicServer ~1.5 s after
+  `/voice hold` matter? Which state loses the box `❯`? This gives the cause, the fix, and the pty repro for
+  `## Part B acceptance`.
+  (c) **If both fail (Buddy-side cause):** on 2.1.328, compare Talk right after a force-stop (no Live call since)
+  with Talk right after a phone Live call has ended (Q3). Check Q4.
+  (d) **If both work:** the trigger is a state not yet reproduced. Bring Q2 and Q3 to the orchestrator.
 - **Q2. Ask Nicholas:** did dictation fail between 2026-11-18 03:33 (first 2.1.327 session, phone still on fork.2) and
   the fork.3 install (~05:00)? And was a watch call, a phone Live call or a Schedule involved when it failed?
 - **Q3. 026, teardown:** `LiveWatch.Call.on` (what makes `noEarpiece`, and so `liveRule`, true) is set only by
@@ -191,3 +231,5 @@ Done-when proof:
   `VOICE_RECOGNITION` `AudioRecord`?
 - **Q4. 027:** does any changed path (ChatHub `send`/`helperGone`, Schedules `keep`, Tools) start, write to or stop the
   hidden dictation session or MicServer?
+- **Q5. Nicholas, only if Q1 finds no failing setup:** ship Part A alone (its wait is the likely fix), with the cause
+  recorded as unproven, or keep 028 open?

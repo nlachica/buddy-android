@@ -61,3 +61,36 @@ F3 [major] A cancelled attempt's timeout can stop the next recording - During th
 F4 [minor] The command guard also discards genuine box text beginning with `/voice` - `plan.md:59-62` rejects a real input such as `/voicemail`, although Buddy sends exactly `/voice hold` (`ClaudeDictation.java:202`). -> Match the normalized command itself and its observed command-output form. Add a positive fixture for a longer word sharing the prefix alongside T5 and T6.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted. As in round 1, research has to do this, not the plan. `research.md` is still empty because the
+Researcher has not run yet, and Part B stays blocked until it does. Q1 now asks for a working/failing pair on the phone
+itself. Buddy stays at fork.4 and only the CLI changes: point the `claude` symlink at 2.1.326 (`claude install 2.1.326`
+or npm), then at 2.1.328, and Talk 3 times on each. That uses the real microphone and routing, so 026 is covered too.
+The session's `.jsonl` `version` field confirms which CLI ran. Q1 then branches. If 326 works and 328 fails, the CLI is
+the cause, and the pty run on 328 shows which Buddy step it breaks. If both fail, the cause is on Buddy's side: compare
+the same Talk right after a force-stop with Talk after a phone Live call has ended (Q3). The pty-plus-WAV run now only
+records what the screen shows in each state. It no longer tests the cause, and the timing-only comparison is gone as a
+cause test, for the reason you gave. `## Part B acceptance` item 3 now requires the "after" check to repeat the setup
+that failed: the pty with WAV for a CLI cause, the phone for a routing cause (after release). New Q5 for Nicholas: if
+no failing setup can be reproduced, does Part A ship alone with the cause recorded as unproven?
+F2: accepted, with a smaller fix than the cleanup at each timeout. `sessionLang` is now set only once voice mode is on.
+`ensureSession` clears it next to `session = null` (line 182), drops the assignment at line 194, and sets it after the
+`Hold space to record` wait succeeds. Any throw (either timeout, PREP, interrupt) therefore leaves `ready()` false, and
+the next call's existing line 181 finishes the half-started session and starts a fresh one, `/voice hold` included. The
+voice-wait timeout is now a plain `throw`, and its `session.finish(); session = null;` is gone. Line 200 is unchanged.
+Proof: a diff check (no `sessionLang = lang` before the voice wait), plus fault check D1 below.
+F3: accepted. In `listen`'s catch (line 65), the posted runnable now does `if (listener == l) end(l, ...)`. A cancelled
+attempt already got `onEnd(null)` from `cancel()`, so its late error is dropped, and it no longer stops the next tap's
+microphone or hides its bar. One upstream line changes and `end()` does not. Proof: fault check D2.
+On the checks for F2/F3: no unit test, for the same reason as round 1 F3 (no Robolectric; `listen`/`ensureSession` need
+`Linux.exec`, a pty and a Looper). Instead there are two device fault checks after release. They use a one-shot stand-in
+for `claude`: a script that the `claude` symlink points to for the test. While it is armed, it prints a bare box and
+sleeps, so voice mode never comes on. Unarmed, it execs the real binary. D1 (failed warm-up, then a same-language tap):
+arm 1 start, force-stop Buddy, open a chat, wait 20 s, tap and speak; the sentence is sent. D2 (cancel and immediate
+retry): arm 1 start, kill the hidden session (the process whose cwd is `/root/dictation`), tap, cancel within 10 s, tap
+again at once and speak; the sentence is sent, with no "couldn't start" toast and the bar up until then.
+F4: accepted. The guard now matches only Buddy's command: `(t + " ").startsWith("/voice hold ")` on the normalized
+text. That covers the typed command (T5) and the echo with its `⎿` output (T1, T6, T9). New positive fixture T11:
+boxes holding `/voicemail` and `/voice holder` come back unchanged.
