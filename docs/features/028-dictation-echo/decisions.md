@@ -52,3 +52,31 @@
   session came before fork.3, and the `/voice` wording changed from "is on" to "Turned on") point at the CLI. If that
   holds, Part A's wait may be the cause fix itself, and one review should see both.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Echo guard: `/voice` prefix only (replaces the `Hold space to record` part of the entry above)
+- Options: (a) keep rejecting any box text that contains `Hold space to record`; (b) reject only text that starts
+  with `/voice`; (c) also reject text that contains `⎿`.
+- Choice: (b). Plan review round 1 F2: (a) blanks real dictation such as "Hold space to record a memo". The `/voice
+  hold` command, typed or echoed with its output, always starts with `/voice`, and the box rule already skips other
+  history. (c) adds nothing that (b) and the box rule miss. `Hold space to record` stays as the readiness wait's signal only.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - If voice mode doesn't come on: drop the session and use the existing error (replaces choice (a) above)
+- Options: (a) carry on after 15 s (the old choice); (b) `session.finish(); session = null;` and throw
+  `dictation_claude_code_no_start`; (c) carry on, but mark the session not reusable (`sessionLang = null`).
+- Choice: (b). Plan review round 1 F3: under (a), `ready()` stays true for a session whose voice mode never came on,
+  so every later tap reuses it and loses the speech. (b) uses existing strings and paths: `listen` reports
+  start-failed, `prepare` ignores it, and the next tap starts fresh. `session = null` is needed because `finish()` only
+  hangs up. (c) hides the failure as "no speech" and still restarts on every tap. Cost: if the CLI drops `Hold space to
+  record`, every tap fails loudly until a one-string fix. No unit test for this branch: `ensureSession` needs
+  `Linux.exec` and a pty, so a seam would grow upstream's diff. Proof is a diff check and the device check.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Gate for Part B (the cause)
+- Options: (a) ship Part A as the fix, with the cause inferred; (b) code Part B only after a controlled comparison names
+  the cause and gives a repro that fails before the fix and returns the words after it.
+- Choice: (b). The brief's clarification says to fix the cause, and plan review round 1 F1 showed that the 3-4 s delay
+  alone doesn't explain it. Q1 changes one variable at a time: only the CLI, or, with the CLI fixed, only Buddy's
+  timing (`prepare` stops MicServer about 1.5 s after `/voice hold`). If that proves Part A's wait is the cause fix,
+  Part B adds no code.
+- By: Planner (claude-opus-5-5)
