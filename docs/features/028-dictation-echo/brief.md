@@ -22,3 +22,6 @@ Talk with voice_input=claude put '/voice hold ⎿ Turned on voice mode (hold)...
 
 ## Clarifications
 <!-- Nicholas's later answers, dated, appended -->
+
+## Nicholas (important)
+Talk with voice_input=claude worked before 2026-11-18's releases (fork.3: 026, fork.4: 027), and no upstream code came in. So something we shipped (or the Claude CLI moving to 2.1.328) is the real trigger; the echo scrape is only the symptom. First find the regression: diff v2.3.12-fork.2..v2.3.12-fork.4 for anything touching the mic, audio routing (026 AudioRoute/CodexLive/Gate), the dictation session, MicServer, ChatHub/Schedules (027) or prompts/sessions. Fix the cause; keep the promptText guard as the small safety net.
