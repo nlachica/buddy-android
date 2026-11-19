@@ -31,3 +31,15 @@
   `static List<String> env(TimeZone)`.
 - Choice: extract `env(TimeZone)`, so the test checks the exact list that survives `env -i`, for fixed and DST zones.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - The zone file is copied from Android's tz database, not installed with Alpine's tzdata (round 1)
+- Supersedes "tzdata arrives through one check in Helper.sync". `TZ` still carries the IANA id.
+- Options: keep `apk add tzdata` and fix the review's findings (in the setup list, plus a synchronous install on
+  upgrade with retries, the browser installer sequenced after it, a per-file guard); or copy the phone's zone
+  entry (a complete TZif2 file) from `/apex/com.android.tzdata/etc/tz/tzdata` into `/usr/share/zoneinfo/<id>` in
+  `Linux.command`, before each launch, once per app process and zone.
+- Choice: the copy, because it needs no network or apk, so the first command after an upgrade already has the
+  zone (F1), nothing competes with the browser installer's apk (F2), and the guard is the exact file (F4); about
+  30 lines against more than that for the apk fixes. Checked on this phone: the database is readable, the layout is
+  as planned, and musl `date`/python read the entries right, DST included (plan.md, Design).
+- By: Planner (claude-opus-5-5)
