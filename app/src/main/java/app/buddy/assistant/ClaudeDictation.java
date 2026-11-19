@@ -244,8 +244,8 @@ final class ClaudeDictation {
     static String promptText(String screen) {
         String[] lines = screen.split("\n");
         int start = -1;
-        for (int i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].contains("❯")) {
+        for (int i = lines.length - 1; i > 0; i--) {
+            if (lines[i].contains("❯") && lines[i - 1].trim().startsWith("─")) { // only the input box, not the history above it
                 start = i;
                 break;
             }
@@ -257,9 +257,10 @@ final class ClaudeDictation {
             if (ln.trim().startsWith("─") || ln.trim().isEmpty()) break;
             sb.append(' ').append(ln.trim());
         }
-        String t = sb.toString();
-        if (t.contains("ALSA lib") || t.contains("keep holding")) return ""; // a status or error line, not words
-        return t.replaceAll("\\s+", " ").trim();
+        String t = sb.toString().replaceAll("\\s+", " ").trim();
+        // a status or error line, or our own /voice hold (typed or echoed), not words
+        if (t.contains("ALSA lib") || t.contains("keep holding") || (t + " ").startsWith("/voice hold ")) return "";
+        return t;
     }
 
     private static void clearPrompt() {
