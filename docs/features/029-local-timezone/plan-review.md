@@ -102,3 +102,11 @@ New unit tests use an unrelated `outside/x`:
 
 Out of scope: a guest that deliberately swaps a checked directory for a link between the check and the write. Guest
 code already runs as Buddy's own uid.
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] Node still returns yesterday in Vancouver - The plan copies Android’s TZif file for musl and assumes the IANA id suffices for Node (plan.md:29–34, 64–68). In Buddy’s Alpine, with the proposed environment and `TZ=America/Vancouver`, Node v24.22.3 reports tzdata `2025b`. At `2026-11-20T07:30:00Z`, both `Date.toString()` and `Intl.DateTimeFormat` with `timeZone: process.env.TZ` return November 19 at 23:30. Vancouver’s local time is November 20 at 00:30 under the permanent UTC−07 rule included in the phone’s reported `2026e` data. ICU reads its own time-zone resources, so copying the TZif file leaves this discrepancy in place. -> Keep the IANA id, add this instant to the three-runtime check, and specify a verified way to supply current ICU time-zone data to existing Node installs. [IANA 2026b release](https://www.iana.org/time-zones/releases/2026b) · [ICU time-zone data updates](https://unicode-org.github.io/icu/userguide/datetime/timezone/#updating-the-time-zone-data)
+
+F2 [major] Verification cleanup can delete unrelated live zone files - The absence check at plan.md:135 establishes the initial state only. If another Buddy session installs tzdata during the check, the recursive deletion at plan.md:149 removes its newly installed files and leaves apk recording the package as installed. The plan itself allows this install (plan.md:13). -> Keep the live-rootfs check. Record the two files it creates. If apk now owns either file or the tree contains unexpected entries, leave it intact and report the changed precondition. Otherwise unlink only the unchanged test copies and use `rmdir` on the directories the check created.
+
+VERDICT: REVISE
