@@ -94,3 +94,11 @@ again at once and speak; the sentence is sent, with no "couldn't start" toast an
 F4: accepted. The guard now matches only Buddy's command: `(t + " ").startsWith("/voice hold ")` on the normalized
 text. That covers the typed command (T5) and the echo with its `⎿` output (T1, T6, T9). New positive fixture T11:
 boxes holding `/voicemail` and `/voice holder` come back unchanged.
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [blocker] The regression still has no demonstrated cause or repair - `brief.md:27` requires finding what changed. `diagnosis.md:32` says the failing recording state was never observed, `research.md:2` has no results, and `plan.md:135` still leaves the repair as a placeholder. Two failures on fork.4 would also leave the cause open. That comparison keeps Buddy fixed, so it cannot establish the “Buddy-side cause” claimed at `plan.md:222`. -> Run Q1 and record a working and failing pair that isolates the trigger. If both CLIs fail, hold the CLI fixed and isolate the relevant Buddy change or phone state. Use that evidence to specify the smallest repair and the before/after check on the failing setup.
+
+F2 [major] The device checks can pass without exercising the startup failure they claim to cover - D1's stand-in prints `❯` immediately (`plan.md:179-185`), so it always passes the first prompt wait at `ClaudeDictation.java:197`. A build that cleans up only after the later voice-mode timeout would pass D1 while retaining round 2 F2. Also, any Claude launch can consume the armed counter, including the model-list query at `linux/buddy-run:123`. -> For D1, withhold the first prompt beyond 30 seconds while keeping the process alive, then check that the same-language tap launches a fresh session and sends the sentence. Keep D2's bare prompt to exercise the voice-mode timeout. Limit the stand-in to the dictation startup (`cd /root/dictation && exec claude`, `ClaudeDictation.java:193`) and record which launch took the fault so a normal successful tap cannot count as a pass.
+
+VERDICT: REVISE
