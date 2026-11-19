@@ -121,3 +121,6 @@
   explain why 326 worked. (b) holds Buddy fixed and uses the real input path. If both CLIs fail, the next comparison
   is the phone's Live-call state (Q3). If no failing setup is found, Nicholas decides (Q5).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Orchestrator: plan accepted after round 3; Part A ships, Part B dropped
+- Strongest evidence: CLI moved to 2.1.327/328 on 2026-11-17/18 (when Talk broke), and /voice hold now takes 3-4 s against Buddy's fixed 1.5 s wait, so Buddy holds space before voice mode is on. Part A (wait for 'Hold space to record', bounded; only the real input box counts; reject the /voice echo) fixes that cause. The controlled comparison is the on-device test after install: if Talk still fails, reopen as Part B. D1/D2 stand-in device checks are dropped; the real phone test replaces them.
