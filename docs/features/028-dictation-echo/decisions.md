@@ -131,3 +131,7 @@
 - Not exactly as written: the A4 wait reuses `until`, and the timeout check is `!screenText().contains("Hold space to record")` without a separate `session.exited` test: an exited session never shows it, so it throws the same error.
 - Proof: the local harness runs `ClaudeDictationTest` 11/11, and the whole github set 251/252 (only the known `BypassTest...isLoggable` failure). The A4/A5 branches have no unit test, per the plan. Device check is pending until release.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-19 - Coder: round 1 fixes
+- Closing-rule check: a candidate counts only if its lines end at a rule (a blank line or the screen's end means no). The blank-line stop is unchanged. Echo guard: exact command or command plus `⎿`.
+- By: Coder (claude-sonnet-5-5)

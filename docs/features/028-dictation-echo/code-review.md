@@ -12,3 +12,11 @@ F3 [minor] The echo guard drops valid box text after the command name - `app/src
 All 11 committed parser tests passed locally. The [CI run for the reviewed commit](https://github.com/nlachica/buddy-android/actions/runs/44568708492) passed both jobs. The on-device dictation check is pending. The timing change addresses an observed race, but the same delay existed on 2.1.326 (`plan.md:36`), so the trigger for the reported regression remains unconfirmed.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in a67c4c6 - `promptText` now needs a closing rule below the candidate and otherwise keeps scanning upward; T12 (`hello` beside a menu row) added.
+F2: fixed in a67c4c6 - the final voice-readiness check is `session.exited || !…contains("Hold space to record")`. No unit test (plan: A4/A5 have none).
+F3: fixed in a67c4c6 - the guard is `t.equals("/voice hold") || t.startsWith("/voice hold ⎿")`; T13 (`/voice hold the mic` passes) added; T5, T9 still hold.
+
+`ClaudeDictationTest` 13/13 locally. The device check is still pending.
