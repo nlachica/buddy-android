@@ -205,7 +205,7 @@ final class ClaudeDictation {
         while (System.currentTimeMillis() < until && !session.exited && !session.emulator.screenText().contains("Hold space to record")) {
             Thread.sleep(200);
         }
-        if (!session.emulator.screenText().contains("Hold space to record")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
+        if (session.exited || !session.emulator.screenText().contains("Hold space to record")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
         sessionLang = lang; // last: a session that never got voice mode on is not reusable
         clearPrompt();
     }
@@ -249,24 +249,22 @@ final class ClaudeDictation {
 
     static String promptText(String screen) {
         String[] lines = screen.split("\n");
-        int start = -1;
         for (int i = lines.length - 1; i > 0; i--) {
-            if (lines[i].contains("❯") && lines[i - 1].trim().startsWith("─")) { // only the input box, not the history above it
-                start = i;
-                break;
+            if (!lines[i].contains("❯") || !lines[i - 1].trim().startsWith("─")) continue; // only the input box, not the history above it
+            StringBuilder sb = new StringBuilder(lines[i].substring(lines[i].indexOf('❯') + 1));
+            int j = i + 1;
+            for (; j < lines.length; j++) {
+                String ln = lines[j].trim();
+                if (ln.startsWith("─") || ln.isEmpty()) break;
+                sb.append(' ').append(ln);
             }
+            if (j == lines.length || lines[j].trim().isEmpty()) continue; // no closing rule: that rule was the box's bottom one
+            String t = sb.toString().replaceAll("\\s+", " ").trim();
+            // a status or error line, or our own /voice hold (typed, or echoed with its ⎿ output), not words
+            if (t.contains("ALSA lib") || t.contains("keep holding") || t.equals("/voice hold") || t.startsWith("/voice hold ⎿")) return "";
+            return t;
         }
-        if (start < 0) return "";
-        StringBuilder sb = new StringBuilder(lines[start].substring(lines[start].indexOf('❯') + 1));
-        for (int i = start + 1; i < lines.length; i++) {
-            String ln = lines[i];
-            if (ln.trim().startsWith("─") || ln.trim().isEmpty()) break;
-            sb.append(' ').append(ln.trim());
-        }
-        String t = sb.toString().replaceAll("\\s+", " ").trim();
-        // a status or error line, or our own /voice hold (typed or echoed), not words
-        if (t.contains("ALSA lib") || t.contains("keep holding") || (t + " ").startsWith("/voice hold ")) return "";
-        return t;
+        return "";
     }
 
     private static void clearPrompt() {

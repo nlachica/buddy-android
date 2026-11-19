@@ -73,4 +73,14 @@ public class ClaudeDictationTest {
         assertEquals("/voicemail", ClaudeDictation.promptText(BANNER + ECHO + box("❯ /voicemail")));
         assertEquals("/voice holder", ClaudeDictation.promptText(BANNER + ECHO + box("❯ /voice holder")));
     }
+
+    @Test
+    public void menuRowBelowTheBoxIsNotText() { // T12
+        assertEquals("hello", ClaudeDictation.promptText(RULE + "\n❯ hello\n" + RULE + "\n❯ menu item\n"));
+    }
+
+    @Test
+    public void textAfterTheCommandNamePasses() { // T13
+        assertEquals("/voice hold the mic", ClaudeDictation.promptText(box("❯ /voice hold the mic")));
+    }
 }
