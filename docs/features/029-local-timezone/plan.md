@@ -45,15 +45,27 @@ musl reads these entries as they are: `America/Dawson_Creek` gave `date` and pyt
 
 Pieces, all in `Linux.java` (the one launcher for chats, Codex, terminals, sshd, the browser helper, `Linux.exec`):
 1. `static List<String> env(TimeZone zone)`: today's `env -i` entries plus `"TZ=" + zone.getID()`.
-2. `static boolean copyZone(File tzdata, File zoneinfo, String id) throws IOException`: plain Java
-   (`RandomAccessFile`): checks the `tzdata` magic, reads the header and the whole index in one read, finds `id`,
-   writes that entry's bytes to `<zoneinfo>/<id>.tmp` (parent dirs made) and renames it over `<zoneinfo>/<id>`.
-   Returns false, writing nothing, when `id` isn't in the index. Only names found in Android's index become paths.
-3. `command()`: `TimeZone tz = TimeZone.getDefault(); zone(root(c), tz.getID()); a.addAll(env(tz));` where
+2. `static boolean copyZone(File tzdata, File root, String id) throws IOException`. It is plain Java
+   (`RandomAccessFile`, plus `java.nio.file.Files`, which `Backup` and `Mirrors` already use). It checks the
+   `tzdata` magic, reads the header and the whole index in one read, and finds `id`. If `id` isn't in the index, or
+   the magic is wrong, it returns false and writes nothing, so only names from Android's index become paths.
+   It then writes the entry to `<root>/usr/share/zoneinfo/<id>` and never follows a link in the guest tree. Buddy
+   keeps the guest's symlinks (`untar`), and agents can add more:
+   - Every directory from `root` down (`usr`, `share`, `zoneinfo`, then the id's own, e.g. `America`) must be a
+     real directory (`Files.isDirectory(p, NOFOLLOW_LINKS)`). If it is missing, it is made with
+     `Files.createDirectory`, which runs mkdir and fails instead of following a link. If a link or a file is there,
+     it throws `IOException` and writes nothing.
+   - The bytes go to `<id>.tmp`. Any existing one is removed first (`Files.deleteIfExists` unlinks a link, never
+     its target), then the file is opened with `CREATE_NEW` (O_EXCL, which fails instead of following a link).
+   - `Files.move(tmp, target, ATOMIC_MOVE)` runs rename(2). It replaces whatever is at the target, a link
+     included, without following it.
+   Out of scope: a guest that deliberately swaps a checked directory for a link between the check and the write.
+   Guest code already runs as Buddy's own uid.
+3. `command()`: `TimeZone tz = TimeZone.getDefault(); zone(root(c), tz.getID()); a.addAll(env(tz));`. Here
    `private static synchronized void zone(File root, String id)` returns at once when `id` equals the zone copied
-   earlier in this app process and the file exists; otherwise it calls `copyZone` and remembers `id`; an
-   `IOException` is logged and the launch goes on (TZ is still passed: node and Claude Code are right, musl falls
-   back to UTC as today).
+   earlier in this app process and the target is still a regular file (`NOFOLLOW_LINKS`). Otherwise it calls
+   `copyZone` and remembers `id`. An `IOException` is logged and the launch goes on (TZ is still passed: node and
+   Claude Code are right, musl falls back to UTC as today).
    So the file is there before the first process starts (no network, no background task), a new zone after travel
    is copied on the next launch, and each app start rewrites it once (Android tz updates; an empty or partial file;
    a reinstalled rootfs). The work is one ~31 KB index read and a 1-3 KB write, once per app process; terminals
@@ -64,9 +76,14 @@ Alternatives considered:
 - POSIX string + dangling `/etc/localtime` symlink naming the id, for ICU: rejected, node still ignored it (probe).
 - POSIX string when tzdata is missing, id when present: rejected, it breaks Claude Code exactly when tzdata is missing.
 - Java writes a TZif file generated from `ZoneRules`: rejected, ~60 lines; Android already ships the compiled file.
-- Alpine's `tzdata` via `apk add` (round 0 of this plan): rejected after review: it needs the network, so the first
+- Alpine's `tzdata` via `apk add` (round 0 of this plan): rejected after review. It needs the network, so the first
   command after an upgrade (or offline) is still UTC, and its apk transaction races the browser installer's (F1,
   F2). Fixing that takes synchronous installs, retries and lock ordering: more code than copying one local file.
+- Keep the file in Buddy's own storage and bind it onto `/usr/share/zoneinfo/<id>` with proot `-b` (review round 2):
+  rejected. proot resolves a bound path only while its parent directories exist on disk (termux/proot
+  `src/path/canon.c:136-185`). It creates missing parents as placeholders when it starts and removes them when it
+  exits (`src/path/glue.c`, `build_glue`). So the first chat to end would put every other running process back on
+  UTC.
 
 ## Steps
 1. `app/src/main/java/app/buddy/assistant/Linux.java`: add `static List<String> env(TimeZone zone)` returning
@@ -74,9 +91,10 @@ Alternatives considered:
    entries, same order, `TZ` added); `command()` does `a.add("/usr/bin/env"); a.add("-i"); a.addAll(env(TimeZone.getDefault()))`.
    One comment line: an IANA id, not a POSIX rule, because Claude Code's runtime only takes ids.
    Test in the same commit: `app/src/test/java/app/buddy/assistant/LinuxTimeZoneTest.java`, the `env` cases.
-2. `Linux.java`: add `copyZone(File, File, String)`, the `zone(File, String)` guard with its one static field, and
-   the call in `command()` before `env`; the `tzdata` path as a constant with a one-line comment (Android's tz
-   database, one TZif file per zone, read by musl from `/usr/share/zoneinfo`). About 30 lines.
+2. `Linux.java`: add `copyZone(File tzdata, File root, String id)` with the link-safe write, the
+   `zone(File, String)` guard with its one static field, and the call in `command()` before `env`. Add the `tzdata`
+   path as a constant with a one-line comment (Android's tz database, one TZif file per zone, read by musl from
+   `/usr/share/zoneinfo`). About 45 lines.
    Tests in the same commit: the `copyZone` cases in `LinuxTimeZoneTest` (see Test plan).
 
 After merge and `update_buddy install=true` (orchestrator, not the Coder):
@@ -97,28 +115,43 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
   - The other entries are unchanged (`HOME=/root`, `LANG=C.UTF-8`, the `PATH=` line), guarding the refactor.
 - **Zone file copy (unit, same class, `TemporaryFolder`):** the test writes a small file in the bionic layout above
   (`tzdata2026e\0` header, two index entries, payloads at different `start`s):
-  - `copyZone(f, dir, "America/Dawson_Creek")` returns true and `dir/America/Dawson_Creek` holds exactly the first
-    payload; the second id gives exactly the second payload (proves `start` is relative to `data_offset`).
-  - An id not in the index (`GMT+05:30`) returns false and creates nothing.
-  - A target that already exists empty (and an empty `America/` dir) is replaced by the full payload; no `.tmp`
-    is left (F4).
+  - On an empty `root`, `copyZone(f, root, "America/Dawson_Creek")` returns true, creates
+    `root/usr/share/zoneinfo/America/`, and `.../America/Dawson_Creek` holds exactly the first payload (first
+    launch). The second id gives exactly the second payload, which proves `start` is relative to `data_offset`.
+  - An id not in the index (`GMT+05:30`) returns false and creates nothing, not even directories.
+  - A target that already exists empty is replaced by the full payload, and no `.tmp` is left (F4).
   - A file without the `tzdata` magic returns false.
-- **Before merge, in this phone's Alpine (Verifier; same rootfs, musl, python3 and node as the app's):**
-  1. Take the real `America/Dawson_Creek` and `Antarctica/Troll` entries from Android's database with `phone_shell`,
-     using the same layout `copyZone` parses (header int32s at 12 and 16, 52-byte entries, `start` relative to
-     `data_offset`): print `sha256sum` and line-wrapped `base64` of each, decode into `/usr/share/zoneinfo/<id>`
-     here, and check the sha256 matches (redo on a mismatch: hand-copied base64 can break).
-  2. Under the exact list from `Linux.env` (`env -i HOME=/root LANG=C.UTF-8 TZ=<id> TERM=... PATH=...`), print
-     `%F %H:%M %z` for the same instant from `date -d @t`, `python3` (`time.localtime(t)`) and `node` (local
-     getters plus `getTimezoneOffset`):
-     - `TZ=America/Dawson_Creek`, t=1795140000 (2026-11-20 02:00Z, the UTC date is already tomorrow): all three
-       `2026-11-19 19:00 -0700`.
-     - DST, `TZ=Antarctica/Troll`: t=1783000000 all three `2026-07-02 15:46 +0200`; t=1768000000 all three
-       `2026-01-09 23:06 +0000`.
-  3. Delete the Troll file; the Dawson Creek one may stay (the app writes the same bytes).
+  - Links (review round 2, F2), with an unrelated file `outside/x` of known bytes:
+    - `root/usr/share/zoneinfo/America` is a symlink to `outside/`: `IOException`, and `outside/` holds only `x`,
+      unchanged.
+    - The target and a stale `Dawson_Creek.tmp` are both symlinks to `outside/x`: the copy returns true, `x` is
+      unchanged, the target is now a regular file (`NOFOLLOW_LINKS`) with the payload, and no `.tmp` is left.
+- **Before merge, in this phone's Alpine (Verifier; same rootfs, musl, python3 and node as the app's), running the
+  branch's own `copyZone` and `env` on Android's real database:**
+  1. Real database: start a python listener on `127.0.0.1:8029` in Linux that writes what it receives to a scratch
+     file and stops after the size `wc -c` reports (411,893 today). Then make one `phone_shell` call:
+     `T=/apex/com.android.tzdata/etc/tz/tzdata; wc -c < $T; sha256sum $T; nc 127.0.0.1 8029 < $T`. The copy's
+     sha256 must equal the phone's. The planner tried this on 2026-11-19 and the sha256 matched (`9525d4c7...`).
+  2. Precondition `test ! -e /usr/share/zoneinfo`: if it exists, stop and report, and touch nothing. Build the
+     branch's classes with the javac + JUnit harness as in 026 (`/tmp/buddy-build-026/check.sh` with `R` set to this
+     worktree, or its javac lines). Use Java 17 (`/usr/lib/jvm/java-17-openjdk`), because the default `java` 21
+     doesn't start here. Then compile and run a scratch driver in package `app.buddy.assistant`, outside the repo.
+     For `America/Dawson_Creek` and `Antarctica/Troll` it calls `Linux.copyZone(db, new File("/"), id)` and prints
+     true, then prints `String.join(" ", Linux.env(TimeZone.getTimeZone(id)))`. `/` here is the same tree Buddy
+     passes as `root(c)`. Then `/usr/share/zoneinfo/America/Dawson_Creek` must be a 683-byte regular file ending
+     `\nMST7\n`, and `.../Antarctica/Troll` must be 1878 bytes: the first launch created them.
+  3. Under `env -i` plus the exact list the driver printed, print `%F %H:%M %z` for the same instant from
+     `date -d @t`, `python3` (`time.localtime(t)`) and `node` (local getters plus `getTimezoneOffset`):
+     - `America/Dawson_Creek`, t=1795140000 (2026-11-20 02:00Z, when the UTC date is already tomorrow): all three
+       print `2026-11-19 19:00 -0700`.
+     - DST, `Antarctica/Troll`: at t=1783000000 all three print `2026-07-02 15:46 +0200`; at t=1768000000 all three
+       print `2026-01-09 23:06 +0000`.
+  4. Cleanup: `rm -rf /usr/share/zoneinfo` (it didn't exist before step 2, so only the check's files go), delete
+     the scratch database copy, then `test ! -e /usr/share/zoneinfo` again.
 - **CI (done-when 3):** PR checks green; `testGithubDebugUnitTest` in `build.yml` runs the new tests.
 - **On the phone, after install and step 3 (done-when 1; release smoke test), in a new chat:**
-  - `ls -l /usr/share/zoneinfo/America/Dawson_Creek` shows 683 bytes; `echo $TZ` prints `America/Dawson_Creek`.
+  - Before installing, `test ! -e /usr/share/zoneinfo` holds, so whatever is there afterwards came from the launcher.
+  - `ls -l /usr/share/zoneinfo/America/Dawson_Creek` shows 683 bytes, and `echo $TZ` prints `America/Dawson_Creek`.
   - `date`, `python3 -c 'import time;print(time.strftime("%F %T %Z"))'`, `node -e 'console.log(new Date().toString())'`
     all show the phone's local time and date (MST, same as the status bar).
   - Claude Code: the new transcript's `"type":"date"` attachment is the local date (after 17:00 local it must not
@@ -133,6 +166,8 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
 - **Only the phone's zone is installed:** `TZ=Europe/Paris date` in an agent's shell stays UTC unless it runs
   `apk add tzdata`. If it does, Buddy still rewrites the phone's zone file once per app start (same or newer data);
   harmless, though `apk audit` would list it.
+- **A link or a file in the zoneinfo path** (an agent's `ln -s /usr/share/zoneinfo ...`): Buddy writes nothing and
+  logs it. `date` and python show UTC as today, while node and Claude Code are still right.
 - **Zone ids Android lacks:** Android's custom `GMT+05:30` form isn't in the index, so no file, and musl reads that
   TZ as a POSIX rule with the wrong sign. Rare on a phone whose zone list is IANA; a non-goal.
 - **Running processes** keep their old TZ until restarted (a chat's next run, a new terminal); DST changes need

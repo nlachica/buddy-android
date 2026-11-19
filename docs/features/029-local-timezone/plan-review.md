@@ -56,3 +56,49 @@ F1 [major] The runtime check can pass with the launcher's copy disabled - At pla
 F2 [major] The host-side write can follow links outside the rootfs - Plan.md:48–51 checks the zone name against Android's index, then opens a predictable `<id>.tmp` under a guest-writable directory. The name check says nothing about existing links in that path. Buddy preserves guest symlinks (Linux.java:218–223), and its existing host-side writer explicitly removes a destination link before opening it (Linux.java:360–365). A linked parent or temp file can redirect the write and damage another file accessible to Buddy. -> Keep the extracted bytes in an app-owned directory outside the guest tree and expose the zone file with the launcher's existing proot bind mechanism (Linux.java:84–88), or specify a confined write that safely handles linked parents and exclusively creates the temporary file. Cover preservation of an unrelated file in a temporary-directory test.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted in part. The pre-merge check now runs the branch's own code on the real database, starting from a
+rootfs with no zone file (plan.md, Test plan, "Before merge"):
+1. Android's whole database comes into Linux over localhost in one `phone_shell` call
+   (`nc 127.0.0.1 8029 < /apex/com.android.tzdata/etc/tz/tzdata`, received by a python listener), and its sha256
+   must equal the phone's. I tried it today: 411,893 bytes, `9525d4c7...`, equal.
+2. It starts only if `test ! -e /usr/share/zoneinfo` holds, and stops otherwise. A driver compiled against the
+   branch (the javac harness) calls `Linux.copyZone(db, /, id)` and prints `Linux.env(zone)`. The file must now
+   exist (Dawson Creek: 683 bytes, ending `\nMST7\n`), which shows the first launch creates it.
+3. The three runtimes run under `env -i` plus the printed list, with the same instants and expected lines as before.
+4. Cleanup is `rm -rf /usr/share/zoneinfo`. The directory didn't exist before step 2, so only the check's own files
+   go and no earlier file is touched. The post-install check now also starts with `test ! -e`, so it can only pass
+   if the installed launcher writes the file.
+Rejected: a disposable Alpine rootfs. Running a second rootfs needs Buddy's proot. `phone_shell` refuses to run
+Buddy's own binary (it returned BLOCKED when I tried), and this Linux has no second proot. The live rootfs, with
+the precondition and the exact cleanup, gives the same evidence ("starts empty, the branch's code creates the file,
+the runtimes read it under the branch's env") and changes no file that was there before.
+
+F2: accepted, as a write that never follows a link. I rejected the proot bind after reading proot's source
+(termux/proot at the submodule's commit 52d65a4):
+- proot resolves a bound path only while its parent directories exist on disk. In `src/path/canon.c:136-185`, a
+  missing non-final component gives ENOENT.
+- For a bind whose parents are missing, proot creates them in the rootfs as placeholders when it starts and removes
+  them when that proot exits (`src/path/glue.c`, `build_glue` and `remove_placeholder`).
+- Chats, terminals and sshd each run their own proot. The first one to exit would delete
+  `/usr/share/zoneinfo/America` and put every other running process back on UTC.
+- Having Buddy make those directories itself would bring back the same host-side walk, plus a bind.
+
+So `copyZone(tzdata, root, id)` now writes with `java.nio.file` (stdlib, already used by `Backup` and `Mirrors`)
+and never follows a link:
+- Each directory from `root` down must be a real directory (`isDirectory(NOFOLLOW_LINKS)`), or is created with
+  `createDirectory`, which runs mkdir and fails instead of following a link. If a link or a file is there, it throws
+  `IOException` and writes nothing.
+- The temp file is first removed with `deleteIfExists` (which unlinks a link, never its target), then created
+  with `CREATE_NEW` (O_EXCL).
+- `Files.move(..., ATOMIC_MOVE)` runs rename(2), which replaces a linked target without following it.
+
+New unit tests use an unrelated `outside/x`:
+- `America` is a link to `outside/`: `IOException`, and `outside/` is unchanged.
+- The target and a stale `.tmp` are both links to `outside/x`: `x` is unchanged, the target is now a regular file
+  holding the payload, and no `.tmp` is left.
+
+Out of scope: a guest that deliberately swaps a checked directory for a link between the check and the write. Guest
+code already runs as Buddy's own uid.

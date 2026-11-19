@@ -43,3 +43,24 @@
   30 lines against more than that for the apk fixes. Checked on this phone: the database is readable, the layout is
   as planned, and musl `date`/python read the entries right, DST included (plan.md, Design).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - The zone file is written into the guest tree without following links (round 2)
+- Options: (a) keep the bytes in Buddy's own storage and bind them onto `/usr/share/zoneinfo/<id>` with proot `-b`;
+  (b) write into the guest tree, checking each directory with `NOFOLLOW_LINKS`, creating the temp file with
+  `CREATE_NEW` (O_EXCL) after `deleteIfExists`, and renaming over the target.
+- Choice: (b). In (a), proot resolves a bound path only while its parent directories exist on disk (termux/proot
+  52d65a4, `src/path/canon.c:136-185`). It creates missing parents as placeholders when it starts and removes them
+  when it exits (`src/path/glue.c`, `build_glue`). The first of several concurrent proots (chat, terminal, sshd) to
+  exit would put the others back on UTC, and making the directories from Buddy needs the same walk as (b), plus a
+  bind. (b) is stdlib `java.nio.file`, about 15 more lines, and unit-testable with real symlinks. It does not cover
+  a guest that deliberately races the check, since guest code already runs as Buddy's own uid.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - The pre-merge runtime check runs in the live rootfs from an absent zoneinfo, not a disposable rootfs
+- Options: a disposable Alpine rootfs (review round 2, F1); the live rootfs, gated on `/usr/share/zoneinfo` not
+  existing and removing it afterwards.
+- Choice: the live rootfs. A second rootfs needs Buddy's proot, which `phone_shell` refuses to run (BLOCKED), and
+  this Linux has no other proot. The gate and the exact cleanup still show that the branch's `copyZone` creates the
+  file from Android's real database (brought in over localhost, sha256-checked). They change no file that existed
+  before, and they leave the post-install check unable to pass without the launcher.
+- By: Planner (claude-opus-5-5)
