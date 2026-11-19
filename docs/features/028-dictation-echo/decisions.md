@@ -124,3 +124,10 @@
 
 ## 2026-11-19 - Orchestrator: plan accepted after round 3; Part A ships, Part B dropped
 - Strongest evidence: CLI moved to 2.1.327/328 on 2026-11-17/18 (when Talk broke), and /voice hold now takes 3-4 s against Buddy's fixed 1.5 s wait, so Buddy holds space before voice mode is on. Part A (wait for 'Hold space to record', bounded; only the real input box counts; reject the /voice echo) fixes that cause. The controlled comparison is the on-device test after install: if Talk still fails, reopen as Part B. D1/D2 stand-in device checks are dropped; the real phone test replaces them.
+
+## 2026-11-19 - Coder: Part A built as planned; Part B not coded
+- Steps 1, 2, 3, 4, 4b done as the plan says, one commit each. Part B has no steps: the orchestrator's entry above dropped it.
+- Step 2's red cases were T1, T5, T6, T9 as expected, and also T8 (its second case puts `❯` on line 0, which the old scan accepted).
+- Not exactly as written: the A4 wait reuses `until`, and the timeout check is `!screenText().contains("Hold space to record")` without a separate `session.exited` test: an exited session never shows it, so it throws the same error.
+- Proof: the local harness runs `ClaudeDictationTest` 11/11, and the whole github set 251/252 (only the known `BypassTest...isLoggable` failure). The A4/A5 branches have no unit test, per the plan. Device check is pending until release.
+- By: Coder (claude-sonnet-5-5)
