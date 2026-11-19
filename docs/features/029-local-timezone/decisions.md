@@ -64,3 +64,8 @@
   file from Android's real database (brought in over localhost, sha256-checked). They change no file that existed
   before, and they leave the post-install check unable to pass without the launcher.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - Orchestrator: plan accepted after round 3, with one design change for F1
+- F1 is real: Node's bundled ICU has stale rules for America/Vancouver (BC's 2026 permanent UTC-7), so an IANA region id gives Node the wrong hour/date. Change: pass a fixed-offset IANA id computed from the phone's CURRENT offset at process start, `Etc/GMT+7` for UTC-7 (sign inverted per IANA; half-hour offsets fall back to the region id). Node ICU, musl (copy that Etc file from Android's tzdata) and Python all agree, nothing depends on stale rule tables, and DST/travel still follow the phone because each new process re-reads the offset. Long-lived processes across a DST change are an accepted edge.
+- F2: verification only creates and removes its own files; never deletes apk-owned or unexpected entries.
+- Also remove the interim TZ=MST7 from ~/.claude/settings.json after install (orchestrator does this).
