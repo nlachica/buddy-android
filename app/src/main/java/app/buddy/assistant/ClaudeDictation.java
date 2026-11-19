@@ -238,8 +238,11 @@ final class ClaudeDictation {
 
     /** Text in Claude Code's input box (after the ❯ prompt, up to the box's bottom rule). */
     static String promptText() {
-        if (session == null) return "";
-        String[] lines = session.emulator.screenText().split("\n");
+        return session == null ? "" : promptText(session.emulator.screenText());
+    }
+
+    static String promptText(String screen) {
+        String[] lines = screen.split("\n");
         int start = -1;
         for (int i = lines.length - 1; i >= 0; i--) {
             if (lines[i].contains("❯")) {
