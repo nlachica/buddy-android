@@ -22,3 +22,5 @@ Agents get dates wrong after 17:00 local because Buddy's Linux runs on UTC (Linu
 
 ## Clarifications
 <!-- Nicholas's later answers, dated, appended -->
+
+Lesson (2026-11-19): TZ=MST7 crashed a node script that passes process.env.TZ to Intl timeZone (RangeError). Prefer an IANA TZ id (install tzdata if needed so date/python honor it); don't ship a POSIX-only TZ.
