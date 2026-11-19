@@ -48,3 +48,11 @@ replaced on the next app start, and the unit tests cover that case.
 F5: accepted - step 3 now uses `Account.logout`'s temp-file-and-rename (Account.java:660) under `umask 077`. It
 deletes `env.TZ` only when it equals `MST7`, drops an `env` left empty, and prints only `TZ-override-gone` (a `jq -e`
 boolean), never the settings. Tested on scratch copies: other env keys stay, a non-MST7 TZ is left alone, mode 600.
+
+## Round 2 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] The runtime check can pass with the launcher's copy disabled - At plan.md:107–111 the verifier creates the zone file and sets `TZ` by hand. At plan.md:118 the Dawson Creek file may stay in the live rootfs, so it can also make the post-install check at plan.md:121 pass if `command()` never provisions the file. The same cleanup unconditionally deletes the Troll file, even if it existed before the check. -> Start with an empty zoneinfo directory in a disposable Alpine rootfs. Run the candidate's provisioning and environment code against the real packed Android database, then use the resulting environment and files for the existing three-runtime comparisons. Verify the first launch creates the file. This can run before merge without installing an APK over Buddy or modifying Nicholas's zone files.
+
+F2 [major] The host-side write can follow links outside the rootfs - Plan.md:48–51 checks the zone name against Android's index, then opens a predictable `<id>.tmp` under a guest-writable directory. The name check says nothing about existing links in that path. Buddy preserves guest symlinks (Linux.java:218–223), and its existing host-side writer explicitly removes a destination link before opening it (Linux.java:360–365). A linked parent or temp file can redirect the write and damage another file accessible to Buddy. -> Keep the extracted bytes in an app-owned directory outside the guest tree and expose the zone file with the launcher's existing proot bind mechanism (Linux.java:84–88), or specify a confined write that safely handles linked parents and exclusively creates the temporary file. Cover preservation of an unrelated file in a temporary-directory test.
+
+VERDICT: REVISE
