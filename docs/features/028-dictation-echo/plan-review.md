@@ -49,3 +49,15 @@ F6: accepted. Q3 now asks about teardown, not object lifetime. `LiveWatch.begin`
 for a phone Live call (`CodexLive.java:253`). `LiveWatch.end` is called only from `CodexLive.end`, which returns early when
 `ses == null` (`:266-268`). Does any path end a phone Live call, or fail after `begin`, without reaching `LiveWatch.end()`,
 leaving `on` true during Talk?
+
+## Round 2 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [blocker] The cause of the regression is still unverified (round 1 F1 remains open) - `brief.md:27` requires finding what changed. `research.md:2` still contains only the template, and `plan.md:83-102` lists competing hypotheses. Changing the wait on 2.1.328 could show that a longer wait helps without explaining why dictation previously worked. A WAV injected at the socket also bypasses the Android microphone and routing suspected in Q3 (`MicServer.java:113`). -> Record a working and failing comparison that isolates the changed condition, then name the smallest fix and show that the same failing setup returns the spoken sentence after it. If the evidence points to routing, compare the affected call and device state on the phone.
+
+F2 [major] A prompt timeout can bypass the new voice-mode wait on the next tap - `ClaudeDictation.java:194` sets the reusable session language before either startup wait. If the first prompt arrives just after its 30 s deadline, line 200 has already thrown, the process is still alive, and no one has sent `/voice hold`. The next same-language tap returns at line 180. The cleanup in `plan.md:63-69` covers only the second wait. -> Use the same session cleanup for both startup timeouts. Check that a failed warm-up followed by a same-language tap reaches voice activation before Buddy starts holding space.
+
+F3 [major] A cancelled attempt's timeout can stop the next recording - During the new 15 s wait, the user can cancel Talk and tap again. The second tap starts microphone capture before waiting for the session lock (`ClaudeDictation.java:50-63`). If the first attempt then times out, its queued error calls `end(l, ...)`. Only the listener assignment in `end` checks ownership. It still stops the shared microphone and calls the old listener's `onEnd`, which hides the recording bar (`ClaudeDictation.java:169-174`, `ChatActivity.java:1943-1945`). -> Have the main-thread error callback return immediately when its listener is no longer current. Check cancel and immediate retry with the first acknowledgement withheld and the second supplied. The second tap should deliver its sentence.
+
+F4 [minor] The command guard also discards genuine box text beginning with `/voice` - `plan.md:59-62` rejects a real input such as `/voicemail`, although Buddy sends exactly `/voice hold` (`ClaudeDictation.java:202`). -> Match the normalized command itself and its observed command-output form. Add a positive fixture for a longer word sharing the prefix alongside T5 and T6.
+
+VERDICT: REVISE
