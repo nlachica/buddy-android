@@ -180,6 +180,7 @@ final class ClaudeDictation {
         if (session != null && !session.exited && lang.equals(sessionLang)) return;
         if (session != null) session.finish();
         session = null;
+        sessionLang = null;
         // first-run answers, folder trust, and the dictation language for this folder only
         // Claude Code's /voice checks that SoX is installed; recording itself goes through Buddy's stand-in rec/arecord
         String out = Linux.exec(c, "set -e; command -v sox >/dev/null || apk add -q sox; mkdir -p " + DIR + "/.claude; f=/root/.claude.json; [ -s $f ] || echo '{}' > $f;"
@@ -191,7 +192,6 @@ final class ClaudeDictation {
         if (!out.contains("PREP_OK")) throw new Exception(out.trim());
         // stderr off the screen: the sound library's complaints would otherwise be read back as the words
         session = TermSession.startHidden(c, 30, 100, "cd " + DIR + " && exec claude 2>>/tmp/dictation.err");
-        sessionLang = lang;
         // wait for the prompt, then switch voice mode on (hold to talk)
         long until = System.currentTimeMillis() + 30_000;
         while (System.currentTimeMillis() < until && !session.exited && !session.emulator.screenText().contains("❯")) {
@@ -200,7 +200,13 @@ final class ClaudeDictation {
         if (session.exited || !session.emulator.screenText().contains("❯")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
         Thread.sleep(400);
         session.write("/voice hold\r");
-        Thread.sleep(1500);
+        // voice mode takes 3-4 s to come on; holding space before that types spaces instead
+        until = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < until && !session.exited && !session.emulator.screenText().contains("Hold space to record")) {
+            Thread.sleep(200);
+        }
+        if (!session.emulator.screenText().contains("Hold space to record")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
+        sessionLang = lang; // last: a session that never got voice mode on is not reusable
         clearPrompt();
     }
 
