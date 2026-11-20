@@ -57,3 +57,61 @@ F4 [major] A speaker that accepts requests but never takes the route can leave t
 F5 [minor] D1 treats incoming speech as proof of audible playback - The “voice audible” log is driven by the incoming stream meter, which still runs while the element is muted (CodexLive.java:745-753, 1027-1034). A correctly held reply can produce that log before release, failing D1 at plan.md:172-173. -> Keep the listening check for actual output. Use the route and mute state to check release ordering, and treat “voice audible” only as evidence that speech arrived.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted. The window that is left goes to Nicholas.
+- Start muted: the page now declares `held = true`. In Java, `reconcile()`'s first statement sets `held` true for the
+  whole phone live call, before anything is read from Android. Only a `live()` tick that saw Android report the applied
+  device clears it (`held = !live(am)`, and `live()` returns `confirmed()` of the `cur` read at its start).
+  `CodexLive.start` posts the first `reconcile()` before the page loads, and the remote track needs the network's answer,
+  so the first playback always follows a fresh confirmation.
+- A switch during speech: it can't be prevented. The page doesn't choose its output device, because Android routes the
+  WebView's call audio. Android moves that audio as soon as the communication device changes, and an app hears of it
+  only afterwards (`getCommunicationDevice()`, polled every 300 ms, then the page's 70 ms tick). So a switch Buddy didn't
+  make, such as a headset that drops mid-sentence, can play up to ~0.4 s on the earpiece. Switches Buddy makes are held
+  from the tick that makes them.
+- This is now Open question 2 for Nicholas. It is not blocking. The default is to accept the window. A
+  communication-device listener would cut it to ~0.1 s; it is offered, not built.
+- The README no longer says "never plays on the earpiece". It says the call doesn't use the earpiece and states the
+  split second.
+- D4 tests a disconnect mid-speech and fails on a word heard from the earpiece, or anything over about half a second.
+  `confirmed()`'s unit cases cover only the tick logic, as the reviewer says.
+- (plan Design 4, Steps 3-4, Test plan D4, Risk 7, Open question 2, decisions.md)
+
+F2: accepted for the behaviour; the unit test is partly rejected. `held = LiveWatch.noEarpiece()` is now `reconcile()`'s
+first assignment, so the active call stays muted in these cases:
+- Ringing and phone-call modes. The live rule is false there, `live()` isn't called, and the other call's routing is
+  left as today.
+- A read that throws. Both callers swallow it, and `held` is already true.
+
+Recovery: the next `live()` tick that confirms the route releases it. No new unit test, because `reconcile()` needs
+AudioManager, and a test seam for a one-line rule grows the code for little proof. The proof is the existing `liveRule`
+cases (`MODE_RINGTONE` and `MODE_IN_CALL` are false), plus a code-review check: `held` is set before any read and cleared
+only by `held = !live(am)`. (plan Design 4, Step 3, Test plan "Goal" row, Risk 6)
+
+F3: accepted, narrowly. `LiveWatch.Call.poll()` gets one branch. While the watch has the voice, the pick is an explicit
+device, and `watchWins()` has turned false, it logs `<pick> is here: phone` and calls `decide()`. Its existing `stop()`
+hands the voice back to the phone, where `live()` has already applied the pick. Auto keeps "only a change of the setting
+decides again". A headset arriving during an Auto call on the watch is outside the brief, and LiveWatch's decision is a
+non-goal. Tests:
+- New `LiveWatchTest.aPickThatComesBackTakesTheVoiceFromTheWatch`. Forwarding clears with no setting change, both when
+  the watch is idle and mid-utterance, and Auto doesn't move.
+- New device check D5: LS2 off and the watch reachable, then LS2 on. The next reply is heard in LS2.
+
+(plan Design 5, Step 2, Test plan row 3, D5, Risk 8, Non-goals, decisions.md)
+
+F4: accepted. A slip still refuses the applied device, except the speaker's first slip since the last confirmed tick: the
+speaker is applied again once, for Chromium's startup pick. A second slip in a row refuses the speaker. With no headset,
+`liveAttempt` then gives `NONE`, and the existing "the phone speaker couldn't be used" ends the call after about 4 s
+instead of staying silent.
+- Mechanism: the pure `refuseSlip(applied, speakerSlipped)` plus one flag. The flag is cleared by a confirmed tick and
+  wherever `liveRefused` is cleared.
+- Test: new `AudioRouteTest.aSpeakerThatNeverTakesTheRouteEndsTheCall`. It chains the first slip (applied again), the
+  second (refused), and then `liveAttempt` giving `NONE`, or the buds when they are listed.
+
+(plan Design 4, Step 3, Test plan "Goal" row, Risks 2 and 6, decisions.md)
+
+F5: accepted. The device checks now say that `voice audible` only shows that speech arrived. D1's log check is the
+route line followed by `page voice released`, with every later held line followed by a release. Whether the first word
+is heard, and where, is Nicholas's ear. (plan Test plan D1 and its preamble)

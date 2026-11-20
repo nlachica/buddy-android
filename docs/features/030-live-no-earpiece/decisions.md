@@ -60,3 +60,38 @@
   spoken while the voice is held are lost (plan Risk 6). The brief's goal ("must never play on the earpiece") outweighs
   a short pause.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - The voice is held for the whole phone live call unless a tick confirmed the route (plan review round 2 F1, F2)
+- Options: hold only when `live()` sees a mismatch (the round 1 design: excluded modes and a failed read release the
+  voice); hold by default for the whole call and release only on a confirming `live()` tick; a test seam around
+  `reconcile()` for the mode cases.
+- Choice: hold by default. `reconcile()` sets `held = LiveWatch.noEarpiece()` before any read, and only `held =
+  !live(am)` clears it. Ringing, phone-call modes and a read that throws keep the active call muted, and the other call's
+  routing is left as today. The page starts held too. No test seam: the existing `liveRule` cases and code review prove
+  a one-line rule.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - A switch Android makes before Buddy sees it is accepted, and stated (plan review round 2 F1)
+- Options: promise "never" anyway; listen for Android's communication-device change (API 31) to cut the window to ~0.1 s;
+  accept the ≤~0.4 s window (poll plus page tick) and say so.
+- Choice: accept and state it (README, plan Risk 7), and ask Nicholas (plan Open question 2). The page can't pin its
+  output, and Android moves the audio before any app hears of it, so no design reaches zero. The listener is a few more
+  lines for ~0.3 s and stays an option for Nicholas. Switches Buddy makes, and the start of each reply, are held.
+- By: Planner (claude-opus-5-5); Nicholas may overrule
+
+## 2026-11-20 - The speaker gets one re-apply per confirmation, then it is refused (plan review round 2 F4)
+- Options: keep the speaker exempt from refusal (with the hold, a speaker that never confirms leaves the call silent
+  forever); refuse it on its first slip (Chromium's startup pick would end calls); cap how long the voice may be held.
+- Choice: `refuseSlip(applied, speakerSlipped)`. The speaker's first slip since the last confirmed tick is applied again,
+  and the second in a row refuses it. With no headset, the existing "no safe device" ends the call with its reason. One
+  flag, cleared by a confirmed tick and with `liveRefused`. A held-time cap would need the same state plus a timer.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - An explicit pick that comes back takes the voice from the watch (plan review round 2 F3)
+- Options: leave LiveWatch alone (with LS2 picked but away, the watch keeps the voice when LS2 returns, failing done-when
+  3); decide again on every `watchWins()` change, Auto included; decide again only while the watch has the voice, the
+  pick is an explicit device and `watchWins()` has turned false.
+- Choice: the narrow one, one branch in `Call.poll()` that calls the existing `decide()` / `stop()` handoff. Auto keeps
+  018/026's "only a change of the setting decides again", because LiveWatch's Auto decision is a non-goal. The voice
+  doesn't go back to the watch on its own if the pick leaves again (plan Risk 8).
+- By: Planner (claude-opus-5-5)
