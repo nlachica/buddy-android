@@ -14,3 +14,15 @@ F4 [major] The diagnosis includes private chat details - `docs/features/029-loca
 F5 [minor] A failed lookup is silent and can be cached - `app/src/main/java/app/buddy/assistant/Linux.java:113`. When `copyZone` returns false for an unrecognized database or missing entry, `zone` still sets `zoned`. If an empty regular target already exists, later launches skip the copy and the failure leaves no diagnostic. -> Set `zoned` only after a successful copy and log a false result while letting the launch continue.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+- F1: fixed in fa4de4f (`b.position(..)` is its own statement, twice, so no `Buffer.put`). `javac --release 8` shows no
+  `position`/`put` error now (the other errors are the missing JUnit/Android classes in my scratch run). CI is the required check and has not run.
+- F2: fixed in c891de4. The plan's pre-merge check now calls `zoneId(zone, t)` per test instant, passes that id to
+  `copyZone` and `env`, and expects `Etc/GMT+7` files and `TZ`. A Vancouver case is added: 2026-11-20 07:00Z (t=1795158000,
+  local midnight) must print `2026-11-20 00:00 -0700`. The post-install check expects `Etc/GMT+7`, no byte count.
+- F3: fixed in c891de4. The recursive `rm -rf` is gone: the driver records what it created, unlinks a file only if its
+  bytes match and no apk package owns it, `rmdir`s only empty directories it made, and leaves anything else intact.
+- F4: fixed in c891de4. Session ids, the quotation and the appointment are removed from `diagnosis.md`, with the
+  date-boundary example kept. The `runs/` logs that still hold the old text are git-ignored (`docs/features/*/runs/`), so they are not in the branch.
+- F5: fixed in d504942. `zoned` is set only when `copyZone` returns true, and false is logged and retried next launch.
