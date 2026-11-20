@@ -87,6 +87,11 @@ final class Voice {
         return current != null || ClaudeDictation.active() || CodexDictation.active();
     }
 
+    /** 031: the microphone is capturing now (listening() also holds while a cloud engine transcribes). */
+    static boolean capturing() {
+        return current != null || MicServer.recording();
+    }
+
     /** Languages offered for voice: {BCP-47 tag, name}. */
     static final String[][] LANGUAGES = {
             {"en-US", "English"}, {"fr-FR", "Français"}, {"de-DE", "Deutsch"}, {"ar-TN", "العربية · تونس"},

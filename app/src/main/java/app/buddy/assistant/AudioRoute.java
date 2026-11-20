@@ -248,9 +248,9 @@ final class AudioRoute {
                 ? now : from;
     }
 
-    /** 031: a refused device Android reports as the communication device (not the earpiece) is back: it connected late. */
-    static void unrefuse(Set<String> refused, String actual) {
-        if (actual != null && !actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":")) refused.remove(actual);
+    /** 031: a refused device Android reports as the communication device (not the earpiece) is back: it connected late; true then. */
+    static boolean unrefuse(Set<String> refused, String actual) {
+        return actual != null && !actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") && refused.remove(actual);
     }
 
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
@@ -311,13 +311,13 @@ final class AudioRoute {
     }
 
     /**
-     * The chosen device as Android routing sees it: Watch is Auto. 031: Auto while dictating is a connected Bluetooth
-     * headset's call link (a SCO named like a connected media output; not the watch's), so its microphone is the input;
+     * The chosen device as Android routing sees it: Watch is Auto. 031: Auto while the microphone captures (not while
+     * a transcript is awaited) is a connected Bluetooth headset's call link (a SCO named like a connected media output; not the watch's), so its microphone is the input;
      * "" when there is none. Read aloud isn't listening: it stays on the headset's media link.
      */
-    static String want(String saved, boolean listening, int[] comm, String[] commName, int[] out, String[] outName) {
+    static String want(String saved, boolean capturing, int[] comm, String[] commName, int[] out, String[] outName) {
         if (WatchVoice.KEY.equals(saved)) return "";
-        if (saved.isEmpty() && listening) {
+        if (saved.isEmpty() && capturing) {
             for (int i = 0; i < comm.length; i++) {
                 if (comm[i] == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && mediaHeadset(commName[i], out, outName)) {
                     return key(comm[i], commName[i]);
@@ -332,7 +332,7 @@ final class AudioRoute {
         AudioManager am = c.getSystemService(AudioManager.class);
         List<AudioDeviceInfo> comm = am.getAvailableCommunicationDevices();
         List<AudioDeviceInfo> out = java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS));
-        return want(Prefs.audioDevice(c), Voice.listening(), types(comm), names(comm), types(out), names(out));
+        return want(Prefs.audioDevice(c), Voice.capturing(), types(comm), names(comm), types(out), names(out));
     }
 
     /** Buddy applied this device key and Android reports it as the communication device (030). Main thread. */
@@ -413,7 +413,10 @@ final class AudioRoute {
             speakerSlipped = false;
         }
         appliedAt = lossFrom(applied, curKey, appliedAt, now); // from here on appliedAt is the time a loss counts from
-        unrefuse(liveRefused, curKey);
+        if (unrefuse(liveRefused, curKey)) { // F1: handed back to a late headset; the speaker it replaced stays eligible
+            applied = null;
+            speakerSlipped = false;
+        }
         if (slipped(applied, curKey, now - appliedAt, grace(applied, seen, curKey))) {
             // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
             if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);

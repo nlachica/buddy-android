@@ -1,5 +1,5 @@
 live voice call, Fri Nov 20 12:31:12 MST 2026, Buddy 2.3.14-fork.2
-    0.01 start: chat 480311123d60
+    0.01 start: chat CHAT_ID
     0.21 status: Connecting…
     0.25 page audio context running, 48000 Hz, page visible
     0.26 page audio context running
@@ -7,13 +7,13 @@ live voice call, Fri Nov 20 12:31:12 MST 2026, Buddy 2.3.14-fork.2
     0.56 route: slipped from 7:LS2 Freecom to 1:SM-G990W
     0.56 route: 2:SM-G990W applied
     1.26 page asks for [android.webkit.resource.AUDIO_CAPTURE]: granted
-    2.71 page mic:  {"autoGainControl":true,"channelCount":1,"deviceId":"default","echoCancellation":true,"groupId":"b5cb333098a01598e20f98ece31fdc4e1de6d5ec6933f2830014b7985ef69683","latency":0.01,"noiseSuppression":true,"sampleRate":48000,"sampleSize":16,"voiceIsolation":false}
+    2.71 page mic:  {"autoGainControl":true,"channelCount":1,"deviceId":"default","echoCancellation":true,"groupId":"GROUP_ID","latency":0.01,"noiseSuppression":true,"sampleRate":48000,"sampleSize":16,"voiceIsolation":false}
     2.91 page: offer ready
     2.99 route: slipped from 2:SM-G990W to 7:LS2 Freecom
     2.99 route: 2:SM-G990W applied
-    6.05 call: thread 01a1fa71-19ec-7e82-9979-7c74e7f7f65f
+    6.05 call: thread THREAD_ID
     6.06 call: start -> {"id":4,"result":{}}
-    7.34 server thread/realtime/started {"threadId":"01a1fa71-19ec-7e82-9979-7c74e7f7f65f","realtimeSessionId":"01a1fa71-19ec-7e82-9979-7c74e7f7f65f","version":"v3"}
+    7.34 server thread/realtime/started {"threadId":"THREAD_ID","realtimeSessionId":"SESSION_ID","version":"v3"}
     7.35 page answer received
     7.36 page ice checking
     7.37 page remote track audio, muted true
