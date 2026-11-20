@@ -131,3 +131,6 @@
 - F2: `SETUP_MS` 8 s -> 30 s (Android's documented window for a Bluetooth call device). A refused headset after 30 s
   with no link still falls to the speaker.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Orchestrator: round-3 F1 is in scope; one more code loop
+- F1 is valid and small: while a headset is still connecting (30 s grace), if Android reports the earpiece, switch to the speaker at once (existing fallback); keep waiting only while the reported output is safe. Add the regression test named. Nothing else changes.
