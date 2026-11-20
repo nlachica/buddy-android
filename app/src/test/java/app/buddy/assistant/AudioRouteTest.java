@@ -2,6 +2,7 @@ package app.buddy.assistant;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import android.media.AudioDeviceInfo;
@@ -68,7 +69,7 @@ public class AudioRouteTest {
     private static final int EARPIECE = AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, WIRED = AudioDeviceInfo.TYPE_WIRED_HEADSET;
 
     private static int live(int[] comm, String[] cn, int[] out, String[] on, String... refused) {
-        return AudioRoute.liveDevice(comm, cn, out, on, new HashSet<>(java.util.Arrays.asList(refused)));
+        return AudioRoute.liveDevice("", comm, cn, out, on, new HashSet<>(java.util.Arrays.asList(refused)));
     }
 
     @Test
@@ -89,6 +90,66 @@ public class AudioRouteTest {
                 new int[]{SPEAKER, WIRED}, new String[]{"Speaker", "Headset"}));
         // the earpiece is never chosen
         assertEquals(AudioRoute.NONE, live(new int[]{EARPIECE}, new String[]{"Earpiece"}, new int[]{SPEAKER}, new String[]{"Speaker"}));
+    }
+
+    private static final String LS2 = "7:LS2 Freecom";
+
+    @Test
+    public void aSavedDeviceThatIsConnectedIsChosenFirst() {
+        Set<String> none = new HashSet<>();
+        int[] out = {SPEAKER};
+        String[] on = {"Speaker"};
+        // the watch-like SCO has no media output: only the pick makes it a device
+        int[] comm = {EARPIECE, SPEAKER, SCO};
+        String[] cn = {"Earpiece", "Speaker", "LS2 Freecom"};
+        assertEquals(2, AudioRoute.liveDevice(LS2, comm, cn, out, on, none));
+        assertEquals(1, AudioRoute.liveDevice("", comm, cn, out, on, none));
+        // away: the speaker, or a headset's call device
+        assertEquals(1, AudioRoute.liveDevice(LS2, new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"}, out, on, none));
+        assertEquals(2, AudioRoute.liveDevice(LS2, new int[]{EARPIECE, SPEAKER, WIRED}, new String[]{"Earpiece", "Speaker", "Headset"},
+                new int[]{SPEAKER, WIRED}, new String[]{"Speaker", "Headset"}, none));
+        // the pick beats a headset; a pick the speaker is the speaker
+        int[] comm2 = {EARPIECE, SPEAKER, SCO, SCO};
+        String[] cn2 = {"Earpiece", "Speaker", "Buds2", "LS2 Freecom"};
+        int[] out2 = {SPEAKER, A2DP};
+        String[] on2 = {"Speaker", "Buds2"};
+        assertEquals(3, AudioRoute.liveDevice(LS2, comm2, cn2, out2, on2, none));
+        assertEquals(1, AudioRoute.liveDevice("2:Speaker", comm2, cn2, out2, on2, none));
+        // a refused pick falls to the headset, then the speaker
+        assertEquals(2, AudioRoute.liveDevice(LS2, comm2, cn2, out2, on2, new HashSet<>(java.util.Arrays.asList(LS2))));
+        // the earpiece is never chosen, even when it is the pick
+        assertEquals(1, AudioRoute.liveDevice("1:Earpiece", new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"}, out, on, none));
+        assertEquals(AudioRoute.NONE, AudioRoute.liveDevice("1:Earpiece", new int[]{EARPIECE}, new String[]{"Earpiece"}, out, on, none));
+    }
+
+    @Test
+    public void aPickThatRefusesIsTriedOnceThenAPickThatLeavesIsTriedAgainWhenBack() {
+        int[] comm = {EARPIECE, SPEAKER, SCO};
+        String[] cn = {"Earpiece", "Speaker", "LS2 Freecom"};
+        int[] out = {SPEAKER};
+        String[] on = {"Speaker"};
+        java.util.List<Integer> calls = new java.util.ArrayList<>();
+        Set<String> refused = new HashSet<>();
+        // refusal: LS2, then the speaker; the earpiece's index (0) never
+        assertEquals(1, AudioRoute.liveAttempt(LS2, comm, cn, out, on, refused, j -> {
+            calls.add(j);
+            return j == 1;
+        }));
+        assertEquals(java.util.Arrays.asList(2, 1), calls);
+        assertTrue(refused.contains(LS2));
+        calls.clear();
+        // still listed: LS2 isn't offered to apply again
+        assertEquals(1, AudioRoute.liveAttempt(LS2, comm, cn, out, on, refused, j -> {
+            calls.add(j);
+            return true;
+        }));
+        assertEquals(java.util.Arrays.asList(1), calls);
+        // it leaves (a slip refused it as it went), and the refusal goes with it; back, it is tried again
+        refused.clear();
+        refused.add(LS2);
+        assertEquals(1, AudioRoute.liveAttempt(LS2, new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"}, out, on, refused, j -> true));
+        assertTrue(refused.isEmpty());
+        assertEquals(2, AudioRoute.liveAttempt(LS2, comm, cn, out, on, refused, j -> true));
     }
 
     @Test
@@ -112,19 +173,19 @@ public class AudioRouteTest {
             return false;
         };
         Set<String> refused = new HashSet<>();
-        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt(comm, cn, out, on, refused, never));
+        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt("", comm, cn, out, on, refused, never));
         assertEquals(java.util.Arrays.asList(2, 1), calls); // the buds, then the speaker
         assertEquals(2, refused.size());
         calls.clear();
-        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt(comm, cn, out, on, refused, never)); // kept: nothing retried
+        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt("", comm, cn, out, on, refused, never)); // kept: nothing retried
         assertTrue(calls.isEmpty());
         calls.clear();
         refused.clear();
-        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt(new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"},
+        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"},
                 new int[]{SPEAKER}, new String[]{"Speaker"}, refused, never));
         assertEquals(java.util.Arrays.asList(1), calls); // the earpiece's index is never applied
         refused.clear();
-        assertEquals(1, AudioRoute.liveAttempt(comm, cn, out, on, refused, j -> j == 1));
+        assertEquals(1, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> j == 1));
         assertEquals(1, refused.size());
         assertTrue(refused.contains(SCO + ":Buds2"));
     }
@@ -140,10 +201,66 @@ public class AudioRouteTest {
 
     @Test
     public void slipped() {
-        assertFalse(AudioRoute.slipped("2:Speaker", "1:Earpiece", 1999));
-        assertFalse(AudioRoute.slipped("2:Speaker", "2:Speaker", 5000));
-        assertTrue(AudioRoute.slipped("2:Speaker", "1:Earpiece", 2000));
-        assertTrue(AudioRoute.slipped("2:Speaker", null, 2000));
-        assertFalse(AudioRoute.slipped(null, "1:Earpiece", 5000));
+        assertFalse(AudioRoute.slipped("2:Speaker", "1:Earpiece", 1999, 2000));
+        assertFalse(AudioRoute.slipped("2:Speaker", "2:Speaker", 5000, 2000));
+        assertTrue(AudioRoute.slipped("2:Speaker", "1:Earpiece", 2000, 2000));
+        assertTrue(AudioRoute.slipped("2:Speaker", null, 2000, 2000));
+        assertFalse(AudioRoute.slipped(null, "1:Earpiece", 5000, 2000));
+    }
+
+    @Test
+    public void aHeadsetNotSeenYetGetsTimeToConnect() { // round 1 F3
+        String ls2 = "7:LS2 Freecom";
+        String speaker = "2:Speaker", earpiece = "1:Earpiece";
+        assertTrue(AudioRoute.grace(ls2, false, speaker) > 3000);
+        assertEquals(2000, AudioRoute.grace(ls2, true, earpiece)); // once seen, a loss is a slip after 2 s
+        assertEquals(2000, AudioRoute.grace("2:Speaker", false, earpiece)); // the speaker keeps its 2 s
+        // LS2 reports itself after 3 s with the speaker active meanwhile: not a slip
+        assertFalse(AudioRoute.slipped(ls2, speaker, 3000, AudioRoute.grace(ls2, false, speaker)));
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 3000, AudioRoute.grace(ls2, true, earpiece)));
+        // round 2 F2: still connecting at 10 s is not a slip; the full 30 s window with no link is
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 10_000, AudioRoute.grace(ls2, false, "2:Speaker")));
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 29_999, AudioRoute.grace(ls2, false, "2:Speaker")));
+        assertTrue(AudioRoute.slipped(ls2, "2:Speaker", 30_000, AudioRoute.grace(ls2, false, "2:Speaker"))); // a link that never comes
+    }
+
+    @Test
+    public void aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker() { // round 3 F1
+        String ls2 = "7:LS2 Freecom", earpiece = "1:Earpiece";
+        long g = AudioRoute.grace(ls2, false, earpiece);
+        assertEquals(0, g);
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 300, g)); // round 4 F1: the first poll after the apply falls back
+        assertTrue(AudioRoute.refuseSlip(ls2, false)); // LS2 refused, so liveAttempt takes the speaker
+        Set<String> refused = new HashSet<>();
+        refused.add(ls2);
+        int[] comm = {EARPIECE, SPEAKER, 7};
+        String[] cn = {"Earpiece", "SM-G990W", "LS2 Freecom"};
+        assertEquals(1, AudioRoute.liveAttempt("7:LS2 Freecom", comm, cn, new int[]{SPEAKER}, new String[]{"SM-G990W"},
+                refused, j -> true));
+    }
+
+    @Test
+    public void aSpeakerThatNeverTakesTheRouteEndsTheCall() { // round 1 F2
+        assertTrue(AudioRoute.refuseSlip("7:LS2 Freecom", false));
+        assertFalse(AudioRoute.refuseSlip("2:SM-G990W", false)); // the first slip: applied again
+        assertTrue(AudioRoute.refuseSlip("2:SM-G990W", true)); // the second with no sighting between
+        Set<String> refused = new HashSet<>();
+        refused.add("2:SM-G990W");
+        int[] comm = {EARPIECE, SPEAKER};
+        String[] cn = {"Earpiece", "SM-G990W"};
+        int[] out = {SPEAKER};
+        String[] on = {"SM-G990W"};
+        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> {
+            assertNotEquals(0, j); // never the earpiece
+            return true;
+        }));
+    }
+
+    @Test
+    public void aPickIsOnOnlyWhenAndroidReportsIt() { // round 1 F1
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", "2:Speaker")); // accepted, speaker still active
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", null));
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", null, "7:LS2 Freecom"));
+        assertTrue(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", "7:LS2 Freecom"));
     }
 }
