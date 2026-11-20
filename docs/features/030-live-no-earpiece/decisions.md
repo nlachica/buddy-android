@@ -95,3 +95,8 @@
   018/026's "only a change of the setting decides again", because LiveWatch's Auto decision is a non-goal. The voice
   doesn't go back to the watch on its own if the pick leaves again (plan Risk 8).
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - Orchestrator: plan accepted after round 3, simplified
+- The plan grew a mute/hold mechanism to guard millisecond races. Nicholas wants simple: drop the hold/mute machinery (F1, F3 go away with it). Accepted risk: up to a fraction of a word on the earpiece in the instant a headset disconnects; the steady-state route must never be the earpiece.
+- Core change only: during a phone live call, noEarpiece is true regardless of watch outcome or saved key, so reconcile() always uses live() (connected saved device > headset > watch > speaker).
+- F2 kept: a watch handoff stops only when the confirmed route equals the explicit saved device key, not any headset. Test LS2 absent + other buds, then LS2 arrives.
