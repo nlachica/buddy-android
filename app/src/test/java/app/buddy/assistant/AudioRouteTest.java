@@ -295,6 +295,35 @@ public class AudioRouteTest {
         assertEquals(java.util.Arrays.asList(2), calls);
     }
 
+    private static final int[] COMM = {EARPIECE, SPEAKER, SCO, SCO}, OUT = {SPEAKER, A2DP};
+    private static final String[] COMM_N = {"SM-G990W", "SM-G990W", "LS2 Freecom", "Galaxy Watch4"}, OUT_N = {"SM-G990W", "LS2 Freecom"};
+
+    @Test
+    public void autoWhileDictatingUsesTheHeadsetsCallLink() { // 031
+        assertEquals(LS2, AudioRoute.want("", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals("", AudioRoute.want("", false, COMM, COMM_N, OUT, OUT_N));
+        assertEquals("", AudioRoute.want("watch", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals("2:SM-G990W", AudioRoute.want("2:SM-G990W", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals(LS2, AudioRoute.want(LS2, true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals(LS2, AudioRoute.want(LS2, false, COMM, COMM_N, OUT, OUT_N));
+        // no media output for LS2: never the watch's SCO, never the earpiece
+        assertEquals("", AudioRoute.want("", true, COMM, COMM_N, new int[]{SPEAKER}, new String[]{"SM-G990W"}));
+        // a wired headset keeps Android's routing
+        assertEquals("", AudioRoute.want("", true, new int[]{EARPIECE, SPEAKER, WIRED}, new String[]{"SM-G990W", "SM-G990W", "Headset"},
+                new int[]{SPEAKER, WIRED}, new String[]{"SM-G990W", "Headset"}));
+    }
+
+    @Test
+    public void autoOrderPutsTheHeadsetBeforeTheWatchAndNeverTheEarpiece() { // 031
+        assertEquals(2, AudioRoute.liveDevice("", COMM, COMM_N, OUT, OUT_N, new HashSet<>())); // LS2, not the watch's SCO
+        assertEquals(1, AudioRoute.liveDevice("", COMM, COMM_N, new int[]{SPEAKER}, new String[]{"SM-G990W"}, new HashSet<>())); // speaker
+        assertEquals(AudioRoute.NONE, AudioRoute.liveDevice("", new int[]{EARPIECE}, new String[]{"SM-G990W"}, OUT, OUT_N, new HashSet<>()));
+        assertEquals("", AudioRoute.pick("", false, true, true));     // read aloud: the headset
+        assertEquals("watch", AudioRoute.pick("", false, false, true)); // then the watch
+        assertEquals("", AudioRoute.pick("", false, false, false));     // then the speaker
+        assertEquals(LS2, AudioRoute.want("", true, COMM, COMM_N, OUT, OUT_N)); // dictation: the headset's mic
+    }
+
     @Test
     public void aSpeakerThatNeverTakesTheRouteEndsTheCall() { // round 1 F2
         assertTrue(AudioRoute.refuseSlip("7:LS2 Freecom", false));
