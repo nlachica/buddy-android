@@ -57,7 +57,12 @@ final class ClaudeDictation {
                 : app.getString(ready(code) ? R.string.dictation_starting : R.string.dictation_starting_claude));
         new Thread(() -> {
             try {
-                MicServer.start(app, null); // before voice mode: Claude Code tests the microphone when it turns on
+                // before voice mode: Claude Code tests the microphone when it turns on. Under the lock cancel() takes,
+                // so a cancelled tap's worker can't reopen the socket cancel just closed
+                synchronized (MicServer.class) {
+                    if (listener != l) return;
+                    MicServer.start(app, null);
+                }
                 ensureSession(app, code);
                 if (listener != l) return;
                 main.post(() -> startHolding(l));
@@ -157,11 +162,14 @@ final class ClaudeDictation {
     }
 
     static void cancel() {
-        Voice.Listener l = listener;
-        listener = null;
-        holding = false;
-        finishing = false;
-        stopMic();
+        Voice.Listener l;
+        synchronized (MicServer.class) { // pairs with the worker's check-and-start in listen()
+            l = listener;
+            listener = null;
+            holding = false;
+            finishing = false;
+            stopMic();
+        }
         if (session != null && !session.exited) clearPrompt();
         if (l != null) l.onEnd(null);
     }

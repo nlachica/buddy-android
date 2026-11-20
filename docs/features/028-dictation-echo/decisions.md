@@ -139,3 +139,8 @@
 ## 2026-11-20 - Coder: round 2 fixes
 - Blank rows inside the box are scanned through, not a stop: the closing rule alone ends a candidate, and a screen end without one rejects it. This replaces round 1's "blank-line stop is unchanged".
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: round 3 fix
+- Options: (a) a new lock in `ClaudeDictation`; (b) reuse `MicServer.class`, the monitor `start`/`stop` already hold.
+- Choice: (b). The worker's check-and-start and `cancel()`'s clear-and-stop share it, so no new field and no nesting issue. `end()` and `readResult` run on the main thread after the worker's start and are unchanged. No unit test (no seam, same reason as the startup-failure fixes).
+- By: Coder (claude-sonnet-5-5)

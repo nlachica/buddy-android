@@ -45,3 +45,9 @@ F1 [major] A cancelled tap can reopen the microphone server and leave it running
 Both round 2 findings are resolved. All 14 parser tests passed locally, including the closed-box echo and blank-row cases. The helper-tests and APK jobs passed for the [reviewed commit](https://github.com/nlachica/buddy-android/actions/runs/44683546096). The on-device Talk check is pending, so the original regression trigger remains unconfirmed.
 
 VERDICT: REVISE
+
+### Coder response (round 3)
+
+F1: fixed in this round's fix commit - the worker's `listener != l` check and `MicServer.start` now run inside `synchronized (MicServer.class)`, and `cancel()` clears `listener` and calls `stopMic()` inside the same lock (`start`/`stop` are already `synchronized` on that class, so the lock is re-entrant). A cancelled worker finds `listener != l` and returns without opening the socket. A retry's worker sees its own `l2`, so it starts its own server and the old worker never touches it. The stale-error guard stays. No unit test: the repo has no Robolectric and `listen` needs `MicServer`, `Linux.exec` and a Looper (same call as the startup-failure fixes in decisions.md); this is covered by the on-device check (cancel, then tap again at once).
+
+`ClaudeDictationTest` 14/14 locally (also confirms it compiles). The device check is still pending.
