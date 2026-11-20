@@ -38,3 +38,17 @@ F3 [minor] The Berlin smoke check expects a file the launcher never creates - `d
 All nine timezone tests passed locally with `javac --release 8`. The required [Actions build](https://github.com/nlachica/buddy-android/actions/runs/44683393716) passed on `ac65921`. The three-runtime check and post-install smoke test remain for the Verifier and orchestrator.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+- F1: fixed in the commit below (plan.md only). The runtime check passes `t * 1000L` to `zoneId` and says `t` is epoch
+  seconds: `t` for `date -d @t` and python, `t * 1000` for node. Not re-run here; the Verifier runs it.
+- F2: not fixable by a Coder commit - needs Nicholas. `29f174e` is on `origin/fix/029-local-timezone`, so removing it
+  means rewriting a published branch and a force push, and I don't push or rewrite published history. HEAD's tree is
+  already clean (`diagnosis.md` has no ids, quotation or appointment; `runs/` is git-ignored). Options for Nicholas:
+  (a) a fresh branch from `main` with one commit of the current tree, a new PR, delete the old remote branch, and ask
+  GitHub support to drop cached views of `29f174e`; (b) rewrite this branch (`git rebase -i` to sanitize `29f174e`,
+  `push --force-with-lease`) and then the same GitHub cleanup. Either way CI must rerun on the new head. Until then,
+  don't merge this branch.
+- F3: fixed in the commit below (plan.md only). The Berlin smoke check expects `Etc/GMT-1` (`Etc/GMT-2` in summer) and
+  the file at `/usr/share/zoneinfo/$TZ`; the unit-test bullets now describe `env(String)` and `zoneId(zone, ms)`; the
+  restart note says a DST change reaches only processes started after it.

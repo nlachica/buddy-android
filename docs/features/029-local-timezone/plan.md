@@ -109,9 +109,11 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
 
 ## Test plan
 - **TZ string (done-when 2, unit):** `LinuxTimeZoneTest` (JVM, plain JUnit):
-  - `env(TimeZone.getTimeZone("America/Dawson_Creek"))` contains exactly one `TZ=` entry, `TZ=America/Dawson_Creek`.
-  - DST zones: `Europe/Berlin` and `America/Los_Angeles` give `TZ=Europe/Berlin` / `TZ=America/Los_Angeles`
-    (the id, never an offset like `GMT-08:00`, so DST stays with the zone).
+  - `env("Etc/GMT+7")` contains exactly one `TZ=` entry, `TZ=Etc/GMT+7`.
+  - `zoneId(zone, instantMillis)` gives the fixed-offset id for the offset at that instant (orchestrator's design
+    change, decisions.md): Dawson_Creek `Etc/GMT+7`, Berlin in winter `Etc/GMT-1`, Los_Angeles `Etc/GMT+8` in
+    November and `Etc/GMT+7` in July (DST follows the instant), Kiritimati `Etc/GMT-14`, UTC `Etc/GMT`; a
+    half-hour zone (`Asia/Kolkata`) keeps its region id.
   - The other entries are unchanged (`HOME=/root`, `LANG=C.UTF-8`, the `PATH=` line), guarding the refactor.
 - **Zone file copy (unit, same class, `TemporaryFolder`):** the test writes a small file in the bionic layout above
   (`tzdata2026e\0` header, two index entries, payloads at different `start`s):
@@ -136,14 +138,15 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
      branch's classes with the javac + JUnit harness as in 026 (`/tmp/buddy-build-026/check.sh` with `R` set to this
      worktree, or its javac lines). Use Java 17 (`/usr/lib/jvm/java-17-openjdk`), because the default `java` 21
      doesn't start here. Then compile and run a scratch driver in package `app.buddy.assistant`, outside the repo.
-     For `America/Dawson_Creek` and `America/Vancouver` it calls `id = Linux.zoneId(TimeZone.getTimeZone(zone), t)` for each
-     test instant `t` of step 3 (the launcher's own choice), then `Linux.copyZone(db, new File("/"), id)`, prints true,
+     For `America/Dawson_Creek` and `America/Vancouver` it calls `id = Linux.zoneId(TimeZone.getTimeZone(zone), t * 1000L)`
+     for each test instant `t` of step 3 (the launcher's own choice; `t` is epoch seconds, `zoneId` takes milliseconds), then `Linux.copyZone(db, new File("/"), id)`, prints true,
      and prints `String.join(" ", Linux.env(id))` for that same `id`. `Antarctica/Troll` is the same, with its two
      instants (ids `Etc/GMT-2` and `Etc/GMT`). `/` here is the same tree Buddy passes as
      `root(c)`. The driver records each path it created (the zone file and every directory it made, found by
      checking existence before the copy). Then each `id`'s file must exist as a regular file whose bytes equal that
      id's payload in the phone's database: the first launch created them.
-  3. Under `env -i` plus the exact list the driver printed for that `id`, print `%F %H:%M %z` for the same instant from
+  3. Every `t` below is epoch seconds: pass `t` to `date -d @t` and python, and `t * 1000` to node's `new Date(...)`.
+     Under `env -i` plus the exact list the driver printed for that `id`, print `%F %H:%M %z` for the same instant from
      `date -d @t`, `python3` (`time.localtime(t)`) and `node` (local getters plus `getTimezoneOffset`):
      - `America/Dawson_Creek` (id `Etc/GMT+7`), t=1795140000 (2026-11-20 02:00Z, when the UTC date is already
        tomorrow): all three print `2026-11-19 19:00 -0700`.
@@ -167,7 +170,8 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
   - Claude Code: the new transcript's `"type":"date"` attachment is the local date (after 17:00 local it must not
     jump to tomorrow).
   - Optional, with Nicholas's OK: set the phone's zone by hand to a DST zone (e.g. Europe/Berlin), open a new
-    terminal: `echo $TZ; date` shows that zone and the file `/usr/share/zoneinfo/Europe/Berlin` exists; set it back.
+    terminal: `echo $TZ` prints `Etc/GMT-1` in winter (`Etc/GMT-2` in summer), `date` shows Berlin's local time,
+    and `/usr/share/zoneinfo/$TZ` exists; set it back.
 
 ## Risks
 - **Android's tz database unreadable or in another format** (a ROM oddity): `copyZone` throws or finds nothing,
@@ -180,8 +184,8 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
   logs it. `date` and python show UTC as today, while node and Claude Code are still right.
 - **Zone ids Android lacks:** Android's custom `GMT+05:30` form isn't in the index, so no file, and musl reads that
   TZ as a POSIX rule with the wrong sign. Rare on a phone whose zone list is IANA; a non-goal.
-- **Running processes** keep their old TZ until restarted (a chat's next run, a new terminal); DST changes need
-  no restart, since the file carries the rules.
+- **Running processes** keep their old TZ until restarted (a chat's next run, a new terminal); a DST change
+  takes effect only in processes started after it, since each launch fixes the offset (accepted, decisions.md).
 - **The settings.json override** (step 3): left in place, Bash tools under Claude Code stay on fixed MST7 and travel
   won't follow.
 
