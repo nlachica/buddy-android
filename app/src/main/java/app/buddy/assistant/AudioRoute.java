@@ -253,6 +253,13 @@ final class AudioRoute {
         return actual != null && !actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") && refused.remove(actual);
     }
 
+    /** 031: Android reports a refused device (late headset): take it back; the speaker it replaced stays eligible. */
+    static void handBack(String actual) {
+        if (!unrefuse(liveRefused, actual)) return;
+        applied = null;
+        speakerSlipped = false;
+    }
+
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
     static boolean refuseSlip(String applied, boolean speakerSlipped) {
         return speakerSlipped || !applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":");
@@ -413,10 +420,7 @@ final class AudioRoute {
             speakerSlipped = false;
         }
         appliedAt = lossFrom(applied, curKey, appliedAt, now); // from here on appliedAt is the time a loss counts from
-        if (unrefuse(liveRefused, curKey)) { // F1: handed back to a late headset; the speaker it replaced stays eligible
-            applied = null;
-            speakerSlipped = false;
-        }
+        handBack(curKey);
         if (slipped(applied, curKey, now - appliedAt, grace(applied, seen, curKey))) {
             // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
             if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);

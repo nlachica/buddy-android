@@ -63,6 +63,7 @@ final class Voice {
 
     private static SpeechRecognizer recognizer;
     private static Listener current;
+    private static boolean inputDone; // the phone recognizer stopped taking input and only awaits its result
     private static TextToSpeech tts;
     private static boolean ttsReady;
     private static String pending;
@@ -87,9 +88,9 @@ final class Voice {
         return current != null || ClaudeDictation.active() || CodexDictation.active();
     }
 
-    /** 031: the microphone is capturing now (listening() also holds while a cloud engine transcribes). */
+    /** 031: input is being taken now (listening() also holds while an engine waits for its transcript). */
     static boolean capturing() {
-        return current != null || MicServer.recording();
+        return (current != null && !inputDone) || ClaudeDictation.taking() || CodexDictation.taking();
     }
 
     /** Languages offered for voice: {BCP-47 tag, name}. */
@@ -128,6 +129,7 @@ final class Voice {
         if ("chatgpt".equals(Prefs.voiceEngine(c))) return unwatchOnError(l, CodexDictation.listen(c, l));
         if (!SpeechRecognizer.isRecognitionAvailable(c)) return unwatchOnError(l, c.getString(R.string.voice_no_recognizer));
         current = l;
+        inputDone = false;
         l.onStatus(c.getString(R.string.voice_starting));
         recognizer = SpeechRecognizer.createSpeechRecognizer(c.getApplicationContext());
         recognizer.setRecognitionListener(new RecognitionListener() {
@@ -167,7 +169,10 @@ final class Voice {
             @Override public void onBufferReceived(byte[] buf) {}
             @Override
             public void onEndOfSpeech() {
-                if (current == l) l.onStatus(c.getString(R.string.voice_finishing));
+                if (current == l) {
+                    inputDone = true;
+                    l.onStatus(c.getString(R.string.voice_finishing));
+                }
             }
             @Override public void onEvent(int type, Bundle b) {}
         });
@@ -276,7 +281,10 @@ final class Voice {
             CodexDictation.finish();
             return;
         }
-        if (recognizer != null) recognizer.stopListening();
+        if (recognizer != null) {
+            inputDone = true;
+            recognizer.stopListening();
+        }
     }
 
     static void stopListening() {

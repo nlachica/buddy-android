@@ -53,6 +53,11 @@ final class CodexDictation {
         return listener != null;
     }
 
+    /** 031: still taking input (not finishing), by any recorder path: the headset's link is wanted. */
+    static boolean taking() {
+        return listener != null && !finishing;
+    }
+
     // ------------------------------------------------------------------ listening
 
     static String listen(Context c, Voice.Listener l) {

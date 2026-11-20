@@ -3,6 +3,7 @@ package app.buddy.assistant;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.media.AudioDeviceInfo;
@@ -297,30 +298,37 @@ public class AudioRouteTest {
     }
 
     @Test
-    public void aLateHeadsetKeepsTheSpeakerEligibleForTheNextFallback() { // code review round 1 F1, live()'s order
+    public void aLateHeadsetKeepsTheSpeakerEligibleForTheNextFallback() throws Exception { // code review rounds 1-2 F1/F3: live()'s own hand-back
         String speaker = "2:SM-G990W";
         int[] comm = {EARPIECE, SPEAKER, SCO};
         String[] cn = {"SM-G990W", "SM-G990W", "LS2 Freecom"};
         int[] out = {SPEAKER, A2DP};
         String[] on = {"SM-G990W", "LS2 Freecom"};
-        // LS2 refused at 5 s, the speaker slipped once (the earpiece still reported), applied again
-        Set<String> refused = new HashSet<>();
-        refused.add(LS2);
-        boolean speakerSlipped = true;
-        String applied = speaker;
-        // the next report is LS2: handed back, the speaker is neither slipped nor refused
-        if (AudioRoute.unrefuse(refused, LS2)) {
-            applied = null;
-            speakerSlipped = false;
+        java.lang.reflect.Field fa = AudioRoute.class.getDeclaredField("applied"), fs = AudioRoute.class.getDeclaredField("speakerSlipped"),
+                fr = AudioRoute.class.getDeclaredField("liveRefused");
+        fa.setAccessible(true);
+        fs.setAccessible(true);
+        fr.setAccessible(true);
+        @SuppressWarnings("unchecked") Set<String> refused = (Set<String>) fr.get(null);
+        try {
+            // LS2 refused at 5 s, the speaker slipped once (the earpiece still reported), applied again
+            refused.add(LS2);
+            fa.set(null, speaker);
+            fs.setBoolean(null, true);
+            AudioRoute.handBack(LS2); // the next report is LS2
+            assertNull(fa.get(null));
+            assertFalse(fs.getBoolean(null));
+            assertTrue(refused.isEmpty());
+            assertEquals(2, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> true)); // LS2
+            // LS2 goes away, Android reports the earpiece: the speaker is tried and the call goes on
+            assertEquals(1, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER}, new String[]{"SM-G990W", "SM-G990W"},
+                    new int[]{SPEAKER}, new String[]{"SM-G990W"}, refused, j -> true));
+            assertFalse(AudioRoute.refuseSlip(speaker, fs.getBoolean(null))); // and its first slip is still applied again
+        } finally {
+            refused.clear();
+            fa.set(null, null);
+            fs.setBoolean(null, false);
         }
-        assertFalse(AudioRoute.slipped(applied, LS2, 5000, 2000));
-        assertTrue(refused.isEmpty());
-        assertEquals(2, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> true)); // LS2
-        // LS2 goes away, Android reports the earpiece: the speaker is tried, the call goes on
-        int[] c2 = {EARPIECE, SPEAKER};
-        String[] n2 = {"SM-G990W", "SM-G990W"};
-        assertEquals(1, AudioRoute.liveAttempt("", c2, n2, new int[]{SPEAKER}, new String[]{"SM-G990W"}, refused, j -> true));
-        assertFalse(AudioRoute.refuseSlip(speaker, speakerSlipped)); // and its first slip is still applied again
     }
 
     private static final int[] COMM = {EARPIECE, SPEAKER, SCO, SCO}, OUT = {SPEAKER, A2DP};

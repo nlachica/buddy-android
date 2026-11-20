@@ -36,3 +36,11 @@ F4 [minor] The README still promises that Live never uses the earpiece - `README
 The production late-connect change keeps the speaker eligible in the round 1 sequence. The current log fixture redacts the reported identifiers. CI passed for reviewed HEAD `42658bc`, including Android unit tests and the F-Droid reproducibility check. The local JVM failed before Gradle could start because it could not mark memory executable. The planned phone checks for Live audio in both directions and dictation with Auto and saved LS2 remain unverified. [CI run 44814236483](https://github.com/nlachica/buddy-android/actions/runs/44814236483)
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+- F1: fixed in this round's commit. `Voice.capturing()` no longer reads `MicServer.recording()`. It uses `ClaudeDictation.taking()` / `CodexDictation.taking()` (listener set and not finishing), which hold from the tap through the late-recorder path until `finish()`. No unit test: both classes need a `Handler` at class load, so the JVM tests can't load them; the pure routing rule (`want`, capture false -> no headset) stays tested.
+- F2: fixed in the same commit. The phone recognizer's `inputDone` is set at end of speech and in `finishListening()` (Done); `capturing()` is then false while `current` stays set for the result. Same test limit as F1 (`Voice` can't be loaded in the JVM tests).
+- F3: fixed in the same commit. `live()` now calls `AudioRoute.handBack(curKey)`, which does the un-refuse and the `applied`/`speakerSlipped` reset. The test calls it, so deleting those resets fails the test.
+- F4: fixed in the same commit. README states the steady state once (never the earpiece) and lists the moments Android can still play there: link connecting, 5 s wait, link lost while still connected (about 2 s); an unplugged or switched-off headset is replaced at the next check.
+
+Tests: not run here (the JVM does not start on this machine, PaX); CI is the first run of the changed test and the compile.

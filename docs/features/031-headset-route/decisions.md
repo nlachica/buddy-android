@@ -127,3 +127,8 @@ By: Coder (claude-sonnet-5-5)
 - F1: a headset handed back (taken out of `liveRefused`) clears `applied` and `speakerSlipped` instead of going through the slip check. Alternative (skip only the refusal) leaves the speaker's slip count stale.
 - F2: Auto dictation follows `Voice.capturing()` (phone recognizer `current`, or `MicServer.recording()`), not `listening()`. Cloud engines in their startup wait are not capturing yet, so the headset link starts when capture begins.
 By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: code review round 2
+- F1/F2: `Voice.capturing()` is "input phase" by each engine's own state: `ClaudeDictation.taking()` / `CodexDictation.taking()` (`listener != null && !finishing`, true on the late-recorder path too) and, for the phone recognizer, `current != null && !inputDone` (`inputDone` set at end of speech and in `finishListening`). `MicServer.recording()` is no longer used for routing. Listeners are untouched, so results still arrive.
+- F3: the hand-back's two resets moved into `AudioRoute.handBack` (what `live()` calls); the test calls it and reads the fields by reflection.
+By: Coder (claude-sonnet-5-5)
