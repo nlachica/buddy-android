@@ -72,3 +72,11 @@ VERDICT: REVISE
   `aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker`; `aHeadsetNotSeenYetGetsTimeToConnect` updated for the
   new signature. Trade-off: a headset that is still connecting while Android reports the earpiece is refused after 2 s
   for the rest of its listing (it is tried again if it leaves and comes back).
+
+## Round 4 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A pending headset leaves speech on the earpiece for two seconds - `app/src/main/java/app/buddy/assistant/AudioRoute.java:230` returns a 2,000 ms grace period when Android reports the earpiece. If LS2 is requested mid-reply and the first poll 300 ms later sees the earpiece, line 397 reuses the cached LS2 request. Phone playback continues. The regression test at `AudioRouteTest.java:231` explicitly expects no fallback even at 1,999 ms. The orchestrator required fallback on the first such poll. -> Give an unconfirmed headset zero grace when the poll reports the earpiece. The slip check at line 373 already runs before the new request at line 398, so this still gives Android until the next poll to apply it. Test that the first 300 ms poll requests the speaker and retain the slow-headset test with the speaker active.
+
+All 51 focused JUnit tests passed on each flavor with the changed Java sources compiled using `javac --release 8`. CI passed at `5ee6896`. Physical playback checks D1–D5 remain unverified. [Build run](https://github.com/nlachica/buddy-android/actions/runs/44696164206)
+
+VERDICT: REVISE
