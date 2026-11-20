@@ -58,11 +58,13 @@ public class LinuxTimeZoneTest {
     private File db(byte[] magic) throws IOException {
         int index = 24, data = index + 2 * 52;
         ByteBuffer b = ByteBuffer.allocate(data + A.length + B.length);
-        b.put(magic).position(12);
+        b.put(magic);
+        b.position(12);
         b.putInt(index).putInt(data).putInt(0);
         entry(b, index, "America/Dawson_Creek", 0, A.length);
         entry(b, index + 52, "Etc/GMT+7", A.length, B.length);
-        b.position(data).put(A).put(B);
+        b.position(data);
+        b.put(A).put(B);
         File f = new File(tmp.getRoot(), "tzdata");
         Files.write(f.toPath(), b.array());
         return f;
