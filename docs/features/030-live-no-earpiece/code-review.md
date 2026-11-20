@@ -31,3 +31,13 @@ VERDICT: REVISE
 
 Tests: `AudioRouteTest`, `LiveWatchTest`, `CodexLiveTest` via the local javac+JUnit harness, 50 tests OK on github and
 fdroid (compiled `--release 17`, not 8; no new API used). CI not run. Device checks D1-D5 still open.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A pending headset can leave an entire reply on the earpiece - app/src/main/java/app/buddy/assistant/AudioRoute.java:369 waits up to eight seconds even when Android explicitly reports the earpiece. The next selection accepts the cached headset request at line 393. With no watch forwarding, the phone track keeps playing (`CodexLive.java:1023`). The new test at `AudioRouteTest.java:218` exercises exactly that route at three seconds. This can happen when LS2 connects during speech, beyond the fraction of a word accepted on disconnect. -> When a poll observes the earpiece during headset setup, protect phone playback immediately. Keep the headset request pending and resume phone output on confirmation of a safe route. Test speech already playing when LS2 is requested, with the earpiece reported for three seconds before LS2 becomes active.
+
+F2 [major] A healthy Bluetooth pick can still be refused for the rest of the call - app/src/main/java/app/buddy/assistant/AudioRoute.java:226 gives a new Bluetooth route eight seconds. For example, if the speaker remains active and a continuously listed BLE headset needs ten seconds, line 371 refuses the headset at the first poll after eight seconds and requests the speaker. The refusal survives every subsequent poll while the headset stays listed. Android documents a setup window of up to 30 seconds. -> Allow a pending Bluetooth request the documented setup window while playback is safe. Test confirmation at ten seconds and fallback when the full window expires. [Android audio routing guide](https://developer.android.com/develop/connectivity/bluetooth/ble-audio/audio-manager#set-communication-device)
+
+All 50 focused JUnit tests passed on each flavor with the changed Java sources and the three test classes compiled using `javac --release 8`. CI passed for `c793ee5`, including APK reproducibility. Physical playback checks D1–D5 remain unverified. [Build run](https://github.com/nlachica/buddy-android/actions/runs/44693538444)
+
+VERDICT: REVISE
