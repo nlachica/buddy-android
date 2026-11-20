@@ -44,3 +44,13 @@ VERDICT: REVISE
 - F4: fixed in the same commit. README states the steady state once (never the earpiece) and lists the moments Android can still play there: link connecting, 5 s wait, link lost while still connected (about 2 s); an unplugged or switched-off headset is replaced at the next check.
 
 Tests: not run here (the JVM does not start on this machine, PaX); CI is the first run of the changed test and the compile.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+No blocker or major findings remain at `0ca3099`. The Live regression tests cover the 300 ms earpiece report, the five-second fallback, and a late LS2 connection followed by disconnection. The last case now exercises the same speaker-reset logic as the Live poll.
+
+I traced Auto dictation through all three engines. Claude requests the headset even if its recorder opens late. Both cloud engines release the Auto route on the next routing check after Finish. The phone recognizer marks input complete on Done or end of speech while keeping its listener for the transcript. The selector tests cover Auto and saved LS2. The engine transitions themselves were checked by inspection. The planned phone checks for two-way Live audio, dictation, and read-aloud routing remain pending.
+
+CI passed for the reviewed commit, including the Android unit tests and F-Droid reproducibility check. The local Gradle retry stopped at JVM startup because the JVM could not mark memory executable. [CI run 44815214396](https://github.com/nlachica/buddy-android/actions/runs/44815214396)
+
+VERDICT: APPROVE
