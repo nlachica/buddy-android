@@ -217,7 +217,10 @@ public class AudioRouteTest {
         // LS2 reports itself after 3 s: not a slip
         assertFalse(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, false)));
         assertTrue(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, true)));
-        assertTrue(AudioRoute.slipped(ls2, "1:Earpiece", 8000, AudioRoute.grace(ls2, false))); // a link that never comes
+        // round 2 F2: still connecting at 10 s is not a slip; the full 30 s window with no link is
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 10_000, AudioRoute.grace(ls2, false)));
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 29_999, AudioRoute.grace(ls2, false)));
+        assertTrue(AudioRoute.slipped(ls2, "2:Speaker", 30_000, AudioRoute.grace(ls2, false))); // a link that never comes
     }
 
     @Test

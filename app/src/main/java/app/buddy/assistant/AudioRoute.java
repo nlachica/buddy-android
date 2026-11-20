@@ -31,7 +31,7 @@ import java.util.function.IntPredicate;
  * All state lives on the main thread.
  */
 final class AudioRoute {
-    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 8000;
+    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 30_000; // Android documents up to 30 s for a Bluetooth call device
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     private static Context app;

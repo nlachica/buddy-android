@@ -41,3 +41,17 @@ F2 [major] A healthy Bluetooth pick can still be refused for the rest of the cal
 All 50 focused JUnit tests passed on each flavor with the changed Java sources and the three test classes compiled using `javac --release 8`. CI passed for `c793ee5`, including APK reproducibility. Physical playback checks D1–D5 remain unverified. [Build run](https://github.com/nlachica/buddy-android/actions/runs/44693538444)
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+- F1: rejected - the fix asks for the hold/mute of phone playback that the orchestrator dropped on purpose
+  (decisions.md, "Orchestrator: plan accepted after round 3, simplified": "drop the hold/mute machinery ... Accepted
+  risk: up to a fraction of a word on the earpiece"; brief non-goal on pausing). Pausing the phone track during setup is
+  the old Design 4 (page change, bridge bit, resume on confirmation). Honest note: F2's longer window makes the exposure
+  last as long as a headset takes to connect while speech is playing, not a fraction of a word. If Nicholas wants that
+  closed, it is a new decision (hold only during a pending headset), not a patch.
+- F2: fixed in this round's commit. `SETUP_MS` is now 30 s, Android's documented setup window for a Bluetooth call
+  device. Test `aHeadsetNotSeenYetGetsTimeToConnect` extended: LS2 confirmed at 10 s (speaker reported meanwhile) is
+  not a slip; still not a slip at 29.999 s; a slip at 30 s (the window over, LS2 refused, the speaker requested).
+
+Tests: `AudioRouteTest`, `LiveWatchTest`, `CodexLiveTest` via the local javac+JUnit harness, 50 tests OK on github;
+fdroid also 50 OK. CI not run. Device checks D1-D5 still open.

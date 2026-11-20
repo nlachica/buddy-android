@@ -124,3 +124,10 @@
   2 s for the speaker and for a route seen once, `SETUP_MS` (8 s) for a device not yet seen. `slipped` takes the grace.
   Any device, not only Bluetooth: a wired or USB apply is reported at once, so the longer wait only costs a failed one.
 - F4: the plan's D1/D4 checklist and expected log no longer require `page voice held/released`.
+
+## 2026-11-20 - Coder: code review round 2 (F1 rejected, F2 fixed)
+- F1 (hold phone playback while a headset is pending): not built; it is the hold/mute the orchestrator dropped. The
+  earpiece exposure while a headset connects mid-speech is the accepted risk, now as long as the setup window.
+- F2: `SETUP_MS` 8 s -> 30 s (Android's documented window for a Bluetooth call device). A refused headset after 30 s
+  with no link still falls to the speaker.
+- By: Coder (claude-sonnet-5-5)
