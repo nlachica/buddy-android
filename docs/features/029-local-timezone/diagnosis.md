@@ -12,11 +12,10 @@ Evidence
    prints `Thu Nov 19 15:52:56 UTC 2026` when the phone says 08:52 Thursday. Python also reports UTC.
 3. Claude Code's "Today's date is ..." comes from that process clock. In the transcripts the injected `date`
    attachment flips to the next day at exactly 17:00 local:
-   - `2026-11-19T00:00:26Z` (Wed 17:00 local): `{"type":"date","date":"2026-11-19"}` in session 0aa98816
-   - `2026-11-19T02:02:04Z` (Wed 19:02 local): `date: 2026-11-19` again, in session 070c7ff6.
-4. The bad answer, session `070c7ff6-...jsonl` at 2026-11-19T02:02Z (Wed 18 Nov, 19:02 local): the user asked
-   for an eye exam. The agent asked "The Still Creek Costco optometrist has openings tomorrow, Fri Nov 20."
-   The agent believed today was Thu 19 Nov (the injected UTC date), so it called Fri 20 "tomorrow". Real
+   - `2026-11-19T00:00:26Z` (Wed 17:00 local): `{"type":"date","date":"2026-11-19"}`
+   - `2026-11-19T02:02:04Z` (Wed 19:02 local): `date: 2026-11-19` again.
+4. The bad answer: at 2026-11-19T02:02Z (Wed 18 Nov, 19:02 local) an agent offered openings for "tomorrow, Fri Nov 20".
+   It believed today was Thu 19 Nov (the injected UTC date), so it called Fri 20 "tomorrow". Real
    tomorrow was Thu 19. This repeats every evening after 17:00 local, which matches "happened several times".
 5. The date the app gives agents is correct, but only if they ask. `PhoneTools.java:299` (device_status) prints
    `Local time: EEEE yyyy-MM-dd HH:mm (<Android tz id>)` from the phone's own zone. Agents don't call it before
@@ -29,7 +28,7 @@ Not the cause
 - Composio calendar calls: no timezone bug found. They take explicit datetimes; the wrong word was the agent's.
 - Vault: `architecture/buddy-phone.md` (2026-11-12) and `_meta/L1.md` already say the clock can be a day ahead.
   This is a per-agent warning, not a fix, and it only reaches agents that read the vault or L1.
-  Plain chats like the eye-exam one don't act on it.
+  Plain chats don't act on it.
 
 ## Smallest fix: set TZ at the source
 In `Linux.java:89`, add `"TZ=MST7"` to the `env -i` list:

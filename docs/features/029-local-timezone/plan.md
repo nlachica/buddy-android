@@ -136,22 +136,32 @@ After merge and `update_buddy install=true` (orchestrator, not the Coder):
      branch's classes with the javac + JUnit harness as in 026 (`/tmp/buddy-build-026/check.sh` with `R` set to this
      worktree, or its javac lines). Use Java 17 (`/usr/lib/jvm/java-17-openjdk`), because the default `java` 21
      doesn't start here. Then compile and run a scratch driver in package `app.buddy.assistant`, outside the repo.
-     For `America/Dawson_Creek` and `Antarctica/Troll` it calls `Linux.copyZone(db, new File("/"), id)` and prints
-     true, then prints `String.join(" ", Linux.env(TimeZone.getTimeZone(id)))`. `/` here is the same tree Buddy
-     passes as `root(c)`. Then `/usr/share/zoneinfo/America/Dawson_Creek` must be a 683-byte regular file ending
-     `\nMST7\n`, and `.../Antarctica/Troll` must be 1878 bytes: the first launch created them.
-  3. Under `env -i` plus the exact list the driver printed, print `%F %H:%M %z` for the same instant from
+     For `America/Dawson_Creek` and `America/Vancouver` it calls `id = Linux.zoneId(TimeZone.getTimeZone(zone), t)` for each
+     test instant `t` of step 3 (the launcher's own choice), then `Linux.copyZone(db, new File("/"), id)`, prints true,
+     and prints `String.join(" ", Linux.env(id))` for that same `id`. `Antarctica/Troll` is the same, with its two
+     instants (ids `Etc/GMT-2` and `Etc/GMT`). `/` here is the same tree Buddy passes as
+     `root(c)`. The driver records each path it created (the zone file and every directory it made, found by
+     checking existence before the copy). Then each `id`'s file must exist as a regular file whose bytes equal that
+     id's payload in the phone's database: the first launch created them.
+  3. Under `env -i` plus the exact list the driver printed for that `id`, print `%F %H:%M %z` for the same instant from
      `date -d @t`, `python3` (`time.localtime(t)`) and `node` (local getters plus `getTimezoneOffset`):
-     - `America/Dawson_Creek`, t=1795140000 (2026-11-20 02:00Z, when the UTC date is already tomorrow): all three
-       print `2026-11-19 19:00 -0700`.
+     - `America/Dawson_Creek` (id `Etc/GMT+7`), t=1795140000 (2026-11-20 02:00Z, when the UTC date is already
+       tomorrow): all three print `2026-11-19 19:00 -0700`.
+     - `America/Vancouver` (id `Etc/GMT+7`, BC's permanent UTC-7, which Node's own region rules lack), t=1795158000
+       (2026-11-20 07:00Z, local midnight; stale PST rules would print the 19th at 23:00): all three print
+       `2026-11-20 00:00 -0700`.
      - DST, `Antarctica/Troll`: at t=1783000000 all three print `2026-07-02 15:46 +0200`; at t=1768000000 all three
        print `2026-01-09 23:06 +0000`.
-  4. Cleanup: `rm -rf /usr/share/zoneinfo` (it didn't exist before step 2, so only the check's files go), delete
-     the scratch database copy, then `test ! -e /usr/share/zoneinfo` again.
+  4. Cleanup, only what the check created: for each path the driver recorded, unlink the file only if its bytes still
+     equal the payload the check wrote and `apk info -W <path>` says no package owns it, then `rmdir` the directories
+     the check created, deepest first, and only if empty. Anything else (a file another session installed during the
+     check, an `apk`-owned file, a non-empty directory) is left intact and reported. Delete the scratch database copy.
+     Never `rm -rf` under `/usr/share/zoneinfo`.
 - **CI (done-when 3):** PR checks green; `testGithubDebugUnitTest` in `build.yml` runs the new tests.
 - **On the phone, after install and step 3 (done-when 1; release smoke test), in a new chat:**
   - Before installing, `test ! -e /usr/share/zoneinfo` holds, so whatever is there afterwards came from the launcher.
-  - `ls -l /usr/share/zoneinfo/America/Dawson_Creek` shows 683 bytes, and `echo $TZ` prints `America/Dawson_Creek`.
+  - `ls -l /usr/share/zoneinfo/Etc/GMT+7` shows a regular file (the launcher selects the fixed-offset id for Dawson
+    Creek's UTC-7), and `echo $TZ` prints `Etc/GMT+7`.
   - `date`, `python3 -c 'import time;print(time.strftime("%F %T %Z"))'`, `node -e 'console.log(new Date().toString())'`
     all show the phone's local time and date (MST, same as the status bar).
   - Claude Code: the new transcript's `"type":"date"` attachment is the local date (after 17:00 local it must not
