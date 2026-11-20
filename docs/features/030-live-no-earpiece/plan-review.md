@@ -1,2 +1,12 @@
 # Plan review: {{SLUG}}
 <!-- Rounds: "## Round N - Plan Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Planner response (round N)" -->
+
+## Round 1 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] A headset disconnect can exclude the saved device for the rest of the call - Once LS2 has been applied for two seconds, unplugging or switching it off can make Android report the speaker at the next poll. `AudioRoute.java:328-334` then adds LS2 to `liveRefused` before reading the available devices. When LS2 reconnects, the proposed first loop skips it (`plan.md:81-83`). D3 also accepts the speaker after a slip even when LS2 remains usable (`plan.md:129-137`), so it can pass while done-when 3 fails. -> Tie refusal to the current connection. Give a reappearing saved device a fresh attempt while retaining bounded fallback for a device that actually refuses. Exercise LS2 → speaker on disconnect → LS2 on reconnect in one established call, without another `use()` or settings change. Require audible LS2 for the healthy-device D3 case.
+
+F2 [major] Playback can start while Android still reports the earpiece - `AudioRouteTest.java:143` explicitly ignores a speaker-to-earpiece mismatch at 1,999 ms. During that interval `AudioRoute.java:349-353` treats the cached speaker key as success, and `CodexLive.java:1023-1026` plays the phone track without checking the actual route. A later speaker reapply can therefore produce the expected D1 log even if the start of a reply played on the earpiece. -> Cover an actual earpiece route during startup and during a spoken reply. Specify how phone playback stays silent until a safe route is confirmed, including when Chromium overrides a successful request. Verify the first audible output and the transition, as well as the final route.
+
+F3 [minor] The D2 setup and user-facing wording omit watch playback - With LS2 off and no headset, `AudioRoute.java:93-96` can select Watch. A reachable watch then takes the voice and mutes the phone (`LiveWatch.java:214-218`, `CodexLive.java:945`), even if the log shows the speaker route that D2 expects. The proposed README and settings text at `plan.md:103-108` likewise promises a phone speaker in that case. -> Run D2 with the watch unreachable and no other headset. Describe the new order as the route used when the phone plays the voice, preserving the existing watch behavior.
+
+VERDICT: REVISE
