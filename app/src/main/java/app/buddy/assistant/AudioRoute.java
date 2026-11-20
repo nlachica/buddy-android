@@ -37,7 +37,7 @@ final class AudioRoute {
     private static boolean on, other, ownMode, dirty, sawLive, heard, stuck;
     private static String applied, refused;
     private static long began, quietSince, appliedAt;
-    /** 017: devices a phone live call couldn't use; kept until use() so each is tried once. */
+    /** 017: devices a phone live call couldn't use; kept until use() or until the device leaves the list (030). */
     private static final Set<String> liveRefused = new HashSet<>();
 
     private AudioRoute() {
@@ -169,13 +169,19 @@ final class AudioRoute {
     }
 
     /**
-     * 017: the communication device a phone live call uses while Watch is picked: a headset's own call device (wired,
-     * USB, BLE, hearing aid, or the SCO of a connected media headset: same product name as its A2DP output; the watch
-     * has no media output, so its SCO never matches), else the built-in speaker. Never the earpiece. comm: the
-     * devices of getAvailableCommunicationDevices(), out: those of getDevices(OUTPUTS). Returns an index in comm, or
-     * NONE. Devices in refused (keys) are skipped.
+     * 017, 030: the communication device a phone live call uses: the saved device when it is connected (a SCO with no
+     * media output, like the watch's, is only ever chosen this way), else a headset's own call device (wired, USB, BLE,
+     * hearing aid, or the SCO of a connected media headset: same product name as its A2DP output), else the built-in
+     * speaker. Never the earpiece. comm: the devices of getAvailableCommunicationDevices(), out: those of
+     * getDevices(OUTPUTS). Returns an index in comm, or NONE. Devices in refused (keys) are skipped.
      */
-    static int liveDevice(int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused) {
+    static int liveDevice(String saved, int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused) {
+        for (int i = 0; i < comm.length; i++) {
+            if (comm[i] != AudioDeviceInfo.TYPE_BUILTIN_EARPIECE && key(comm[i], commName[i]).equals(saved)
+                    && !refused.contains(saved)) {
+                return i;
+            }
+        }
         int speaker = NONE;
         for (int i = 0; i < comm.length; i++) {
             if (refused.contains(key(comm[i], commName[i]))) continue;
@@ -194,11 +200,16 @@ final class AudioRoute {
 
     /**
      * 017: liveDevice, then apply it; a device apply refuses goes into refused and the next is tried, so this ends
-     * (headset, speaker, NONE at worst). Returns the index applied, or NONE.
+     * (headset, speaker, NONE at worst). A refusal lasts while Android lists the device (030): one that left and comes
+     * back is tried again. Returns the index applied, or NONE.
      */
-    static int liveAttempt(int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused, IntPredicate apply) {
+    static int liveAttempt(String saved, int[] comm, String[] commName, int[] out, String[] outName, Set<String> refused,
+                           IntPredicate apply) {
+        Set<String> listed = new HashSet<>();
+        for (int i = 0; i < comm.length; i++) listed.add(key(comm[i], commName[i]));
+        refused.retainAll(listed);
         for (;;) {
-            int i = liveDevice(comm, commName, out, outName, refused);
+            int i = liveDevice(saved, comm, commName, out, outName, refused);
             if (i == NONE || apply.test(i)) return i;
             refused.add(key(comm[i], commName[i]));
         }
@@ -318,8 +329,9 @@ final class AudioRoute {
     }
 
     /**
-     * 017: a phone live call with Watch as the device: the headset's call device or the speaker, never the earpiece
-     * and never drop() (that is Android's routing, the earpiece). The WebView owns the mode, so this never sets it.
+     * 017, 030: a phone live call: the saved device when connected, else a headset's call device, else the speaker,
+     * never the earpiece and never drop() (that is Android's routing, the earpiece). The WebView owns the mode, so this
+     * never sets it.
      */
     @TargetApi(31)
     private static void live(AudioManager am) {
@@ -346,7 +358,7 @@ final class AudioRoute {
             ot[i] = outs[i].getType();
             outNames[i] = String.valueOf(outs[i].getProductName());
         }
-        int i = liveAttempt(ct, cn, ot, outNames, liveRefused, j -> {
+        int i = liveAttempt(Prefs.audioDevice(app), ct, cn, ot, outNames, liveRefused, j -> {
             String k = key(ct[j], cn[j]);
             if (k.equals(applied)) return true;
             boolean ok = am.setCommunicationDevice(comm.get(j));

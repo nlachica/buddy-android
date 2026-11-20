@@ -662,9 +662,9 @@ public class LiveWatchTest {
         assertEquals(0, c.toWatch() & 1);
         assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, c.noEarpiece("")));
         // no headset: the speaker (the watch's SCO isn't one); buds connected: their call device
-        assertEquals(1, AudioRoute.liveDevice(new int[]{earpiece, speaker, sco}, new String[]{"Earpiece", "Speaker", "Watch4"},
+        assertEquals(1, AudioRoute.liveDevice("", new int[]{earpiece, speaker, sco}, new String[]{"Earpiece", "Speaker", "Watch4"},
                 new int[]{speaker}, new String[]{"Speaker"}, new java.util.HashSet<>()));
-        assertEquals(3, AudioRoute.liveDevice(new int[]{earpiece, speaker, sco, sco},
+        assertEquals(3, AudioRoute.liveDevice("", new int[]{earpiece, speaker, sco, sco},
                 new String[]{"Earpiece", "Speaker", "Watch4", "Buds2"}, new int[]{speaker, a2dp},
                 new String[]{"Speaker", "Buds2"}, new java.util.HashSet<>()));
     }
