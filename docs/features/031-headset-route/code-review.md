@@ -22,3 +22,17 @@ VERDICT: REVISE
 - F4: fixed in a11745c. README now says the steady state is never the earpiece, that the 5 s applies while Android reports the earpiece, and that a headset not yet reported gets 30 s.
 
 Tests: not run here (the JVM does not start on this machine, PaX); CI is the first run of the new and changed tests.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] Auto can miss the headset mic when Claude opens its recorder late - `app/src/main/java/app/buddy/assistant/Voice.java:92`. If the microphone is temporarily unavailable at tap time, `ClaudeDictation.listen()` continues after `startCapture()` returns false (ClaudeDictation.java:56). When the mic becomes available, the socket recorder can start successfully (MicServer.java:246). That path never sets `MicServer.recording()`, so every routing poll sees capture as false. With Auto and LS2 connected, the whole utterance can come from the phone mic. -> Use Claude's existing listener and finishing state to request the headset during the input phase, including the late recorder path. Test a failed initial capture followed by successful socket recording, then release at finish.
+
+F2 [major] The phone recognizer keeps the headset in call mode while waiting for a transcript - `app/src/main/java/app/buddy/assistant/Voice.java:92`. Tapping Done calls `recognizer.stopListening()` at line 279. Automatic end of speech only changes the status at line 170. Both paths leave `current` set until results or error, so a read-aloud request in that interval requests the headset call link again. The test at AudioRouteTest.java:332 supplies `false` directly and misses the value the phone path actually supplies. -> Track when the phone recognizer finishes taking input, keep its listener for result delivery, and test a read-aloud request between stopping and receiving the result. [Android SpeechRecognizer.stopListening](https://developer.android.com/reference/android/speech/SpeechRecognizer#stopListening())
+
+F3 [minor] The late-headset test can pass if the production fix is removed - `app/src/test/java/app/buddy/assistant/AudioRouteTest.java:312`. The test clears its own local copies of both fields. Deleting those assignments from AudioRoute.java:417–418 would leave the assertions green and restore round 1's speaker-fallback bug. -> Exercise the same recovery and slip decision that the live poll uses, then assert the speaker is tried after LS2 disconnects.
+
+F4 [minor] The README still promises that Live never uses the earpiece - `README.md:105`. The first Live sentence makes that unconditional claim, while the same paragraph says setup audio can play there for several seconds. It also promises only a fraction of a second after a drop, although a previously confirmed headset that stays listed gets a two-second grace period. -> State the steady-state rule once and distinguish unplugging a device from losing the link while Android still lists it.
+
+The production late-connect change keeps the speaker eligible in the round 1 sequence. The current log fixture redacts the reported identifiers. CI passed for reviewed HEAD `42658bc`, including Android unit tests and the F-Droid reproducibility check. The local JVM failed before Gradle could start because it could not mark memory executable. The planned phone checks for Live audio in both directions and dictation with Auto and saved LS2 remain unverified. [CI run 44814236483](https://github.com/nlachica/buddy-android/actions/runs/44814236483)
+
+VERDICT: REVISE
