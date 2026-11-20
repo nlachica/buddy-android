@@ -96,3 +96,17 @@
   mic, and waiting would be capture gating (round 1 F2). The state ends with the dictation (Auto: the first idle poll;
   a saved pick: session end). DW3's proof is the headset-only phrase on the phone, for Auto and saved = LS2.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - Orchestrator rulings after plan review round 3 (no APPROVE)
+Tie-breaker: the brief (headset > watch > speaker, never earpiece; "keep it simple").
+- **R3 F1 accepted, minimal form.** A device in `liveRefused` that Android reports as the communication device (not
+  the earpiece) is taken out of `liveRefused` in `live()` before the slip check, so `liveAttempt` picks it again
+  (it ranks above the speaker) and the speaker is never re-applied over a headset that connected late. This is the
+  log's 2.99 s fight. Two lines plus a test; no new state.
+- **R3 F2 rejected.** The speaker's 2 s confirm while the earpiece is reported is 030's accepted behaviour, unchanged
+  here; protecting playback until a safe output is confirmed is the hold/mute 030 dropped. Exposure stays bounded
+  (headset 5 s + speaker 2 s, worst case, only for a listed headset that never connects). Non-goal: redesign.
+- **R3 F3 deferred.** A headset that connects mid-call while an Auto call already plays on the watch: the call-start
+  decision already yields to a connected media headset (`livePick`); the mid-call handoff is a new watch-flow
+  behaviour, not the 030 regression, and touches LiveWatch (non-goal). Note for a follow-up if Nicholas hits it.
+- By: orchestrator (claude-opus-5-5)

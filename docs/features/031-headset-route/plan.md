@@ -282,3 +282,9 @@ arrays with them. That is the second use, and `live()` loses its two copy loops.
 ## Open questions
 None blocking. One for Nicholas, with a working default: up to 5 s on the earpiece while a listed headset's call link
 fails to come (Risk 1). The other options are a different bound, or 030's dropped hold/mute (decisions.md).
+
+## Orchestrator amendment (after round 3, see decisions.md)
+- Add to Fix 1 / step 2: in `live()`, before the slip check, if `curKey` is non-null, not the earpiece, and in
+  `liveRefused`, remove it from `liveRefused` (a pure helper is fine). Test: LS2 refused after its 5 s, speaker
+  applied, then Android reports LS2: the next poll's `liveAttempt` keeps/applies LS2, not the speaker.
+- R3 F2 and F3: no change (decisions.md).
