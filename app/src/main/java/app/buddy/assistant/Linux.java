@@ -110,8 +110,8 @@ final class Linux {
     private static synchronized void zone(File root, String id) {
         if (id.equals(zoned) && Files.isRegularFile(new File(root, "usr/share/zoneinfo/" + id).toPath(), LinkOption.NOFOLLOW_LINKS)) return;
         try {
-            copyZone(new File(TZDATA), root, id);
-            zoned = id;
+            if (copyZone(new File(TZDATA), root, id)) zoned = id; // false (no such id) is retried next launch
+            else android.util.Log.w("BuddyLinux", "zone file " + id + ": not in " + TZDATA);
         } catch (IOException e) {
             android.util.Log.w("BuddyLinux", "zone file " + id, e); // TZ is still passed: node and Claude Code are right, musl shows UTC
         }
