@@ -3,6 +3,7 @@ package app.buddy.assistant;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
+import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 
 import android.media.AudioDeviceInfo;
@@ -228,8 +229,9 @@ public class AudioRouteTest {
     public void aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker() { // round 3 F1
         String ls2 = "7:LS2 Freecom", earpiece = "1:Earpiece";
         long g = AudioRoute.grace(ls2, false, earpiece);
-        assertEquals(0, g);
-        assertTrue(AudioRoute.slipped(ls2, earpiece, 300, g)); // round 4 F1: the first poll after the apply falls back
+        assertEquals(5000, g); // 031: not 0, LS2's link took 2.7 s
+        assertFalse(AudioRoute.slipped(ls2, earpiece, 4999, g));
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 5000, g)); // a link that never comes: the speaker
         assertTrue(AudioRoute.refuseSlip(ls2, false)); // LS2 refused, so liveAttempt takes the speaker
         Set<String> refused = new HashSet<>();
         refused.add(ls2);
@@ -237,6 +239,125 @@ public class AudioRouteTest {
         String[] cn = {"Earpiece", "SM-G990W", "LS2 Freecom"};
         assertEquals(1, AudioRoute.liveAttempt("7:LS2 Freecom", comm, cn, new int[]{SPEAKER}, new String[]{"SM-G990W"},
                 refused, j -> true));
+    }
+
+    @Test
+    public void aConfirmedHeadsetSurvivesAOnePollLoss() { // 031 round 2 F2
+        long from = 0; // the apply
+        from = AudioRoute.lossFrom(LS2, LS2, from, 2730);
+        assertEquals(2730, from);
+        String earpiece = "1:SM-G990W";
+        from = AudioRoute.lossFrom(LS2, earpiece, from, 3030);
+        assertEquals(2730, from);
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 3030 - from, AudioRoute.grace(LS2, true, earpiece)));
+        from = AudioRoute.lossFrom(LS2, LS2, from, 3330);
+        assertEquals(3330, from);
+        assertTrue(AudioRoute.slipped(LS2, earpiece, 5330 - from, AudioRoute.grace(LS2, true, earpiece)));
+        assertEquals(0, AudioRoute.lossFrom("2:SM-G990W", "2:SM-G990W", 0, 5000)); // the speaker keeps its apply clock
+        assertEquals(7, AudioRoute.lossFrom(null, LS2, 7, 5000));
+    }
+
+    @Test
+    public void aRefusedHeadsetThatConnectsLateIsTriedAgainNotTheSpeaker() { // 031 orchestrator amendment (the 2.99 fight)
+        Set<String> refused = new HashSet<>();
+        refused.add(LS2);
+        assertFalse(AudioRoute.unrefuse(refused, "1:SM-G990W")); // the earpiece reported: nothing changes
+        assertFalse(AudioRoute.unrefuse(refused, null));
+        assertTrue(refused.contains(LS2));
+        assertTrue(AudioRoute.unrefuse(refused, LS2)); // Android reports LS2 as the device
+        assertFalse(AudioRoute.unrefuse(refused, LS2));
+        assertTrue(refused.isEmpty());
+        java.util.List<Integer> calls = new java.util.ArrayList<>();
+        assertEquals(2, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER, SCO}, new String[]{"SM-G990W", "SM-G990W", "LS2 Freecom"},
+                new int[]{SPEAKER, A2DP}, new String[]{"SM-G990W", "LS2 Freecom"}, refused, j -> {
+                    calls.add(j);
+                    return true;
+                }));
+        assertEquals(java.util.Arrays.asList(2), calls);
+    }
+
+    @Test
+    public void theLs2ConnectingWhileTheEarpieceIsReportedIsNotRefused() { // 031: live-ls2.log 0.26 -> 2.99, 7.59 -> 8.44
+        String earpiece = "1:SM-G990W";
+        // applied; Android reports the earpiece while the SCO connects
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 300, AudioRoute.grace(LS2, false, earpiece)));
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 2400, AudioRoute.grace(LS2, false, earpiece)));
+        // then it reports LS2: seen, holds
+        assertFalse(AudioRoute.slipped(LS2, LS2, 2730, AudioRoute.grace(LS2, true, LS2)));
+        // page connect: applied again, unseen again; the earpiece is reported 850 ms later, then LS2
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 850, AudioRoute.grace(LS2, false, earpiece)));
+        assertFalse(AudioRoute.slipped(LS2, LS2, 2000, AudioRoute.grace(LS2, true, LS2)));
+        // liveAttempt keeps LS2 and tries nothing else
+        java.util.List<Integer> calls = new java.util.ArrayList<>();
+        assertEquals(2, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER, SCO}, new String[]{"SM-G990W", "SM-G990W", "LS2 Freecom"},
+                new int[]{SPEAKER, A2DP}, new String[]{"SM-G990W", "LS2 Freecom"}, new HashSet<>(), j -> {
+                    calls.add(j);
+                    return true;
+                }));
+        assertEquals(java.util.Arrays.asList(2), calls);
+    }
+
+    @Test
+    public void aLateHeadsetKeepsTheSpeakerEligibleForTheNextFallback() throws Exception { // code review rounds 1-2 F1/F3: live()'s own hand-back
+        String speaker = "2:SM-G990W";
+        int[] comm = {EARPIECE, SPEAKER, SCO};
+        String[] cn = {"SM-G990W", "SM-G990W", "LS2 Freecom"};
+        int[] out = {SPEAKER, A2DP};
+        String[] on = {"SM-G990W", "LS2 Freecom"};
+        java.lang.reflect.Field fa = AudioRoute.class.getDeclaredField("applied"), fs = AudioRoute.class.getDeclaredField("speakerSlipped"),
+                fr = AudioRoute.class.getDeclaredField("liveRefused");
+        fa.setAccessible(true);
+        fs.setAccessible(true);
+        fr.setAccessible(true);
+        @SuppressWarnings("unchecked") Set<String> refused = (Set<String>) fr.get(null);
+        try {
+            // LS2 refused at 5 s, the speaker slipped once (the earpiece still reported), applied again
+            refused.add(LS2);
+            fa.set(null, speaker);
+            fs.setBoolean(null, true);
+            AudioRoute.handBack(LS2); // the next report is LS2
+            assertNull(fa.get(null));
+            assertFalse(fs.getBoolean(null));
+            assertTrue(refused.isEmpty());
+            assertEquals(2, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> true)); // LS2
+            // LS2 goes away, Android reports the earpiece: the speaker is tried and the call goes on
+            assertEquals(1, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER}, new String[]{"SM-G990W", "SM-G990W"},
+                    new int[]{SPEAKER}, new String[]{"SM-G990W"}, refused, j -> true));
+            assertFalse(AudioRoute.refuseSlip(speaker, fs.getBoolean(null))); // and its first slip is still applied again
+        } finally {
+            refused.clear();
+            fa.set(null, null);
+            fs.setBoolean(null, false);
+        }
+    }
+
+    private static final int[] COMM = {EARPIECE, SPEAKER, SCO, SCO}, OUT = {SPEAKER, A2DP};
+    private static final String[] COMM_N = {"SM-G990W", "SM-G990W", "LS2 Freecom", "Galaxy Watch4"}, OUT_N = {"SM-G990W", "LS2 Freecom"};
+
+    @Test
+    public void autoWhileDictatingUsesTheHeadsetsCallLink() { // 031
+        assertEquals(LS2, AudioRoute.want("", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals("", AudioRoute.want("", false, COMM, COMM_N, OUT, OUT_N)); // F2: capture over, transcript awaited
+        assertEquals("", AudioRoute.want("watch", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals("2:SM-G990W", AudioRoute.want("2:SM-G990W", true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals(LS2, AudioRoute.want(LS2, true, COMM, COMM_N, OUT, OUT_N));
+        assertEquals(LS2, AudioRoute.want(LS2, false, COMM, COMM_N, OUT, OUT_N));
+        // no media output for LS2: never the watch's SCO, never the earpiece
+        assertEquals("", AudioRoute.want("", true, COMM, COMM_N, new int[]{SPEAKER}, new String[]{"SM-G990W"}));
+        // a wired headset keeps Android's routing
+        assertEquals("", AudioRoute.want("", true, new int[]{EARPIECE, SPEAKER, WIRED}, new String[]{"SM-G990W", "SM-G990W", "Headset"},
+                new int[]{SPEAKER, WIRED}, new String[]{"SM-G990W", "Headset"}));
+    }
+
+    @Test
+    public void autoOrderPutsTheHeadsetBeforeTheWatchAndNeverTheEarpiece() { // 031
+        assertEquals(2, AudioRoute.liveDevice("", COMM, COMM_N, OUT, OUT_N, new HashSet<>())); // LS2, not the watch's SCO
+        assertEquals(1, AudioRoute.liveDevice("", COMM, COMM_N, new int[]{SPEAKER}, new String[]{"SM-G990W"}, new HashSet<>())); // speaker
+        assertEquals(AudioRoute.NONE, AudioRoute.liveDevice("", new int[]{EARPIECE}, new String[]{"SM-G990W"}, OUT, OUT_N, new HashSet<>()));
+        assertEquals("", AudioRoute.pick("", false, true, true));     // read aloud: the headset
+        assertEquals("watch", AudioRoute.pick("", false, false, true)); // then the watch
+        assertEquals("", AudioRoute.pick("", false, false, false));     // then the speaker
+        assertEquals(LS2, AudioRoute.want("", true, COMM, COMM_N, OUT, OUT_N)); // dictation: the headset's mic
     }
 
     @Test

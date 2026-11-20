@@ -20,7 +20,8 @@ import java.util.function.IntPredicate;
 /**
  * Which audio device Buddy's voice uses: Auto or one of the devices Android offers for calls (speaker, earpiece, a
  * Bluetooth watch or headset). Auto is the order phones use: a connected media headset (Android's own routing, the
- * latest one), then the Galaxy Watch for read aloud, then the phone speaker (docs/features/016-audio-auto-priority). While Buddy's voice is on and a device is chosen, Buddy runs as a
+ * latest one), then the Galaxy Watch for read aloud, then the phone speaker (docs/features/016-audio-auto-priority).
+ * 031: while you dictate, Auto uses a connected Bluetooth headset's call link, so its microphone is the input. While Buddy's voice is on and a device is chosen, Buddy runs as a
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
  * and puts everything back, so no end of voice needs a hook. Android 12+ (setCommunicationDevice); below, only Auto.
@@ -31,7 +32,8 @@ import java.util.function.IntPredicate;
  * All state lives on the main thread.
  */
 final class AudioRoute {
-    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 30_000; // Android documents up to 30 s for a Bluetooth call device
+    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 30_000, // Android documents up to 30 s for a Bluetooth call device
+            EARPIECE_MS = 5000; // 031: LS2's call link took about 2.7 s, all of it with the earpiece reported
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     private static Context app;
@@ -115,6 +117,12 @@ final class AudioRoute {
         int[] t = new int[l.size()];
         for (int i = 0; i < t.length; i++) t[i] = l.get(i).getType();
         return t;
+    }
+
+    private static String[] names(List<AudioDeviceInfo> l) {
+        String[] n = new String[l.size()];
+        for (int i = 0; i < n.length; i++) n[i] = String.valueOf(l.get(i).getProductName());
+        return n;
     }
 
     /** 016: where Buddy's voice goes now: the saved key, WatchVoice.KEY, or "" (Android's own routing). */
@@ -222,13 +230,34 @@ final class AudioRoute {
     }
 
     /**
-     * 030: a headset Android hasn't reported yet gets time to connect while the reported output is safe; the speaker, a
-     * route seen once and the speaker get 2 s; a headset not seen yet gets none when Android reports the earpiece (the
-     * reply plays there): the next poll after the apply falls back to the speaker.
+     * 030, 031: a route seen once and the speaker get 2 s; a headset not seen yet gets 30 s while the reported output is
+     * safe and 5 s while Android reports the earpiece (the reply plays there, and Android reports it for as long as a
+     * call link connects). Counted from the latest request (lossFrom), then the speaker takes over.
      */
     static long grace(String applied, boolean seen, String actual) {
         if (seen || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")) return CONFIRM_MS;
-        return actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") ? 0 : SETUP_MS;
+        return actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") ? EARPIECE_MS : SETUP_MS;
+    }
+
+    /**
+     * 031: the time a loss counts from: now while Android reports a headset (not the speaker) as the applied device, so
+     * one earpiece report late in a call is no slip; else from (the latest apply; the speaker keeps it, as in 030).
+     */
+    static long lossFrom(String applied, String actual, long from, long now) {
+        return applied != null && applied.equals(actual) && !applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")
+                ? now : from;
+    }
+
+    /** 031: a refused device Android reports as the communication device (not the earpiece) is back: it connected late; true then. */
+    static boolean unrefuse(Set<String> refused, String actual) {
+        return actual != null && !actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") && refused.remove(actual);
+    }
+
+    /** 031: Android reports a refused device (late headset): take it back; the speaker it replaced stays eligible. */
+    static void handBack(String actual) {
+        if (!unrefuse(liveRefused, actual)) return;
+        applied = null;
+        speakerSlipped = false;
     }
 
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
@@ -288,10 +317,29 @@ final class AudioRoute {
         });
     }
 
-    /** The chosen device as Android routing sees it: Watch is Auto. */
+    /**
+     * The chosen device as Android routing sees it: Watch is Auto. 031: Auto while the microphone captures (not while
+     * a transcript is awaited) is a connected Bluetooth headset's call link (a SCO named like a connected media output; not the watch's), so its microphone is the input;
+     * "" when there is none. Read aloud isn't listening: it stays on the headset's media link.
+     */
+    static String want(String saved, boolean capturing, int[] comm, String[] commName, int[] out, String[] outName) {
+        if (WatchVoice.KEY.equals(saved)) return "";
+        if (saved.isEmpty() && capturing) {
+            for (int i = 0; i < comm.length; i++) {
+                if (comm[i] == AudioDeviceInfo.TYPE_BLUETOOTH_SCO && mediaHeadset(commName[i], out, outName)) {
+                    return key(comm[i], commName[i]);
+                }
+            }
+        }
+        return saved;
+    }
+
+    @TargetApi(31)
     private static String want(Context c) {
-        String w = Prefs.audioDevice(c);
-        return WatchVoice.KEY.equals(w) ? "" : w;
+        AudioManager am = c.getSystemService(AudioManager.class);
+        List<AudioDeviceInfo> comm = am.getAvailableCommunicationDevices();
+        List<AudioDeviceInfo> out = java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS));
+        return want(Prefs.audioDevice(c), Voice.capturing(), types(comm), names(comm), types(out), names(out));
     }
 
     /** Buddy applied this device key and Android reports it as the communication device (030). Main thread. */
@@ -371,6 +419,8 @@ final class AudioRoute {
             seen = true;
             speakerSlipped = false;
         }
+        appliedAt = lossFrom(applied, curKey, appliedAt, now); // from here on appliedAt is the time a loss counts from
+        handBack(curKey);
         if (slipped(applied, curKey, now - appliedAt, grace(applied, seen, curKey))) {
             // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
             if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);
@@ -379,20 +429,11 @@ final class AudioRoute {
             applied = null;
         }
         final List<AudioDeviceInfo> comm = am.getAvailableCommunicationDevices();
-        int n = comm.size();
-        int[] ct = new int[n];
-        String[] cn = new String[n];
-        for (int i = 0; i < n; i++) {
-            ct[i] = comm.get(i).getType();
-            cn[i] = String.valueOf(comm.get(i).getProductName());
-        }
-        AudioDeviceInfo[] outs = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS);
-        int[] ot = new int[outs.length];
-        String[] outNames = new String[outs.length];
-        for (int i = 0; i < outs.length; i++) {
-            ot[i] = outs[i].getType();
-            outNames[i] = String.valueOf(outs[i].getProductName());
-        }
+        final int[] ct = types(comm);
+        final String[] cn = names(comm);
+        List<AudioDeviceInfo> outs = java.util.Arrays.asList(am.getDevices(AudioManager.GET_DEVICES_OUTPUTS));
+        int[] ot = types(outs);
+        String[] outNames = names(outs);
         int i = liveAttempt(Prefs.audioDevice(app), ct, cn, ot, outNames, liveRefused, j -> {
             String k = key(ct[j], cn[j]);
             if (k.equals(applied)) return true;
@@ -459,6 +500,7 @@ final class AudioRoute {
                     return;
                 }
                 if (sawLive) afterLive(app.getSystemService(AudioManager.class).getMode());
+                else if (applied != null && want(app).isEmpty()) drop(app.getSystemService(AudioManager.class)); // 031: Auto's dictation link
             }
             main.postDelayed(this, POLL_MS);
         }

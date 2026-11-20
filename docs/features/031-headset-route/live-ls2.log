@@ -1,0 +1,73 @@
+live voice call, Fri Nov 20 12:31:12 MST 2026, Buddy 2.3.14-fork.2
+    0.01 start: chat CHAT_ID
+    0.21 status: Connecting…
+    0.25 page audio context running, 48000 Hz, page visible
+    0.26 page audio context running
+    0.26 route: 7:LS2 Freecom applied
+    0.56 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+    0.56 route: 2:SM-G990W applied
+    1.26 page asks for [android.webkit.resource.AUDIO_CAPTURE]: granted
+    2.71 page mic:  {"autoGainControl":true,"channelCount":1,"deviceId":"default","echoCancellation":true,"groupId":"GROUP_ID","latency":0.01,"noiseSuppression":true,"sampleRate":48000,"sampleSize":16,"voiceIsolation":false}
+    2.91 page: offer ready
+    2.99 route: slipped from 2:SM-G990W to 7:LS2 Freecom
+    2.99 route: 2:SM-G990W applied
+    6.05 call: thread THREAD_ID
+    6.06 call: start -> {"id":4,"result":{}}
+    7.34 server thread/realtime/started {"threadId":"THREAD_ID","realtimeSessionId":"SESSION_ID","version":"v3"}
+    7.35 page answer received
+    7.36 page ice checking
+    7.37 page remote track audio, muted true
+    7.38 page connection connecting
+    7.38 page audio element playing
+    7.38 page audio element play ok
+    7.57 page ice connected
+    7.58 status: Listening…
+    7.59 route: 7:LS2 Freecom applied
+    7.74 page connection connected
+    7.88 page remote track unmuted
+    7.97 page data channel open
+    8.14 page dc session.started
+    8.44 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+    9.06 route: 2:SM-G990W applied
+   12.79 page rtp 10 s: sent 3794 B; got 723 B, level 0.000; mic peak 0.000; voice peak 0.000; audio playing, 0 pauses; ctx running
+   17.44 route: 7:LS2 Freecom applied
+   18.47 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+   18.47 route: 2:SM-G990W applied
+   18.47 watch: setting auto -> 1:SM-G990W
+   19.94 route: 2:SM-G990W applied
+   19.96 watch: setting 1:SM-G990W -> 2:SM-G990W
+   20.00 route: 7:LS2 Freecom applied
+   21.65 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+   21.65 route: 2:SM-G990W applied
+   21.65 watch: setting 2:SM-G990W -> 7:LS2 Freecom
+   22.40 page dc session.usage.updated {"usage":{"audio_duration_ms":12000,"backend_model_usage":[]},"limit":{"status":null,"reset_seconds":null}}
+   22.77 page rtp 10 s: sent 8662 B; got 1512 B, level 0.000; mic peak 0.000; voice peak 0.000; audio playing, 0 pauses; ctx running
+   30.86 route: 7:LS2 Freecom applied
+   30.94 watch: setting 7:LS2 Freecom -> watch
+   30.94 watch: looking
+   32.00 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+   32.00 route: 2:SM-G990W applied
+   32.01 watch: playing there
+   32.03 console WARNING: The ScriptProcessorNode is deprecated. Use AudioWorkletNode instead. (https://bit.ly/audio-worklet)
+   32.03 page voice on the watch
+   32.78 page rtp 10 s: sent 10934 B; got 1497 B, level 0.000; mic peak 0.000; voice peak 0.000; audio playing, 0 pauses; ctx running
+   33.89 route: 7:LS2 Freecom applied
+   35.11 route: 7:LS2 Freecom applied
+   35.11 watch: setting watch -> 1:SM-G990W
+   35.12 watch: stop: the setting moved
+   35.18 page voice on the phone
+   36.31 route: 2:SM-G990W applied
+   36.31 watch: setting 1:SM-G990W -> 2:SM-G990W
+   37.39 page dc session.usage.updated {"usage":{"audio_duration_ms":27600,"backend_model_usage":[]},"limit":{"status":null,"reset_seconds":null}}
+   38.51 route: 7:LS2 Freecom applied
+   39.73 route: slipped from 7:LS2 Freecom to 1:SM-G990W
+   39.73 route: 2:SM-G990W applied
+   39.73 watch: setting 2:SM-G990W -> 7:LS2 Freecom
+   42.77 page rtp 10 s: sent 1764 B; got 1503 B, level 0.000; mic peak 0.000; voice peak 0.000; audio playing, 0 pauses; ctx running
+   43.95 end: End
+   43.97 page hang up
+   44.02 page hung up: microphone stopped
+   44.02 page data channel closed
+   44.03 page audio context closed
+   44.05 end: call stopped
+   44.27 end: page destroyed

@@ -36,6 +36,11 @@ final class ClaudeDictation {
         return listener != null;
     }
 
+    /** 031: still taking input (not finishing), by any recorder path: the headset's link is wanted. */
+    static boolean taking() {
+        return listener != null && !finishing;
+    }
+
     /** Start listening (the hidden session starts first if needed: a few seconds the first time). */
     static String listen(Context c, String lang, Voice.Listener l) {
         if (!SetupState.planSignedIn(c, "claude")) return c.getString(R.string.dictation_claude_sign_in);
