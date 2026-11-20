@@ -20,3 +20,13 @@ F2: fixed in a67c4c6 - the final voice-readiness check is `session.exited || !�
 F3: fixed in a67c4c6 - the guard is `t.equals("/voice hold") || t.startsWith("/voice hold ⎿")`; T13 (`/voice hold the mic` passes) added; T5, T9 still hold.
 
 `ClaudeDictationTest` 13/13 locally. The device check is still pending.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A blank row inside the input box discards the whole transcript - `app/src/main/java/app/buddy/assistant/ClaudeDictation.java:261` rejects the candidate as soon as it reaches a blank row, even when the next row is the closing rule. I ran the compiled parser on `────\n❯ hello\n\n────` and got `""`. The base parser returns `hello`. A box with two paragraphs separated by a blank row also returned `""`, which makes `readResult` report “no speech.” -> Scan through blank rows to the closing rule and let the existing whitespace normalization join the text. Keep rejecting candidates that reach the end of the screen without a closing rule. Add a regression test for a blank row inside a closed box and keep the footer test.
+
+F2 [minor] The echo test no longer exercises the output-marker guard - `app/src/test/java/app/buddy/assistant/ClaudeDictationTest.java:44` gives T6 an opening rule and no closing rule. It passes even if the `t.startsWith("/voice hold ⎿")` check is deleted. -> Add an assertion with both the command and its output inside `box(...)`, so removing the guard makes the test fail.
+
+The round 1 menu, exited-session and command-prefix fixes are present. All 13 committed parser tests passed locally. Both CI jobs passed for `09a67c3`. The on-device Talk check is pending, and the original regression trigger remains unconfirmed. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44682636328)
+
+VERDICT: REVISE
