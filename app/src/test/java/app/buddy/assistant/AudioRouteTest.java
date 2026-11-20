@@ -211,16 +211,32 @@ public class AudioRouteTest {
     @Test
     public void aHeadsetNotSeenYetGetsTimeToConnect() { // round 1 F3
         String ls2 = "7:LS2 Freecom";
-        assertTrue(AudioRoute.grace(ls2, false) > 3000);
-        assertEquals(2000, AudioRoute.grace(ls2, true)); // once seen, a loss is a slip after 2 s
-        assertEquals(2000, AudioRoute.grace("2:Speaker", false));
-        // LS2 reports itself after 3 s: not a slip
-        assertFalse(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, false)));
-        assertTrue(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, true)));
+        String speaker = "2:Speaker", earpiece = "1:Earpiece";
+        assertTrue(AudioRoute.grace(ls2, false, speaker) > 3000);
+        assertEquals(2000, AudioRoute.grace(ls2, true, earpiece)); // once seen, a loss is a slip after 2 s
+        assertEquals(2000, AudioRoute.grace("2:Speaker", false, earpiece));
+        // LS2 reports itself after 3 s with the speaker active meanwhile: not a slip
+        assertFalse(AudioRoute.slipped(ls2, speaker, 3000, AudioRoute.grace(ls2, false, speaker)));
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 3000, AudioRoute.grace(ls2, true, earpiece)));
         // round 2 F2: still connecting at 10 s is not a slip; the full 30 s window with no link is
-        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 10_000, AudioRoute.grace(ls2, false)));
-        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 29_999, AudioRoute.grace(ls2, false)));
-        assertTrue(AudioRoute.slipped(ls2, "2:Speaker", 30_000, AudioRoute.grace(ls2, false))); // a link that never comes
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 10_000, AudioRoute.grace(ls2, false, "2:Speaker")));
+        assertFalse(AudioRoute.slipped(ls2, "2:Speaker", 29_999, AudioRoute.grace(ls2, false, "2:Speaker")));
+        assertTrue(AudioRoute.slipped(ls2, "2:Speaker", 30_000, AudioRoute.grace(ls2, false, "2:Speaker"))); // a link that never comes
+    }
+
+    @Test
+    public void aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker() { // round 3 F1
+        String ls2 = "7:LS2 Freecom", earpiece = "1:Earpiece";
+        long g = AudioRoute.grace(ls2, false, earpiece);
+        assertFalse(AudioRoute.slipped(ls2, earpiece, 1999, g)); // the apply's own moment
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 2000, g)); // speech playing on the earpiece: slip, not 30 s
+        assertTrue(AudioRoute.refuseSlip(ls2, false)); // LS2 refused, so liveAttempt takes the speaker
+        Set<String> refused = new HashSet<>();
+        refused.add(ls2);
+        int[] comm = {EARPIECE, SPEAKER, 7};
+        String[] cn = {"Earpiece", "SM-G990W", "LS2 Freecom"};
+        assertEquals(1, AudioRoute.liveAttempt("7:LS2 Freecom", comm, cn, new int[]{SPEAKER}, new String[]{"SM-G990W"},
+                refused, j -> true));
     }
 
     @Test

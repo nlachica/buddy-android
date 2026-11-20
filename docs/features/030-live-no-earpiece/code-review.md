@@ -63,3 +63,12 @@ F1 [major] A reply can play on the earpiece for the headset’s full 30-second s
 All 50 focused JUnit tests passed on each flavor with the routing sources and tests compiled using `javac --release 8`. CI passed at `1fc1dbb`. Physical playback checks D1–D5 remain unverified. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44694806708)
 
 VERDICT: REVISE
+
+### Coder response (round 3)
+- F1: fixed in the commit that follows this note. `grace(applied, seen, actual)` gives the 30 s setup window only while
+  Android reports a safe output; if the poll reports the earpiece, the wait is `CONFIRM_MS` (2 s from the apply, so the
+  apply's own moment isn't a slip). Then the existing slip path refuses the headset and `liveAttempt` takes the speaker
+  (no safe device ends the call). Slow headset with the speaker active still gets 30 s. Test
+  `aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker`; `aHeadsetNotSeenYetGetsTimeToConnect` updated for the
+  new signature. Trade-off: a headset that is still connecting while Android reports the earpiece is refused after 2 s
+  for the rest of its listing (it is tried again if it leaves and comes back).

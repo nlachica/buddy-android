@@ -221,9 +221,13 @@ final class AudioRoute {
         return applied != null && sinceMs >= graceMs && !applied.equals(actual);
     }
 
-    /** 030: a headset Android hasn't reported yet gets time to connect; the speaker, and a route seen once, don't. */
-    static long grace(String applied, boolean seen) {
-        return seen || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":") ? CONFIRM_MS : SETUP_MS;
+    /**
+     * 030: a headset Android hasn't reported yet gets time to connect while the reported output is safe; the speaker, a
+     * route seen once, and any wait during which Android reports the earpiece (the reply plays there) don't.
+     */
+    static long grace(String applied, boolean seen, String actual) {
+        boolean earpiece = actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":");
+        return seen || earpiece || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":") ? CONFIRM_MS : SETUP_MS;
     }
 
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
@@ -366,7 +370,7 @@ final class AudioRoute {
             seen = true;
             speakerSlipped = false;
         }
-        if (slipped(applied, curKey, now - appliedAt, grace(applied, seen))) {
+        if (slipped(applied, curKey, now - appliedAt, grace(applied, seen, curKey))) {
             // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
             if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);
             else speakerSlipped = true;

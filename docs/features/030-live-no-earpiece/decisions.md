@@ -134,3 +134,10 @@
 
 ## 2026-11-20 - Orchestrator: round-3 F1 is in scope; one more code loop
 - F1 is valid and small: while a headset is still connecting (30 s grace), if Android reports the earpiece, switch to the speaker at once (existing fallback); keep waiting only while the reported output is safe. Add the regression test named. Nothing else changes.
+
+## 2026-11-20 - Coder: code review round 3 (F1), earpiece during headset setup
+- Options: slip at once when the earpiece is reported; use the normal 2 s wait.
+- Choice: `grace(applied, seen, actual)` returns `CONFIRM_MS` when `actual` is the earpiece, so the existing slip,
+  refusal and speaker fallback apply after 2 s; the 30 s setup window stays for a safe reported output. Zero would
+  refuse a healthy headset in the moment Android hasn't reacted to the apply yet.
+- By: Coder (claude-sonnet-5-5)
