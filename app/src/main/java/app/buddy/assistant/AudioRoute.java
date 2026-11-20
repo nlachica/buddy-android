@@ -24,8 +24,9 @@ import java.util.function.IntPredicate;
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
  * and puts everything back, so no end of voice needs a hook. Android 12+ (setCommunicationDevice); below, only Auto.
- * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice),
- * except in a phone live call (017, Android 12+): a headset's call device, else the speaker, never the earpiece.
+ * Watch (github build) is not an Android device: for routing it is Auto, and read aloud goes to the watch (WatchVoice).
+ * A phone live call (017, 030, Android 12+) never uses the earpiece, whatever the choice: the chosen device while it is
+ * connected (not the earpiece), else a headset's call device, else the speaker.
  * A picked device that is away is Auto until it is back.
  * All state lives on the main thread.
  */
@@ -254,7 +255,7 @@ final class AudioRoute {
             heard = false;
             quietSince = 0;
             // a device choice is forced to apply again; Auto keeps `applied` so reconcile's drop() releases it
-            if (!want(a).isEmpty() || LiveWatch.noEarpiece(Prefs.audioDevice(a))) applied = null;
+            if (!want(a).isEmpty() || LiveWatch.noEarpiece()) applied = null;
             refused = null;
             liveRefused.clear();
             stuck = false;
@@ -273,13 +274,18 @@ final class AudioRoute {
         return WatchVoice.KEY.equals(w) ? "" : w;
     }
 
+    /** Buddy applied this device key (a phone live call, 030). Main thread. */
+    static boolean applied(String key) {
+        return key.equals(applied);
+    }
+
     /** Buddy itself holds communication mode (AutoPause doesn't count that as a call). */
     static boolean ownsMode() {
         return ownMode;
     }
 
     /**
-     * 017's live rule: while Buddy's phone call holds the mode (noEarpiece), the route is live()'s. Not gated on the
+     * 017's live rule: while a phone live call is on (noEarpiece, 030: every setting), the route is live()'s. Not gated on the
      * session latch `other`: a session that began in another mode would otherwise send Auto to drop(), the earpiece
      * (026, the W2 log).
      */
@@ -294,7 +300,7 @@ final class AudioRoute {
         boolean live = CodexLive.on();
         afterLive(mode);
         sawLive |= live;
-        if (liveRule(mode, LiveWatch.noEarpiece(Prefs.audioDevice(app)))) {
+        if (liveRule(mode, LiveWatch.noEarpiece())) {
             live(am);
             return;
         }

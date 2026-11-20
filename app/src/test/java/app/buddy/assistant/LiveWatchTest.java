@@ -34,7 +34,7 @@ public class LiveWatchTest {
     }
 
     private static final class Fake implements LiveWatch.Out {
-        String saved = "watch", node = "n1";
+        String saved = "watch", node = "n1", applied;
         boolean wins = true, holdFind;
         long now;
         int finds, savedReads;
@@ -46,6 +46,7 @@ public class LiveWatchTest {
 
         @Override public String saved() { savedReads++; return saved; }
         @Override public boolean watchWins() { return wins; }
+        @Override public boolean pickApplied(String s) { return s.equals(applied); }
 
         @Override
         public void find(Consumer<String> n) {
@@ -127,10 +128,10 @@ public class LiveWatchTest {
         c.begin();
         Reading r = f.last();
         assertEquals(0, c.toWatch()); // not attached: the phone still plays
-        assertFalse(c.noEarpiece(""));
+        assertTrue(c.noEarpiece()); // the phone call is on, attached or not
         r.attached.run();
         assertEquals(1, c.toWatch());
-        assertTrue(c.noEarpiece(""));
+        assertTrue(c.noEarpiece());
         quiet(3);
         assertTrue(r.got.isEmpty()); // the silence before the voice is not sent
         c.pcm(LOUD);
@@ -144,8 +145,7 @@ public class LiveWatchTest {
         c.begin();
         assertTrue(f.opened.isEmpty());
         assertEquals(0, c.toWatch());
-        assertTrue(c.noEarpiece("watch"));
-        assertFalse(c.noEarpiece(""));
+        assertTrue(c.noEarpiece());
     }
 
     @Test
@@ -153,7 +153,7 @@ public class LiveWatchTest {
         Reading r = onWatch();
         r.events.refused();
         assertEquals(0, c.toWatch());
-        assertTrue(c.noEarpiece("")); // took stays: the phone route keeps the live rule
+        assertTrue(c.noEarpiece()); // the phone route keeps the live rule
         f.advance(RETRY - 1);
         assertEquals(1, f.finds);
         assertEquals(1, f.opened.size());
@@ -214,7 +214,7 @@ public class LiveWatchTest {
         f.advance(5000);
         assertEquals(reads, f.savedReads);
         assertEquals(0, c.toWatch());
-        assertFalse(c.noEarpiece("watch"));
+        assertFalse(c.noEarpiece());
     }
 
     @Test
@@ -660,7 +660,7 @@ public class LiveWatchTest {
         utterance();
         r.events.broken(true);
         assertEquals(0, c.toWatch() & 1);
-        assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, c.noEarpiece("")));
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, c.noEarpiece()));
         // no headset: the speaker (the watch's SCO isn't one); buds connected: their call device
         assertEquals(1, AudioRoute.liveDevice("", new int[]{earpiece, speaker, sco}, new String[]{"Earpiece", "Speaker", "Watch4"},
                 new int[]{speaker}, new String[]{"Speaker"}, new java.util.HashSet<>()));
@@ -690,21 +690,89 @@ public class LiveWatchTest {
 
     @Test
     public void noEarpiece() {
-        assertFalse(c.noEarpiece("watch")); // no call yet
+        assertFalse(c.noEarpiece()); // no call yet
+        for (String saved : new String[]{"", "watch", "2:Speaker", "7:LS2 Freecom", "1:Earpiece"}) {
+            f.saved = saved;
+            f.node = null; // no watch found
+            c.begin();
+            assertTrue(saved, c.noEarpiece());
+            c.end();
+            assertFalse(saved, c.noEarpiece());
+            f.node = "n1"; // a watch found
+            c.begin();
+            f.last().attached.run();
+            assertTrue(saved, c.noEarpiece());
+            c.end();
+            assertFalse(saved, c.noEarpiece());
+        }
+    }
+
+    private static final int EARPIECE = AudioDeviceInfo.TYPE_BUILTIN_EARPIECE, SPEAKER = AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,
+            SCO = AudioDeviceInfo.TYPE_BLUETOOTH_SCO, A2DP = AudioDeviceInfo.TYPE_BLUETOOTH_A2DP;
+
+    @Test
+    public void anAutoCallWithNoWatchUsesTheSpeaker() {
+        f.saved = "";
         f.node = null;
         c.begin();
-        assertTrue(c.noEarpiece("watch"));
-        assertFalse(c.noEarpiece("")); // Auto, the watch hasn't taken the voice
-        assertFalse(c.noEarpiece("2:Speaker"));
-        c.end();
-        assertFalse(c.noEarpiece("watch"));
+        assertTrue(logged("none found: phone"));
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_IN_COMMUNICATION, c.noEarpiece()));
+        assertTrue(AudioRoute.liveRule(AudioManager.MODE_NORMAL, c.noEarpiece()));
+        assertEquals(1, AudioRoute.liveDevice("", new int[]{EARPIECE, SPEAKER, SCO}, new String[]{"Earpiece", "Speaker", "Watch4"},
+                new int[]{SPEAKER}, new String[]{"Speaker"}, new java.util.HashSet<>()));
+    }
 
-        f.node = "n1";
+    @Test
+    public void aPickedDeviceThatIsAwayUsesAHeadsetOrTheSpeaker() {
+        f.saved = "7:LS2 Freecom";
+        f.node = null;
         c.begin();
-        f.last().attached.run();
-        assertTrue(c.noEarpiece(""));
-        assertFalse(c.noEarpiece("2:Speaker"));
-        c.end();
-        assertFalse(c.noEarpiece(""));
+        assertTrue(c.noEarpiece());
+        assertEquals(1, AudioRoute.liveDevice(f.saved, new int[]{EARPIECE, SPEAKER}, new String[]{"Earpiece", "Speaker"},
+                new int[]{SPEAKER}, new String[]{"Speaker"}, new java.util.HashSet<>()));
+        assertEquals(2, AudioRoute.liveDevice(f.saved, new int[]{EARPIECE, SPEAKER, SCO}, new String[]{"Earpiece", "Speaker", "Buds2"},
+                new int[]{SPEAKER, A2DP}, new String[]{"Speaker", "Buds2"}, new java.util.HashSet<>()));
+    }
+
+    @Test
+    public void aPickThatComesBackTakesTheVoiceFromTheWatch() {
+        f.saved = "7:LS2 Freecom";
+        f.wins = true; // LS2 is away: the watch is first
+        Reading r = onWatch();
+        assertEquals(1, c.toWatch());
+        // other buds arrive: the route isn't the pick, so the watch keeps the voice
+        f.wins = false;
+        f.advance(POLL);
+        assertEquals(1, c.toWatch() & 1);
+        assertFalse(r.cancelled);
+        // LS2 itself is applied: the voice goes back to the phone, with no setting change
+        f.applied = "7:LS2 Freecom";
+        f.advance(POLL);
+        assertEquals(0, c.toWatch() & 1);
+        assertTrue(r.cancelled);
+        assertTrue(logged("7:LS2 Freecom is here: phone"));
+        assertFalse(logged("setting"));
+    }
+
+    @Test
+    public void aPickThatComesBackMidUtteranceClosesTheReadingAndTheMicWaits() {
+        f.saved = "7:LS2 Freecom";
+        Reading r = onWatch();
+        c.pcm(LOUD);
+        f.wins = false;
+        f.applied = "7:LS2 Freecom";
+        f.advance(POLL);
+        assertTrue(r.closed);
+        assertEquals(2, c.toWatch());
+    }
+
+    @Test
+    public void anAutoCallOnTheWatchIgnoresADeviceThatIsApplied() {
+        f.saved = "";
+        onWatch();
+        f.applied = "2:Speaker"; // a headset came: Auto changes nothing
+        f.wins = false;
+        f.advance(POLL);
+        assertEquals(1, c.toWatch());
     }
 }

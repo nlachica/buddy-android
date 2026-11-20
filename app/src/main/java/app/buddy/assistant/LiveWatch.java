@@ -11,7 +11,7 @@ import java.util.function.Consumer;
 
 /**
  * A phone live voice call and the Galaxy Watch (docs/features/017-live-voice-watch/plan.md): the call's voice can play
- * on the watch, and while Watch is the audio device the call never falls to the earpiece (AudioRoute.live). The voice
+ * on the watch, and a phone call never falls to the earpiece, whatever the audio device (AudioRoute.live, 030). The voice
  * goes to the watch as one 012 reading per utterance (the silence gate cuts them), and the phone's mic stays closed from
  * the first audible block until the watch says that reading is quiet. Google-free (the watch link is WatchVoice's), so
  * it is unit-tested through {@link Call}. Calls started from the watch have a Remote (007) and never come here.
@@ -32,6 +32,9 @@ final class LiveWatch {
 
         /** The watch is first in the order now (AudioRoute.liveTarget). */
         boolean watchWins();
+
+        /** AudioRoute has applied this saved device key for the call (it is connected and chosen, 030). */
+        boolean pickApplied(String saved);
 
         /** A reachable watch's node, or null. */
         void find(Consumer<String> node);
@@ -58,10 +61,10 @@ final class LiveWatch {
         if (k != null) k.end();
     }
 
-    /** Whether AudioRoute must keep this call off the earpiece, given the saved audio device key. */
-    static boolean noEarpiece(String saved) {
+    /** A phone live call is on: AudioRoute keeps it off the earpiece, whatever the audio device (030). */
+    static boolean noEarpiece() {
         Call k = call;
-        return k != null && k.noEarpiece(saved);
+        return k != null && k.noEarpiece();
     }
 
     /** The voice (16-bit mono, 16 kHz), from the call's page (any thread). */
@@ -89,7 +92,7 @@ final class LiveWatch {
         private final Out out;
         private final Gate gate = new Gate();
         private final ArrayList<byte[]> held = new ArrayList<>();
-        private boolean on, took, watch, fed, heldEnded;
+        private boolean on, watch, fed, heldEnded;
         private int gen, count, retries;
         private String saved, node;
         private Object turn;
@@ -124,23 +127,25 @@ final class LiveWatch {
             if (drain != null) drain.cancel();
             cur = drain = null;
             held.clear();
-            took = watch = fed = heldEnded = false;
+            watch = fed = heldEnded = false;
             turn = retryTurn = pending = null;
             openAt = retryAt = 0;
         }
 
-        /** A phone call is on and Watch is picked, or Auto after the watch took the voice in this call. */
-        synchronized boolean noEarpiece(String saved) {
-            return on && (WatchVoice.KEY.equals(saved) || (saved.isEmpty() && took));
+        synchronized boolean noEarpiece() {
+            return on;
         }
 
         private synchronized void poll(int g) {
             if (g != gen || !on) return;
             String s = out.saved();
-            if (!s.equals(saved)) { // only a change of the setting decides again
+            if (!s.equals(saved)) { // a change of the setting decides again
                 out.log("setting " + show(saved) + " -> " + show(s));
                 saved = s;
                 retryAt = 0; // the change is the fresh decision, not a retry
+                decide();
+            } else if (watch && out.pickApplied(saved)) { // an explicit pick that is back takes the voice from the watch
+                out.log(saved + " is here: phone");
                 decide();
             } else if (pending != null && pending == turn && quiet()) {
                 move(pending);
@@ -214,7 +219,7 @@ final class LiveWatch {
         private void move(Object t) {
             pending = null;
             gate.reset();
-            watch = took = true;
+            watch = true;
             out.log(t == retryTurn ? "playing there (quiet " + (out.now() - loudAt) + " ms)" : "playing there");
         }
 
@@ -401,6 +406,11 @@ final class LiveWatch {
         @Override
         public boolean watchWins() {
             return WatchVoice.KEY.equals(AudioRoute.liveTarget(app));
+        }
+
+        @Override
+        public boolean pickApplied(String saved) {
+            return AudioRoute.applied(saved);
         }
 
         @Override
