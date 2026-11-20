@@ -201,3 +201,8 @@
 - Upstream's new on-phone provider (`onphone`) is hidden from the API key services list and every `service/onphone[/...]` name is unknown, as upstream's API keys screen hides it (it has its own screen): `service/onphone=off` would otherwise hide downloaded models with no switch to bring them back.
 - Not patched: Codex also asked to deny Linux tools to Lite-mode chats; upstream's own `devFor` ignores Lite too (Lite is a prompt-size mode for small models, not a permission), so it isn't a fork gap.
 - By: sync (claude-opus-5-5)
+
+## 2026-11-20 - Upstream 2.3.16 sync: onphone_think
+- Upstream 2.3.15 added Models on this phone → **Think before answering** (`OnPhone.think`, off by default). Added `onphone_think` (on, off) to `buddy_settings`, with the same note as `onphone_device` (setThink restarts the engine when idle). JVM test added.
+- Not patched (Codex review of the sync, upstream's own code as in official 2.3.16, no fork feature involved): upstream 2.3.15's Lite fallback in `Tools.call` (a lite background chat whose hidden screen is empty reads the user's real screen, read only) also applies to a Lite sub-agent before it opens an app, and `ownScreenEmpty` counts an app window with a null root as empty. Listed as upstream issues.
+- By: sync (claude-opus-5-5)
