@@ -240,6 +240,27 @@ public class AudioRouteTest {
     }
 
     @Test
+    public void theLs2ConnectingWhileTheEarpieceIsReportedIsNotRefused() { // 031: live-ls2.log 0.26 -> 2.99, 7.59 -> 8.44
+        String earpiece = "1:SM-G990W";
+        // applied; Android reports the earpiece while the SCO connects
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 300, AudioRoute.grace(LS2, false, earpiece)));
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 2400, AudioRoute.grace(LS2, false, earpiece)));
+        // then it reports LS2: seen, holds
+        assertFalse(AudioRoute.slipped(LS2, LS2, 2730, AudioRoute.grace(LS2, true, LS2)));
+        // page connect: applied again, unseen again; the earpiece is reported 850 ms later, then LS2
+        assertFalse(AudioRoute.slipped(LS2, earpiece, 850, AudioRoute.grace(LS2, false, earpiece)));
+        assertFalse(AudioRoute.slipped(LS2, LS2, 2000, AudioRoute.grace(LS2, true, LS2)));
+        // liveAttempt keeps LS2 and tries nothing else
+        java.util.List<Integer> calls = new java.util.ArrayList<>();
+        assertEquals(2, AudioRoute.liveAttempt("", new int[]{EARPIECE, SPEAKER, SCO}, new String[]{"SM-G990W", "SM-G990W", "LS2 Freecom"},
+                new int[]{SPEAKER, A2DP}, new String[]{"SM-G990W", "LS2 Freecom"}, new HashSet<>(), j -> {
+                    calls.add(j);
+                    return true;
+                }));
+        assertEquals(java.util.Arrays.asList(2), calls);
+    }
+
+    @Test
     public void aSpeakerThatNeverTakesTheRouteEndsTheCall() { // round 1 F2
         assertTrue(AudioRoute.refuseSlip("7:LS2 Freecom", false));
         assertFalse(AudioRoute.refuseSlip("2:SM-G990W", false)); // the first slip: applied again
