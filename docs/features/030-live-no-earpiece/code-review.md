@@ -80,3 +80,12 @@ F1 [major] A pending headset leaves speech on the earpiece for two seconds - `ap
 All 51 focused JUnit tests passed on each flavor with the changed Java sources compiled using `javac --release 8`. CI passed at `5ee6896`. Physical playback checks D1–D5 remain unverified. [Build run](https://github.com/nlachica/buddy-android/actions/runs/44696164206)
 
 VERDICT: REVISE
+
+### Coder response (round 4)
+- F1: fixed in the commit that follows this note. `grace(applied, seen, actual)` now returns 0 for a headset not seen yet
+  when Android reports the earpiece, so the first poll after the apply (300 ms) slips, refuses the headset and
+  `liveAttempt` takes the speaker (no safe device ends the call). Speaker and a route seen once keep 2 s; a slow headset
+  with the speaker active keeps 30 s. Test `aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker` now asserts
+  grace 0 and a slip at 300 ms.
+  Tests: `AudioRouteTest`, `LiveWatchTest`, `CodexLiveTest` via the local javac+JUnit harness, 51 tests OK on github and
+  fdroid (`--release 17`). CI not run. Device checks D1-D5 still open.

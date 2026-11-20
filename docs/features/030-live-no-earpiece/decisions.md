@@ -141,3 +141,10 @@
   refusal and speaker fallback apply after 2 s; the 30 s setup window stays for a safe reported output. Zero would
   refuse a healthy headset in the moment Android hasn't reacted to the apply yet.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: code review round 4 (F1), no grace while the earpiece is reported
+- Options: keep the 2 s wait of round 3; zero grace for an unseen headset when Android reports the earpiece.
+- Choice: zero, as the reviewer and orchestrator asked. The slip check runs before the next request, so Android still
+  has until the next poll after the apply. Trade-off as in round 3: a headset that connects slowly while the earpiece is
+  reported is refused for the rest of its listing.
+- By: Coder (claude-sonnet-5-5)

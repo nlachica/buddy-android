@@ -223,11 +223,12 @@ final class AudioRoute {
 
     /**
      * 030: a headset Android hasn't reported yet gets time to connect while the reported output is safe; the speaker, a
-     * route seen once, and any wait during which Android reports the earpiece (the reply plays there) don't.
+     * route seen once and the speaker get 2 s; a headset not seen yet gets none when Android reports the earpiece (the
+     * reply plays there): the next poll after the apply falls back to the speaker.
      */
     static long grace(String applied, boolean seen, String actual) {
-        boolean earpiece = actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":");
-        return seen || earpiece || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":") ? CONFIRM_MS : SETUP_MS;
+        if (seen || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")) return CONFIRM_MS;
+        return actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") ? 0 : SETUP_MS;
     }
 
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */

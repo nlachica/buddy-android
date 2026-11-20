@@ -214,7 +214,7 @@ public class AudioRouteTest {
         String speaker = "2:Speaker", earpiece = "1:Earpiece";
         assertTrue(AudioRoute.grace(ls2, false, speaker) > 3000);
         assertEquals(2000, AudioRoute.grace(ls2, true, earpiece)); // once seen, a loss is a slip after 2 s
-        assertEquals(2000, AudioRoute.grace("2:Speaker", false, earpiece));
+        assertEquals(2000, AudioRoute.grace("2:Speaker", false, earpiece)); // the speaker keeps its 2 s
         // LS2 reports itself after 3 s with the speaker active meanwhile: not a slip
         assertFalse(AudioRoute.slipped(ls2, speaker, 3000, AudioRoute.grace(ls2, false, speaker)));
         assertTrue(AudioRoute.slipped(ls2, earpiece, 3000, AudioRoute.grace(ls2, true, earpiece)));
@@ -228,8 +228,8 @@ public class AudioRouteTest {
     public void aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker() { // round 3 F1
         String ls2 = "7:LS2 Freecom", earpiece = "1:Earpiece";
         long g = AudioRoute.grace(ls2, false, earpiece);
-        assertFalse(AudioRoute.slipped(ls2, earpiece, 1999, g)); // the apply's own moment
-        assertTrue(AudioRoute.slipped(ls2, earpiece, 2000, g)); // speech playing on the earpiece: slip, not 30 s
+        assertEquals(0, g);
+        assertTrue(AudioRoute.slipped(ls2, earpiece, 300, g)); // round 4 F1: the first poll after the apply falls back
         assertTrue(AudioRoute.refuseSlip(ls2, false)); // LS2 refused, so liveAttempt takes the speaker
         Set<String> refused = new HashSet<>();
         refused.add(ls2);
