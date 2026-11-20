@@ -69,3 +69,30 @@
   ReadQueue's re-check when the watch find returns (`ReadQueue.java:187`) covers a reading that starts inside those
   300 ms. Releasing from Voice would add a hook from Voice into AudioRoute that the poll already makes unneeded.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - The earpiece wait for a headset not seen yet is 5 s (plan review round 2 F1; replaces the first entry's 30 s for that case)
+- Options: 0 (030 round 4, the bug); 2 s (030 round 3, under LS2's ~2.7 s); 30 s whatever Android reports (the
+  previous plan, up to 30 s of a reply on the earpiece for a listed headset that never connects); a hold/mute while the
+  earpiece is reported (dropped by Nicholas in 030); a bound of 5 s.
+- Choice: 5 s (`EARPIECE_MS`) while Android reports the earpiece. 30 s (`SETUP_MS`) stays while it reports a safe
+  output. `grace` keeps its 3-arg signature, and on main only the 0 changes. LS2's link came within about 2.7 s
+  (`0.26` applied, `2.99` reported), so 5 s covers it with about 2x margin and bounds the earpiece exposure to 5 s
+  after the latest request.
+- By: Planner (claude-opus-5-5); Nicholas may pick another bound or ask for the hold back
+
+## 2026-11-20 - A seen headset's loss counts from the last poll that saw it (plan review round 2 F2)
+- Options: from the apply (main and pre-030: a single earpiece report more than 2 s after the apply refuses a working
+  headset); from the first sighting (the same failure later in the call); from the last sighting, for headsets only;
+  also for the speaker.
+- Choice: the last sighting, headsets only, through a pure `lossFrom` (the file's pattern, like `grace` and
+  `refuseSlip`), so the rule has a unit test. The speaker keeps 030's clock from its apply, so another app's pick over
+  it is still undone at the next poll after its first 2 s. A disconnect doesn't use the clock: `liveAttempt` moves on
+  at the next poll. Cost: a link drop while the headset stays listed can play up to about 2 s on the earpiece.
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-20 - Dictation doesn't track whether the SCO is pending or active (plan review round 2 F3)
+- Options: track Android's reported device on the non-live path, with a timeout and fallback; leave the path as it is.
+- Choice: leave it. While the link is pending, input is the phone mic. The only fallback, `drop()`, gives the same phone
+  mic, and waiting would be capture gating (round 1 F2). The state ends with the dictation (Auto: the first idle poll;
+  a saved pick: session end). DW3's proof is the headset-only phrase on the phone, for Auto and saved = LS2.
+- By: Planner (claude-opus-5-5)

@@ -62,3 +62,54 @@ F3 [major] Dictation can treat an unconfirmed SCO as active for the whole uttera
 F4 [minor] The Live mic check cannot identify which mic picked up the voice - plan.md:194–197 accepts an applied request, a positive mic peak and audible headset output. The meter samples whichever input stream the page opened (CodexLive.java:999–1005), and the log reads it once every ten seconds (lines 1042–1043). A handset mic can pass, and a working headset can produce a zero sample between words. -> For Auto and saved LS2, place the handset out of earshot and ask Live to repeat a short phrase spoken into the headset. Use the route log and meter as diagnostics.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: partly accepted - the earpiece wait is now 5 s, not 30 s. There is still no playback hold.
+- Changed: `grace()` keeps 030's earpiece branch and its 3-arg signature. For a headset not seen yet while Android
+  reports the earpiece, it returns a new `EARPIECE_MS` (5 s) instead of 0. The 30 s window stays only while Android
+  reports a safe output, as 030 had it. A listed headset whose link never comes now plays at most 5 s on the earpiece
+  after the latest request (page connect included), then goes to the speaker. LS2's link came within about 2.7 s in the
+  log (applied `0.26`, reported `2.99`), so 5 s covers it with about 2x margin. On main this is one constant in place of
+  0, the smallest diff that restores LS2.
+- Rejected: protecting playback (hold/mute) while the earpiece is reported. Nicholas dropped it in 030 (030
+  decisions.md, orchestrator "plan accepted after round 3, simplified"). The 030 ruling cited at `:136` ("switch to the
+  speaker at once" while the earpiece is reported) is exactly what this brief names as the bug (DW1: "not refused at the
+  first poll while Android still reports the earpiece"). With 0 s ruled out (the bug) and a hold ruled out, a short
+  bound is what's left. I agree that accepting up to 5 s on the earpiece is Nicholas's call, so it is recorded as the
+  one non-blocking question (plan Open questions, decisions.md). A shorter bound is a one-constant change.
+- Tests: step 2's `aHeadsetPendingWhileTheEarpieceIsReportedFallsBackToTheSpeaker` now has the earpiece reported, not
+  slipped at 4 999 ms, slipped at 5 000, refused, and `liveAttempt` taking the speaker and never index 0. Step 1's
+  confirmation trace stays.
+- New phone check, an audible reply through confirmation: while Live is speaking on the speaker, switch the setting to
+  LS2. The voice moves to the headset within a second or two, and the log shows no `slipped from 7:LS2`. A listed
+  headset that never connects can't be produced on demand, so the unit test is its proof (Risk 1 says so).
+
+F2: accepted - a confirmed headset's loss now counts from the last poll that saw it.
+- A pure `lossFrom(applied, actual, from, now)`, in the same style as `grace` and `refuseSlip`, returns `now` when
+  Android reports the applied device and it isn't the speaker, else `from`. Before the slip check, `live()` sets
+  `appliedAt = lossFrom(...)`.
+- In the sequence you describe (LS2 confirmed at 2.73 s, earpiece reported at 3.03 s, no second apply), the loss is
+  300 ms, not 2.77 s, so there is no slip. 2 s of sustained loss still slips, is refused, and takes the speaker.
+- A disconnect is unchanged: LS2 leaves the list, and `liveAttempt` applies the next device on that same poll, with no
+  slip clock.
+- The speaker keeps 030's clock from its apply, so another app's pick over it is still undone at the next poll after
+  its first 2 s.
+- New step 2 test, `aConfirmedHeadsetSurvivesAOnePollLoss`, with no second apply.
+
+F3: rejected - no pending/active tracking on the dictation path.
+- Knowing "pending" would leave Buddy two things to do. Waiting is capture gating (round 1 F2, rejected). Falling back
+  is `drop()`, which is Android's routing and the same phone mic a pending SCO already uses. Neither puts the input in
+  the headset. Only the link coming up does that.
+- The state ends with the dictation. Under Auto it is released at the first idle poll (step 3). A saved pick is
+  released at session end, as it has been since 001.
+- Accepted from the test plan: the headset-only phrase is now a DW3 pass condition for Auto and for saved = LS2. With
+  the phone covered or across the room, a short phrase spoken quietly into the headset after the mic opens must come
+  through. The phrase spoken right as the mic opens stays a Risk 3 diagnostic, not a pass condition.
+
+F4: accepted - DW1's phone pass condition, for Auto and for saved = LS2, is now:
+- the phone is across the room, out of earshot of a quiet voice;
+- Nicholas asks Live to repeat a short phrase spoken quietly into the headset;
+- Live repeats it, and its voice is in the headset.
+
+The route log and the `mic peak` line are diagnostics only.
