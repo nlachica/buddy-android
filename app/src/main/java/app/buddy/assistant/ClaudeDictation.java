@@ -57,12 +57,17 @@ final class ClaudeDictation {
                 : app.getString(ready(code) ? R.string.dictation_starting : R.string.dictation_starting_claude));
         new Thread(() -> {
             try {
-                MicServer.start(app, null); // before voice mode: Claude Code tests the microphone when it turns on
+                // before voice mode: Claude Code tests the microphone when it turns on. Under the lock cancel() takes,
+                // so a cancelled tap's worker can't reopen the socket cancel just closed
+                synchronized (MicServer.class) {
+                    if (listener != l) return;
+                    MicServer.start(app, null);
+                }
                 ensureSession(app, code);
                 if (listener != l) return;
                 main.post(() -> startHolding(l));
             } catch (Exception e) {
-                main.post(() -> end(l, app.getString(R.string.dictation_claude_start_failed, e.getMessage())));
+                main.post(() -> { if (listener == l) end(l, app.getString(R.string.dictation_claude_start_failed, e.getMessage())); }); // a cancelled tap already got onEnd
             }
         }, "claude-dictation").start();
         return null;
@@ -157,11 +162,14 @@ final class ClaudeDictation {
     }
 
     static void cancel() {
-        Voice.Listener l = listener;
-        listener = null;
-        holding = false;
-        finishing = false;
-        stopMic();
+        Voice.Listener l;
+        synchronized (MicServer.class) { // pairs with the worker's check-and-start in listen()
+            l = listener;
+            listener = null;
+            holding = false;
+            finishing = false;
+            stopMic();
+        }
         if (session != null && !session.exited) clearPrompt();
         if (l != null) l.onEnd(null);
     }
@@ -180,6 +188,7 @@ final class ClaudeDictation {
         if (session != null && !session.exited && lang.equals(sessionLang)) return;
         if (session != null) session.finish();
         session = null;
+        sessionLang = null;
         // first-run answers, folder trust, and the dictation language for this folder only
         // Claude Code's /voice checks that SoX is installed; recording itself goes through Buddy's stand-in rec/arecord
         String out = Linux.exec(c, "set -e; command -v sox >/dev/null || apk add -q sox; mkdir -p " + DIR + "/.claude; f=/root/.claude.json; [ -s $f ] || echo '{}' > $f;"
@@ -191,7 +200,6 @@ final class ClaudeDictation {
         if (!out.contains("PREP_OK")) throw new Exception(out.trim());
         // stderr off the screen: the sound library's complaints would otherwise be read back as the words
         session = TermSession.startHidden(c, 30, 100, "cd " + DIR + " && exec claude 2>>/tmp/dictation.err");
-        sessionLang = lang;
         // wait for the prompt, then switch voice mode on (hold to talk)
         long until = System.currentTimeMillis() + 30_000;
         while (System.currentTimeMillis() < until && !session.exited && !session.emulator.screenText().contains("❯")) {
@@ -200,7 +208,13 @@ final class ClaudeDictation {
         if (session.exited || !session.emulator.screenText().contains("❯")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
         Thread.sleep(400);
         session.write("/voice hold\r");
-        Thread.sleep(1500);
+        // voice mode takes 3-4 s to come on; holding space before that types spaces instead
+        until = System.currentTimeMillis() + 15_000;
+        while (System.currentTimeMillis() < until && !session.exited && !session.emulator.screenText().contains("Hold space to record")) {
+            Thread.sleep(200);
+        }
+        if (session.exited || !session.emulator.screenText().contains("Hold space to record")) throw new Exception(c.getString(R.string.dictation_claude_code_no_start));
+        sessionLang = lang; // last: a session that never got voice mode on is not reusable
         clearPrompt();
     }
 
@@ -238,25 +252,27 @@ final class ClaudeDictation {
 
     /** Text in Claude Code's input box (after the ❯ prompt, up to the box's bottom rule). */
     static String promptText() {
-        if (session == null) return "";
-        String[] lines = session.emulator.screenText().split("\n");
-        int start = -1;
-        for (int i = lines.length - 1; i >= 0; i--) {
-            if (lines[i].contains("❯")) {
-                start = i;
-                break;
+        return session == null ? "" : promptText(session.emulator.screenText());
+    }
+
+    static String promptText(String screen) {
+        String[] lines = screen.split("\n");
+        for (int i = lines.length - 1; i > 0; i--) {
+            if (!lines[i].contains("❯") || !lines[i - 1].trim().startsWith("─")) continue; // only the input box, not the history above it
+            StringBuilder sb = new StringBuilder(lines[i].substring(lines[i].indexOf('❯') + 1));
+            int j = i + 1;
+            for (; j < lines.length; j++) {
+                String ln = lines[j].trim();
+                if (ln.startsWith("─")) break; // blank rows inside the box are joined by the whitespace normalization
+                sb.append(' ').append(ln);
             }
+            if (j == lines.length) continue; // no closing rule: that rule was the box's bottom one
+            String t = sb.toString().replaceAll("\\s+", " ").trim();
+            // a status or error line, or our own /voice hold (typed, or echoed with its ⎿ output), not words
+            if (t.contains("ALSA lib") || t.contains("keep holding") || t.equals("/voice hold") || t.startsWith("/voice hold ⎿")) return "";
+            return t;
         }
-        if (start < 0) return "";
-        StringBuilder sb = new StringBuilder(lines[start].substring(lines[start].indexOf('❯') + 1));
-        for (int i = start + 1; i < lines.length; i++) {
-            String ln = lines[i];
-            if (ln.trim().startsWith("─") || ln.trim().isEmpty()) break;
-            sb.append(' ').append(ln.trim());
-        }
-        String t = sb.toString();
-        if (t.contains("ALSA lib") || t.contains("keep holding")) return ""; // a status or error line, not words
-        return t.replaceAll("\\s+", " ").trim();
+        return "";
     }
 
     private static void clearPrompt() {
