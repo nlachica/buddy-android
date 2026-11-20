@@ -55,3 +55,11 @@ VERDICT: REVISE
 
 Tests: `AudioRouteTest`, `LiveWatchTest`, `CodexLiveTest` via the local javac+JUnit harness, 50 tests OK on github;
 fdroid also 50 OK. CI not run. Device checks D1-D5 still open.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A reply can play on the earpiece for the headset’s full 30-second setup window - app/src/main/java/app/buddy/assistant/AudioRoute.java:369 gives an unconfirmed LS2 request the full grace period even when Android reports the earpiece. Line 393 then accepts the cached request on every poll. With the watch absent, phone playback continues (CodexLive.java:1023). A focused probe with LS2 still listed and the earpiece reported returned no slip at 10,000 or 29,999 ms. The orchestrator accepted a fraction of a word when a headset disconnects. This case occurs while a headset connects and can last an entire reply, failing device check D4. -> Keep the 30-second wait while Android reports a safe output. If a poll reports the earpiece during setup, use the existing speaker fallback immediately and end the call if a safe route cannot be established. Add a regression test that checks the fallback request with speech in progress and retains the slow-headset case with the speaker active.
+
+All 50 focused JUnit tests passed on each flavor with the routing sources and tests compiled using `javac --release 8`. CI passed at `1fc1dbb`. Physical playback checks D1–D5 remain unverified. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44694806708)
+
+VERDICT: REVISE
