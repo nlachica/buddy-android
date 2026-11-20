@@ -110,3 +110,15 @@ Tie-breaker: the brief (headset > watch > speaker, never earpiece; "keep it simp
   decision already yields to a connected media headset (`livePick`); the mid-call handoff is a new watch-flow
   behaviour, not the 030 regression, and touches LiveWatch (non-goal). Note for a follow-up if Nicholas hits it.
 - By: orchestrator (claude-opus-5-5)
+
+## 2026-11-20 - Coder: small choices the plan left open
+- `unrefuse(Set, String)` is a pure static helper (the amendment allowed it) so its rule has a unit test; `live()` calls it
+  right after `lossFrom`, before the slip check. It also un-refuses the speaker when Android reports the speaker as the
+  device (it works then), which the amendment's wording covers ("not the earpiece").
+- `want(Context)` builds the comm/out lists on every call, including for a saved pick (cheap framework calls, one code
+  path), instead of branching on the saved key first.
+- The idle-branch release in `poll` reads the AudioManager from `app` inline (one use, no helper).
+- Tests could not run here: the JVM does not start on this machine (PaX, as in features 006/007). Step 1's red run was
+  reasoned by hand (on main `grace(LS2, false, earpiece)` is 0, so `slipped(..., 300, 0)` is true); CI is the first real
+  run of all the new tests and of the compile.
+By: Coder (claude-sonnet-5-5)
