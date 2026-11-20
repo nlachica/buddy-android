@@ -30,3 +30,10 @@ F2 [minor] The echo test no longer exercises the output-marker guard - `app/src/
 The round 1 menu, exited-session and command-prefix fixes are present. All 13 committed parser tests passed locally. Both CI jobs passed for `09a67c3`. The on-device Talk check is pending, and the original regression trigger remains unconfirmed. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44682636328)
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+F1: fixed in this round's fix commit - blank rows inside the box no longer stop the scan; `promptText` runs to the closing rule and the whitespace normalization joins the rows. A candidate that reaches the end of the screen still has no closing rule, so T12 (footer menu row) holds. T14 added: `❯ hello`, blank, rule gives `hello`; a two-paragraph box gives `one two`.
+F2: fixed in this round's fix commit - T6 now also asserts the command plus its `⎿` output inside `box(...)`, which only the `/voice hold ⎿` guard rejects (delete the guard and it returns the text).
+
+`ClaudeDictationTest` 14/14 locally. The device check is still pending.

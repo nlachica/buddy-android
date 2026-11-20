@@ -135,3 +135,7 @@
 ## 2026-11-19 - Coder: round 1 fixes
 - Closing-rule check: a candidate counts only if its lines end at a rule (a blank line or the screen's end means no). The blank-line stop is unchanged. Echo guard: exact command or command plus `⎿`.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: round 2 fixes
+- Blank rows inside the box are scanned through, not a stop: the closing rule alone ends a candidate, and a screen end without one rejects it. This replaces round 1's "blank-line stop is unchanged".
+- By: Coder (claude-sonnet-5-5)

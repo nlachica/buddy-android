@@ -42,6 +42,8 @@ public class ClaudeDictationTest {
     @Test
     public void ruleAboveTheEchoWithNoBox() { // T6
         assertEquals("", ClaudeDictation.promptText(BANNER + RULE + "\n" + ECHO));
+        // typed and run, inside a closed box: only the /voice hold guard rejects it
+        assertEquals("", ClaudeDictation.promptText(box("❯ /voice hold\n  ⎿  Turned on voice mode (hold). Hold space to record.")));
     }
 
     @Test
@@ -82,5 +84,11 @@ public class ClaudeDictationTest {
     @Test
     public void textAfterTheCommandNamePasses() { // T13
         assertEquals("/voice hold the mic", ClaudeDictation.promptText(box("❯ /voice hold the mic")));
+    }
+
+    @Test
+    public void blankRowInsideTheBoxIsJoined() { // T14
+        assertEquals("hello", ClaudeDictation.promptText(RULE + "\n❯ hello\n\n" + RULE + "\n"));
+        assertEquals("one two", ClaudeDictation.promptText(box("❯ one\n\n  two")));
     }
 }

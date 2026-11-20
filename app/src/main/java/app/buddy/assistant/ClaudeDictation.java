@@ -255,10 +255,10 @@ final class ClaudeDictation {
             int j = i + 1;
             for (; j < lines.length; j++) {
                 String ln = lines[j].trim();
-                if (ln.startsWith("─") || ln.isEmpty()) break;
+                if (ln.startsWith("─")) break; // blank rows inside the box are joined by the whitespace normalization
                 sb.append(' ').append(ln);
             }
-            if (j == lines.length || lines[j].trim().isEmpty()) continue; // no closing rule: that rule was the box's bottom one
+            if (j == lines.length) continue; // no closing rule: that rule was the box's bottom one
             String t = sb.toString().replaceAll("\\s+", " ").trim();
             // a status or error line, or our own /voice hold (typed, or echoed with its ⎿ output), not words
             if (t.contains("ALSA lib") || t.contains("keep holding") || t.equals("/voice hold") || t.startsWith("/voice hold ⎿")) return "";
