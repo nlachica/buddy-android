@@ -58,6 +58,11 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
     private AutoPause autoPause;
     private final KeepAwake keepAwake = new KeepAwake(this);
     private final WorkNotice workNotice = new WorkNotice(this);
+
+    /** An outside session started or stopped working on the phone (main thread): the notification follows. */
+    void outsideChanged() {
+        workNotice.update();
+    }
     private Marks marks;
     /** Touches on the screen while a card waited for the user (see onScreenTouched). */
     private volatile int cardTouches;
@@ -92,6 +97,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         new Thread(() -> { // API key services: the key saved per agent by earlier builds, then fresh model lists
             Providers.migrate(this);
             Providers.rewrite(this); // fields added by this build, before any run reads them
+            OnPhone.sync(this); // models on this phone as this build lists them (a context size changed)
+            OnPhone.killOrphans(); // an engine left by Buddy's earlier process holds GBs
             McpServers.rewrite(this);
             Providers.refresh(this);
         }, "providers").start();
@@ -501,7 +508,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
 
     @Override
     public JSONArray listTools() throws JSONException {
-        return tools.list();
+        Sessions.Session lite = Lite.caller(this); // a small model's chat: a dozen tools, more on request
+        return lite != null ? Lite.filter(tools.list(), lite) : tools.list();
     }
 
     @Override
@@ -686,7 +694,19 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
             return;
         }
         if (getPackageName().equals(foregroundPkg()) || onlyRuleRuns()) return;
+        // every agent at work has a hidden screen of its own (background mode): the user's touches aren't in its way
+        if (!anyOnRealScreen()) return;
         autoPause(R.string.service_autopaused_touch);
+    }
+
+    /** Is an agent working on the user's real screen: a chat without background mode, or a session from outside? */
+    private boolean anyOnRealScreen() {
+        if (Background.outsideOnRealScreenWithin(10 * 60_000)) return true; // (one may think for minutes between taps)
+        for (Sessions.Session s : ChatHub.get(this).sessions.all) {
+            if (!s.running || Triggers.ruleRun(s.id)) continue;
+            if (!Background.on(this, s.id)) return true;
+        }
+        return false;
     }
 
     /** Agents waiting for the user to confirm an install (wait_for_install, update_buddy): touches are theirs. */
@@ -1021,7 +1041,10 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
                 onAnswer(true, null);
             }
         };
-        main.post(() -> bubble.askConfirm(text, chat, countdown, cb));
+        // from outside Buddy: the card says which computer asks, and Stop on that session denies it
+        final String key = Background.outsideCaller();
+        final String from = McpServer.CALLER_REMOTE.get();
+        main.post(() -> bubble.askConfirm(text, chat, countdown, cb, key, from));
         Triggers.approvalShown(this, chat, text, countdown, true, null);
         String ended = null;
         try {
@@ -1045,6 +1068,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
                     + "make these changes (for example, rewrite the text), then call confirm again with the "
                     + "updated version and wait for the answer.";
         }
+        String stopped = key == null || Boolean.TRUE.equals(answer.get()) ? null : Background.outsideStopped(key);
+        if (stopped != null) return stopped; // denied by the user's Stop on the whole session, not just this card
         return Boolean.TRUE.equals(answer.get())
                 ? "APPROVED by the user. Go ahead."
                 : "DENIED by the user. Do not do it; ask what they want instead.";
@@ -1073,7 +1098,9 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
             answer.set(text);
             done.countDown();
         };
-        main.post(() -> bubble.askQuestion(question, options, chat, handsOn, cb));
+        final String key = Background.outsideCaller();
+        final String from = McpServer.CALLER_REMOTE.get();
+        main.post(() -> bubble.askQuestion(question, options, chat, handsOn, cb, key, from));
         Triggers.approvalShown(this, chat, question, 0, false, handsOn ? null : options);
         boolean answered;
         try {
@@ -1093,6 +1120,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
                     + ". Don't guess; stop and ask in your reply.";
         }
         if (answer.get() == null) {
+            String stopped = key == null ? null : Background.outsideStopped(key);
+            if (stopped != null) return stopped; // the user's Stop on the whole session closed it
             return "NO ANSWER: the user closed the question. Don't guess; stop and ask what they want.";
         }
         String then = usedScreen ? " The user may have changed the screen meanwhile: call read_screen before going on." : "";

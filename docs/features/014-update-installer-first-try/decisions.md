@@ -69,3 +69,7 @@
   Its evidence goes in `verify.md` as "Cause", or "cause unresolved" with the reason. The brief asks for the real
   cause, and a retry result alone can't tell the hypotheses apart.
 - By: Planner (claude-opus-5-5), plan review round 1 F3
+
+## 2026-11-20 - Upstream 2.3.14 sync: installer on the user's screen
+- Conflict in Updates.java and Tools.java (install_apk): upstream 2.3.14 starts the installer and the "install unknown apps" page with `Background.startOnUserScreen` (default display) so they don't open on a hidden background screen. Kept the fork's flow (per-attempt APK file, `openChecked` retry and notification, file cleanup) and switched its starts to `Background.startOnUserScreen`. The notification's tap intent is unchanged (a user's tap opens on their screen).
+- By: sync (claude-opus-5-5)

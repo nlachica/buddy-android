@@ -167,3 +167,7 @@
 ## 2026-11-18 - Orchestrator: code accepted after round 3
 - F1 (test compile): fixed (throws Exception).
 - F2 (a queued scheduler pump can start a run right after a watch request ends) and F3 (a BUSY-refused occurrence lost if Buddy dies in the 5 s retry window) are narrow races; deferred as follow-ups, not blockers for fixing the hours-long drops seen on 2026-11-17.
+
+## 2026-11-20 - Upstream 2.3.14 sync: element ids and the user's real screen
+- Conflict in Tools.java: upstream 2.3.13 added `lastNodesDisplay` (refuse element ids read from the other screen, after a background chat reads screen "user"); 027 already records `readKey`/`readDisplay` per read_screen. Kept 027's fields and `sameRead` check (it covers upstream's display check) plus upstream's `USER_SCREEN`; dropped `lastNodesDisplay`. When only the display differs, the refusal uses upstream's wording ("from the other screen's read... without screen \"user\""); a different chat keeps 027's wording.
+- By: sync (claude-opus-5-5)

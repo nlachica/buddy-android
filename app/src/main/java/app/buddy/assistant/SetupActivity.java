@@ -364,7 +364,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         java.util.List<String> keyAgents = new java.util.ArrayList<>();
         if (misfit != null) {
             java.util.List<String> keys = new java.util.ArrayList<>(), fit = new java.util.ArrayList<>();
-            for (Providers.P k : Providers.all()) keys.add(k.name);
+            for (Providers.P k : Providers.all()) if (!OnPhone.ID.equals(k.id)) keys.add(k.name);
             for (Account a : Account.ALL) {
                 if (!Providers.forAgent(a.agent).isEmpty()) {
                     keyAgents.add(a.agent);
@@ -411,7 +411,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         boolean offerOther = !installed && misfit != null && !keyAgents.isEmpty() && acc.step != Account.Step.INSTALLING;
         if (offerOther) {
             java.util.List<String> keys = new java.util.ArrayList<>(), fit = new java.util.ArrayList<>();
-            for (Providers.P k : Providers.all()) keys.add(k.name);
+            for (Providers.P k : Providers.all()) if (!OnPhone.ID.equals(k.id)) keys.add(k.name);
             for (String a : keyAgents) fit.add(Account.nameOf(a));
             installText += "\n\n" + getString(R.string.setup_step_signin_key_mismatch, acc.name(),
                     android.text.TextUtils.join(", ", keys), android.text.TextUtils.join(", ", fit));
@@ -518,6 +518,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                 }), topGap(12));
         for (Account a : Account.ALL) ag.addView(agentRow(a.agent), topGap(a == Account.CLAUDE ? 12 : 4));
         ag.addView(apiKeysRow(), topGap(4));
+        ag.addView(onPhoneRow(), topGap(4));
         // what a chat on Default uses, per agent (issue #20; API keys has the same rows for its services)
         List<String> defaults = new ArrayList<>();
         for (Account one : Account.ALL) {
@@ -688,6 +689,24 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         String engineNote = getString("claude".equals(engine) ? R.string.setup_voice_input_claude
                 : "chatgpt".equals(engine) ? R.string.setup_voice_input_chatgpt : R.string.setup_voice_input_phone);
         vc.addView(text(this, engineNote, 13, MUTED), topGap(8));
+        // when listening ends: the engine waits for quiet, which noise around never gives (#60)
+        vc.addView(fieldLabel(getString(R.string.setup_voice_pause), null), topGap(16));
+        vc.addView(segmented(this, new String[][]{{"0", getString(R.string.setup_voice_auto)},
+                        {"1000", getString(R.string.rules_seconds, 1)}, {"2000", getString(R.string.rules_seconds, 2)},
+                        {"3000", getString(R.string.rules_seconds, 3)}},
+                String.valueOf(Prefs.voicePauseMs(this)), false, v -> {
+                    Prefs.setVoicePauseMs(this, Long.parseLong(v));
+                    render();
+                }), topGap(8));
+        vc.addView(text(this, getString(R.string.setup_voice_pause_info), 13, MUTED), topGap(8));
+        vc.addView(fieldLabel(getString(R.string.setup_voice_max), null), topGap(16));
+        vc.addView(segmented(this, new String[][]{{"0", getString(R.string.setup_voice_no_limit)},
+                        {"60000", getString(R.string.rules_minutes, 1)}, {"120000", getString(R.string.rules_minutes, 2)},
+                        {"300000", getString(R.string.rules_minutes, 5)}},
+                String.valueOf(Prefs.voiceMaxMs(this)), false, v -> {
+                    Prefs.setVoiceMaxMs(this, Long.parseLong(v));
+                    render();
+                }), topGap(8));
         vc.addView(fieldLabel(getString(R.string.setup_voice_output), null), topGap(16));
         String speech = Prefs.speechEngine(this);
         vc.addView(segmented(this, new String[][]{{"phone", getString(R.string.setup_voice_phone)}, {"chatgpt", "ChatGPT"}},
@@ -1828,10 +1847,19 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
     /** Settings → API keys: other services' models for Claude Code, Codex and OpenCode. */
     private View apiKeysRow() {
         List<String> names = new ArrayList<>();
-        for (Providers.P p : Providers.all()) names.add(p.name);
+        for (Providers.P p : Providers.all()) if (!OnPhone.ID.equals(p.id)) names.add(p.name);
         return navRow(R.drawable.ms_key, getString(R.string.api_keys_title), names.isEmpty()
                 ? getString(R.string.api_keys_row_none) : android.text.TextUtils.join(", ", names), !names.isEmpty(),
                 ApiKeysActivity.class);
+    }
+
+    /** Settings → Models on this phone: a model Buddy runs itself, offline (see OnPhone). */
+    private View onPhoneRow() {
+        List<String> names = new ArrayList<>();
+        for (OnPhone.Model m : OnPhone.downloaded(this)) names.add(m.name);
+        return navRow(R.drawable.ms_memory, getString(R.string.onphone_title), names.isEmpty()
+                ? getString(R.string.onphone_row_none) : android.text.TextUtils.join(", ", names), !names.isEmpty(),
+                OnPhoneActivity.class);
     }
 
     /** Settings → Skills: instructions the agents share. */

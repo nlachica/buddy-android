@@ -410,6 +410,14 @@
     <!-- The card's label when the request comes from an agent session outside Buddy's chats (e.g. a terminal).
          %1$s: card_label_approval or card_label_question. All caps. -->
     <string name="card_label_other_session">%1$s · DE OUTRA SESSÃO</string>
+    <string name="card_label_from">%1$s · DE %2$s</string>
+    <string name="outside_terminal">Terminal deste telefone</string>
+    <string name="outside_computer">Um computador</string>
+    <string name="monitor_outside">Fora do Buddy</string>
+    <string name="monitor_outside_hidden">Na sua própria tela oculta · último passo %1$s</string>
+    <string name="monitor_outside_screen">Na sua tela · último passo %1$s</string>
+    <string name="monitor_outside_bring">Trazer para minha tela</string>
+    <string name="monitor_outside_stopped">Parada. As ferramentas do telefone dela são recusadas por um minuto, e os cartões pendentes foram negados.</string>
     <string name="card_label_queue">%1$s · 1 DE %2$d</string>
     <!-- Buttons side by side at the bottom of the card: keep them short. -->
     <string name="card_deny">Negar</string>
@@ -641,6 +649,26 @@
     <!-- Chat messages -->
     <!-- Toast after a long press copies a message. -->
     <string name="chat_copied">Copiado</string>
+    <string name="chat_copy">Copiar</string>
+    <string name="chat_quote">Citar</string>
+    <string name="chat_quote_remove">Remover citação</string>
+    <string name="chat_edit">Editar</string>
+    <string name="chat_fork">Ramificar daqui</string>
+    <string name="chat_fork_title">%1$s · ramificação</string>
+    <string name="chat_forked_from">Ramificada de “%1$s”</string>
+    <string name="chat_forked">Ramificada: uma nova conversa a partir daqui</string>
+    <string name="chat_before_edit_title">%1$s (antes da edição)</string>
+    <string name="chat_edit_running">Espere esta conversa terminar e depois edite.</string>
+    <string name="chat_edit_failed">Não foi possível editar a mensagem.</string>
+    <string name="chat_edit_title">Editar sua mensagem</string>
+    <string name="chat_edit_info">O agente responde de novo a partir daqui, começando do zero com a conversa antes desta mensagem. Tudo depois dela sai desta conversa; a conversa como estava fica em Arquivadas.</string>
+    <string name="chat_edit_send">Enviar</string>
+    <string name="chat_edited">editada</string>
+    <string name="setup_voice_pause">Parar de ouvir após uma pausa de</string>
+    <string name="setup_voice_auto">Auto</string>
+    <string name="setup_voice_pause_info">O Buddy para e envia quando as palavras ouvidas não mudam por esse tempo, mesmo com música ou trânsito por perto. Auto: o mecanismo de voz decide, e ele espera o silêncio.</string>
+    <string name="setup_voice_max">Gravação mais longa</string>
+    <string name="setup_voice_no_limit">Sem limite</string>
     <string name="chat_copy_whole_reply">Copiar a resposta inteira</string>
     <!-- Header of a collapsible group of the agent's steps in the chat. -->
     <plurals name="chat_tool_calls">
@@ -2014,6 +2042,8 @@
     <string name="backup_not_one">Esse arquivo não é um backup do Buddy.</string>
     <string name="chat_incognito">Anônimo</string>
     <string name="chat_incognito_info">Este chat é apagado quando o Buddy reinicia, junto com o que o agente guardou dele.</string>
+    <string name="chat_lite">Modo leve</string>
+    <string name="chat_lite_info">Para modelos pequenos: um início curto com uma dúzia de ferramentas do telefone, o agente carrega mais quando precisa. Liga sozinho para um modelo neste telefone. Sem ferramentas Linux enquanto estiver ligado.</string>
     <string name="api_keys_remove_title">Remover %1$s?</string>
     <string name="api_keys_remove">Remover</string>
     <string name="api_keys_failed">Não foi possível listar os modelos deste serviço com esta chave: %1$s</string>
@@ -2103,6 +2133,9 @@
     <string name="api_keys_local_info">Para um servidor seu (Ollama, LM Studio, llama.cpp): deixe a chave de API vazia. Num PC, coloque o endereço dele no seu Wi-Fi no lugar de localhost, por exemplo http://192.168.1.20:11434/v1.</string>
     <string name="main_section_pinned">Fixadas</string>
     <string name="main_section_archived">Arquivadas (%1$d)</string>
+    <string name="main_archived_title">Arquivadas</string>
+    <string name="main_archived_open">Conversas arquivadas</string>
+    <string name="main_archived_back">Voltar às conversas</string>
     <string name="chat_pinned_marker">Fixada</string>
     <string name="chat_menu_rename">Renomear</string>
     <string name="chat_menu_pin">Fixar no topo</string>
@@ -2114,4 +2147,37 @@
     <string name="chat_rename_title">Renomear conversa</string>
     <string name="chat_rename_hint">Vazio: a primeira mensagem</string>
     <string name="chat_rename_save">Salvar</string>
+    <string name="onphone_title">Modelos neste telefone</string>
+    <string name="onphone_row_none">Rodar um modelo no próprio telefone, offline</string>
+    <string name="onphone_intro">Baixe um modelo e o Buddy o executa no próprio telefone: nada sai do telefone e funciona sem internet. Modelos pequenos dão conta de pedidos simples (a bateria, um timer, uma olhada num app) e erram em tarefas mais longas. Escolha um no menu de modelos de um chat do OpenCode, em \"Neste telefone\"; esses chats usam o modo leve.</string>
+    <string name="onphone_runs_on">Roda em</string>
+    <string name="onphone_dev_auto">Auto</string>
+    <string name="onphone_dev_npu">NPU</string>
+    <string name="onphone_dev_gpu">GPU</string>
+    <string name="onphone_dev_cpu">CPU</string>
+    <string name="onphone_runs_on_info">Auto usa o mais rápido que iniciar: a NPU, depois a GPU, depois a CPU.</string>
+    <string name="onphone_ran_on">Da última vez: a %s.</string>
+    <string name="onphone_not_snapdragon">Neste telefone os modelos rodam na CPU: o motor de NPU e GPU é para telefones Snapdragon.</string>
+    <string name="onphone_models">Modelos</string>
+    <string name="onphone_download">Baixar</string>
+    <string name="onphone_delete">Remover</string>
+    <string name="onphone_cancel">Cancelar</string>
+    <string name="onphone_size_license">%1$s · %2$s</string>
+    <string name="onphone_downloaded">No telefone</string>
+    <string name="onphone_downloading">Baixando… %1$d%%</string>
+    <string name="onphone_engine_downloading">Baixando o motor… %1$d%%</string>
+    <string name="onphone_failed">Não deu certo: %s</string>
+    <string name="onphone_metered_title">Baixar pelos dados móveis?</string>
+    <string name="onphone_metered_text">%1$s tem %2$s. Pelos dados móveis isso pode custar caro.</string>
+    <string name="onphone_no_space">Sem espaço suficiente: precisa de %1$s, há %2$s livres.</string>
+    <string name="onphone_delete_title">Remover %s?</string>
+    <string name="onphone_delete_text">Ele é apagado do telefone. Você pode baixá-lo de novo quando quiser.</string>
+    <string name="onphone_source">O motor é a versão oficial do llama.cpp para Android (%s), do GitHub; os modelos vêm do Hugging Face. O Buddy confere cada download com seu checksum.</string>
+    <string name="onphone_service">Neste telefone</string>
+    <string name="onphone_note_gemma_e2b">Do Google. Rápido numa NPU Snapdragon: para pedidos simples, de um passo.</string>
+    <string name="onphone_note_gemma_e4b">Do Google. Maior e cerca de metade da velocidade do E2B. Precisa de bastante memória livre.</string>
+    <string name="onphone_note_qwen_2b">Da Alibaba. O menor download e o mais rápido para responder.</string>
+    <string name="onphone_note_qwen_4b">Da Alibaba. Maior e cerca de metade da velocidade do 2B.</string>
+    <string name="hub_still_reading_phone">Ainda trabalhando… O modelo neste telefone precisa de um momento, principalmente para a primeira resposta.</string>
+    <string name="onphone_too_hot">O telefone está quente demais para rodar um modelo agora. Deixe esfriar por alguns minutos e tente de novo.</string>
 </resources>

@@ -237,14 +237,14 @@ public final class Updates extends BroadcastReceiver {
         }
         if (!c.getPackageManager().canRequestPackageInstalls()) {
             out.delete();
-            c.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+            Background.startOnUserScreen(c, new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                     Uri.parse("package:" + c.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
             return NEEDS_PERMISSION;
         }
         final File apk = out;
         String res = null;
         try {
-            res = openChecked(() -> c.startActivity(installer(apk)), shown, () -> notifyInstall(c, r.version, apk), 8000);
+            res = openChecked(() -> Background.startOnUserScreen(c, installer(apk)), shown, () -> notifyInstall(c, r.version, apk), 8000);
         } finally {
             if (res == null) out.delete(); // the first start threw; a file the installer or notification may open later stays
         }

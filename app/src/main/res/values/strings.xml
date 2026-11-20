@@ -426,6 +426,14 @@
     <!-- The card's label when the request comes from an agent session outside Buddy's chats (e.g. a terminal).
          %1$s: card_label_approval or card_label_question. All caps. -->
     <string name="card_label_other_session">%1$s · FROM ANOTHER SESSION</string>
+    <string name="card_label_from">%1$s · FROM %2$s</string>
+    <string name="outside_terminal">This phone\'s terminal</string>
+    <string name="outside_computer">A computer</string>
+    <string name="monitor_outside">Outside Buddy</string>
+    <string name="monitor_outside_hidden">On its own hidden screen · last step %1$s</string>
+    <string name="monitor_outside_screen">On your screen · last step %1$s</string>
+    <string name="monitor_outside_bring">Bring to my screen</string>
+    <string name="monitor_outside_stopped">Stopped. Its phone tools are refused for a minute, and its waiting cards were denied.</string>
     <string name="card_label_queue">%1$s · 1 OF %2$d</string>
     <!-- Buttons side by side at the bottom of the card: keep them short. -->
     <string name="card_deny">Deny</string>
@@ -709,6 +717,26 @@
     <!-- Chat messages -->
     <!-- Toast after a long press copies a message. -->
     <string name="chat_copied">Copied</string>
+    <string name="chat_copy">Copy</string>
+    <string name="chat_quote">Quote</string>
+    <string name="chat_quote_remove">Remove quote</string>
+    <string name="chat_edit">Edit</string>
+    <string name="chat_fork">Fork from here</string>
+    <string name="chat_fork_title">%1$s · fork</string>
+    <string name="chat_forked_from">Forked from “%1$s”</string>
+    <string name="chat_forked">Forked: a new chat from here</string>
+    <string name="chat_before_edit_title">%1$s (before edit)</string>
+    <string name="chat_edit_running">Wait until this chat has finished, then edit.</string>
+    <string name="chat_edit_failed">The message couldn\'t be edited.</string>
+    <string name="chat_edit_title">Edit your message</string>
+    <string name="chat_edit_info">The agent answers again from here, starting fresh with the chat before this message. Everything after it goes from this chat; the chat as it was is kept in Archived.</string>
+    <string name="chat_edit_send">Send</string>
+    <string name="chat_edited">edited</string>
+    <string name="setup_voice_pause">Stop listening after a pause of</string>
+    <string name="setup_voice_auto">Auto</string>
+    <string name="setup_voice_pause_info">Buddy stops and sends when the words it heard haven\'t changed for that long, even with music or traffic around. Auto: the voice engine decides, and it waits for quiet.</string>
+    <string name="setup_voice_max">Longest recording</string>
+    <string name="setup_voice_no_limit">No limit</string>
     <string name="chat_copy_whole_reply">Copy whole reply</string>
     <!-- Header of a collapsible group of the agent's steps in the chat. -->
     <plurals name="chat_tool_calls">
@@ -2306,6 +2334,8 @@
     <string name="backup_not_one">That file isn\'t a Buddy backup.</string>
     <string name="chat_incognito">Incognito</string>
     <string name="chat_incognito_info">This chat is deleted, with what its agent kept of it, when Buddy restarts.</string>
+    <string name="chat_lite">Lite mode</string>
+    <string name="chat_lite_info">For small models: a short start with a dozen phone tools, the agent loads more when it needs them. On by itself for a model on this phone. No Linux tools while it\'s on.</string>
     <string name="models_context">%1$s context</string>
     <string name="models_chip_context">%1$d%% context</string>
     <string name="chat_context">Context</string>
@@ -2328,6 +2358,9 @@
     <!-- Chat list: pinned and archived chats, and the long-press menu on a chat (rename, pin, archive, delete). -->
     <string name="main_section_pinned">Pinned</string>
     <string name="main_section_archived">Archived (%1$d)</string>
+    <string name="main_archived_title">Archived</string>
+    <string name="main_archived_open">Archived chats</string>
+    <string name="main_archived_back">Back to chats</string>
     <string name="chat_pinned_marker">Pinned</string>
     <string name="chat_menu_rename">Rename</string>
     <string name="chat_menu_pin">Pin to top</string>
@@ -2339,4 +2372,37 @@
     <string name="chat_rename_title">Rename chat</string>
     <string name="chat_rename_hint">Empty: its first message</string>
     <string name="chat_rename_save">Save</string>
+    <string name="onphone_title">Models on this phone</string>
+    <string name="onphone_row_none">Run a model on the phone itself, offline</string>
+    <string name="onphone_intro">Download a model and Buddy runs it on the phone itself: nothing leaves the phone, and it works without internet. Small models handle simple requests (the battery, a timer, a quick look at an app) and make mistakes on longer tasks. Pick one in an OpenCode chat\'s model menu, under On this phone; those chats use lite mode.</string>
+    <string name="onphone_runs_on">Runs on</string>
+    <string name="onphone_dev_auto">Auto</string>
+    <string name="onphone_dev_npu">NPU</string>
+    <string name="onphone_dev_gpu">GPU</string>
+    <string name="onphone_dev_cpu">CPU</string>
+    <string name="onphone_runs_on_info">Auto takes the fastest that starts: the NPU, then the GPU, then the CPU.</string>
+    <string name="onphone_ran_on">Last time: the %s.</string>
+    <string name="onphone_not_snapdragon">On this phone models run on the CPU: the NPU and GPU engine is for Snapdragon phones.</string>
+    <string name="onphone_models">Models</string>
+    <string name="onphone_download">Download</string>
+    <string name="onphone_delete">Remove</string>
+    <string name="onphone_cancel">Cancel</string>
+    <string name="onphone_size_license">%1$s · %2$s</string>
+    <string name="onphone_downloaded">On the phone</string>
+    <string name="onphone_downloading">Downloading… %1$d%%</string>
+    <string name="onphone_engine_downloading">Getting the engine… %1$d%%</string>
+    <string name="onphone_failed">Didn\'t work: %s</string>
+    <string name="onphone_metered_title">Download over mobile data?</string>
+    <string name="onphone_metered_text">%1$s is %2$s. Over mobile data that may cost you.</string>
+    <string name="onphone_no_space">Not enough space: it needs %1$s, %2$s is free.</string>
+    <string name="onphone_delete_title">Remove %s?</string>
+    <string name="onphone_delete_text">It\'s deleted from the phone. You can download it again any time.</string>
+    <string name="onphone_source">The engine is llama.cpp\'s official Android build (%s) from GitHub; the models come from Hugging Face. Buddy checks each download against its checksum.</string>
+    <string name="onphone_service">On this phone</string>
+    <string name="onphone_note_gemma_e2b">By Google. Quick on a Snapdragon NPU: for simple, one-step requests.</string>
+    <string name="onphone_note_gemma_e4b">By Google. Bigger and about half as fast as E2B. Needs plenty of free memory.</string>
+    <string name="onphone_note_qwen_2b">By Alibaba. The smallest download, and the quickest to answer.</string>
+    <string name="onphone_note_qwen_4b">By Alibaba. Bigger and about half as fast as the 2B.</string>
+    <string name="hub_still_reading_phone">Still working… The model on this phone needs a moment, mostly for the first answer.</string>
+    <string name="onphone_too_hot">The phone is too hot to run a model now. Let it cool down for a few minutes, then try again.</string>
 </resources>
