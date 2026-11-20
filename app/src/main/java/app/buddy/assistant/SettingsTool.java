@@ -202,6 +202,13 @@ final class SettingsTool {
         }));
         agentsModels(svc, l);
         voice(svc, l);
+        // upstream 2.3.14, Models on this phone → Runs on: npu and gpu only on a Snapdragon phone, as on the screen
+        l.add(new Scalar("onphone_device", () -> OnPhone.snapdragon() ? OnPhone.device(svc) : "cpu", v -> OnPhone.setDevice(svc, v),
+                " A model running now finishes its answer first.", "auto", "npu", "gpu", "cpu").ready(v -> {
+            if ((v.equals("npu") || v.equals("gpu")) && !OnPhone.snapdragon()) {
+                throw new IllegalArgumentException("npu and gpu need a Snapdragon phone; this one runs models on its cpu");
+            }
+        }));
         safety(svc, l);
         l.add(new Scalar("background_browser", () -> Prefs.browser(svc) ? "on" : "off", v -> {
             Prefs.setBrowser(svc, v.equals("on"));
@@ -376,6 +383,13 @@ final class SettingsTool {
             Prefs.setVoiceLangs(svc, v);
             Prefs.setVoiceLang(svc, v.split(",")[0]);
         }));
+        // upstream 2.3.13 (#60): when listening ends, the screen's choices
+        l.add(new Scalar("voice_pause", () -> Prefs.voicePauseMs(svc) == 0 ? "auto" : Prefs.voicePauseMs(svc) / 1000 + "s",
+                v -> Prefs.setVoicePauseMs(svc, v.equals("auto") ? 0 : Long.parseLong(v.replace("s", "")) * 1000), "",
+                "auto", "1s", "2s", "3s"));
+        l.add(new Scalar("voice_max", () -> Prefs.voiceMaxMs(svc) == 0 ? "none" : Prefs.voiceMaxMs(svc) / 60000 + "m",
+                v -> Prefs.setVoiceMaxMs(svc, v.equals("none") ? 0 : Long.parseLong(v.replace("m", "")) * 60000), "",
+                "none", "1m", "2m", "5m"));
         l.add(new Scalar("assist_mode", () -> Prefs.assistMode(svc), v -> Prefs.setAssistMode(svc, v), "", "talk", "live"));
         l.add(new Scalar("live_agent", () -> Prefs.liveAgent(svc).isEmpty() ? "default" : Prefs.liveAgent(svc),
                 v -> Prefs.setLiveAgent(svc, v.equals("default") ? "" : v), "", "default", "claude", "codex", "opencode", "agy",
@@ -1618,6 +1632,9 @@ final class SettingsTool {
             return model(name, () -> Models.options(h, false), false, () -> Prefs.reviewerModel(svc, h),
                     v -> Prefs.setReviewerModel(svc, h, v), " The reviewer uses it from its next review.").ready(v -> signedIn(svc, h));
         }
+        if (name.equals("service/" + OnPhone.ID) || name.startsWith("service/" + OnPhone.ID + "/")) {
+            return null; // models on this phone aren't an API key service: their own screen (Models on this phone)
+        }
         if (name.matches("service/[A-Za-z0-9_-]+/key")) {
             return serviceKey(svc, name.substring(8, name.length() - 4), Linux.root(svc), file);
         }
@@ -1760,7 +1777,9 @@ final class SettingsTool {
         b.append("\nAPI key services (service/<id> = on, off; each also has service/<id>/name, /models and /key; "
                 + "keys and addresses are never shown):\n");
         synchronized (Providers.class) {
-            for (Providers.P p : Providers.all()) b.append(serviceLine(p)).append('\n');
+            for (Providers.P p : Providers.all()) {
+                if (!OnPhone.ID.equals(p.id)) b.append(serviceLine(p)).append('\n'); // (its own screen: Models on this phone)
+            }
         }
         b.append("\napp/<package> = hard, smart, trust or default: how freely agents may work in one app. Apps with "
                 + "your choice:\n");

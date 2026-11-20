@@ -305,6 +305,23 @@ public class SettingsCoverageTest {
     }
 
     @Test
+    public void upstreamVoiceEndAndOnPhoneDeviceAreCovered() { // upstream 2.3.13/2.3.14 controls
+        refused(named("voice_pause"), "4s");
+        refused(named("voice_max"), "10m");
+        refused(named("onphone_device"), "tpu");
+        assertEquals("2s", named("voice_pause").check("2S"));
+        assertEquals("none", named("voice_max").check("None"));
+        assertEquals("cpu", named("onphone_device").check("CPU"));
+    }
+
+    @Test
+    public void modelsOnThisPhoneAreNotAnApiKeyService() { // their own screen, as on API keys
+        for (String n : new String[]{"service/onphone", "service/onphone/key", "service/onphone/name", "service/onphone/models"}) {
+            assertTrue(n, SettingsTool.find(null, n) == null);
+        }
+    }
+
+    @Test
     public void languagesAreListedTagsInTheirCanonicalCase() {
         assertEquals("fr-FR,en-US", SettingsTool.languages("fr-fr, en-US, fr-FR"));
         for (String bad : new String[]{"", " , ", "xx-XX", "en-US,xx-XX"}) {
