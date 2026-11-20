@@ -26,3 +26,15 @@ VERDICT: REVISE
 - F4: fixed in c891de4. Session ids, the quotation and the appointment are removed from `diagnosis.md`, with the
   date-boundary example kept. The `runs/` logs that still hold the old text are git-ignored (`docs/features/*/runs/`), so they are not in the branch.
 - F5: fixed in d504942. `zoned` is set only when `copyZone` returns true, and false is logged and retried next launch.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] The runtime check selects 1970 offsets - `docs/features/029-local-timezone/plan.md:139` passes epoch seconds to `zoneId`, which takes milliseconds. With the branch code and the specified Java 17 harness, Vancouver at `1795158000` selects `Etc/GMT+8`, moving the local midnight check back to the previous date. Passing `1795158000000L` selects the expected `Etc/GMT+7`. The summer Troll check also selects UTC with the documented call. -> Define `t` as epoch seconds. Pass `t * 1000L` to Java and JavaScript's `Date`, and pass `t` to BusyBox and Python.
+
+F2 [major] Private chat details remain in the public branch history - `docs/features/029-local-timezone/diagnosis.md:15` at commit `29f174e` still contains the material identified in round 1. GitHub serves that commit, and it is an ancestor of the published review head `ac65921`. A normal merge would bring it into `main`'s history. -> Build the merge candidate from the sanitized tree on a clean base and rerun CI. Coordinate removal of the exposed branch history and any retained GitHub references with Nicholas.
+
+F3 [minor] The Berlin smoke check expects a file the launcher never creates - `docs/features/029-local-timezone/plan.md:170` expects `Europe/Berlin`. The launcher selects `Etc/GMT-1` in winter and `Etc/GMT-2` in summer. The unit-test expectations at line 112 and the DST restart guidance at line 183 also describe the superseded design. -> Check the expected offset and the file at `/usr/share/zoneinfo/$TZ`, and align those two passages with the accepted launch-time offset decision.
+
+All nine timezone tests passed locally with `javac --release 8`. The required [Actions build](https://github.com/nlachica/buddy-android/actions/runs/44683393716) passed on `ac65921`. The three-runtime check and post-install smoke test remain for the Verifier and orchestrator.
+
+VERDICT: REVISE
