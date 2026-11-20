@@ -18,6 +18,7 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
@@ -72,6 +73,28 @@ final class Linux {
         if (!staging.renameTo(root)) throw new IOException(c.getString(R.string.linux_move_failed));
     }
 
+    /**
+     * What survives {@code env -i}. TZ is an IANA id, never a POSIX rule: Claude Code's runtime (bun) and node only
+     * take ids, and they disagree with musl on stale region rules (029).
+     */
+    static List<String> env(String zoneId) {
+        return Arrays.asList("HOME=/root", "LANG=C.UTF-8", "TZ=" + zoneId, "TERM=xterm-256color", "COLORTERM=truecolor",
+                "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    }
+
+    /**
+     * The phone's zone as a fixed-offset id for the offset it has at {@code now} (UTC-7 is Etc/GMT+7: IANA inverts the
+     * sign). Every runtime then agrees on the hour, whatever rules their own tz data has for the region. Each new
+     * process re-reads the offset, so DST and travel are followed. shortcut: half-hour zones keep the region id,
+     * and a process that lives across a DST change keeps its old offset.
+     */
+    static String zoneId(TimeZone tz, long now) {
+        int ms = tz.getOffset(now);
+        int h = ms / 3_600_000;
+        if (ms % 3_600_000 != 0 || h < -12 || h > 14) return tz.getID();
+        return h == 0 ? "Etc/GMT" : "Etc/GMT" + (h > 0 ? "-" : "+") + Math.abs(h);
+    }
+
     /** The proot command line for running {@code cmd} inside Alpine. */
     static List<String> command(Context c, String... cmd) {
         String lib = c.getApplicationInfo().nativeLibraryDir;
@@ -86,8 +109,10 @@ final class Linux {
         // the phone's own fonts, for every script and emoji: the background browser shows pages in any language
         // without a big font download (Alpine's Chromium only brings a Latin one)
         if (new File("/system/fonts").isDirectory()) a.addAll(Arrays.asList("-b", "/system/fonts:/usr/share/fonts/android"));
-        a.addAll(Arrays.asList("/usr/bin/env", "-i", "HOME=/root", "LANG=C.UTF-8", "TERM=xterm-256color", "COLORTERM=truecolor",
-                "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"));
+        a.add("/usr/bin/env");
+        a.add("-i");
+        String zid = zoneId(TimeZone.getDefault(), System.currentTimeMillis());
+        a.addAll(env(zid));
         a.addAll(Arrays.asList(cmd));
         return a;
     }
