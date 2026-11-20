@@ -14,3 +14,20 @@ F4 [minor] The device checklist still requires deleted log messages - docs/featu
 The three focused JUnit classes passed all 47 tests on each flavor with the routing classes and tests compiled using `javac --release 8`. The GitHub Build workflow passed for `a65bab0`, including the APK reproducibility check. Physical playback checks D1–D5 remain unverified. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44692331026)
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+- F1: fixed in 1cf0745. `AudioRoute.applied(key)` (behind `pickApplied`) now also reads Android's communication device, and the
+  pure `pickOn(pick, applied, actual)` needs both to equal the pick. Test `aPickIsOnOnlyWhenAndroidReportsIt`: accepted
+  with the speaker still active is false, then LS2 reported is true.
+- F2: fixed in 1cf0745. `refuseSlip`: the speaker's first slip is applied again, the second with no sighting in between is
+  refused (`speakerSlipped`, cleared when Android reports the applied device and where `liveRefused` clears). With no
+  headset, `liveAttempt` gives `NONE` and the existing "no safe device" ends the call. Test
+  `aSpeakerThatNeverTakesTheRouteEndsTheCall`. The hold/page mechanism stays dropped (orchestrator).
+- F3: fixed in 1cf0745. `seen` (Android has reported the applied device once) and `grace(applied, seen)`: 2 s for the speaker
+  and a route seen once, 8 s for a device not yet seen. `slipped` takes the grace. Test
+  `aHeadsetNotSeenYetGetsTimeToConnect`: LS2 at 3 s isn't a slip, a loss after being seen is, a link that never comes
+  slips at 8 s. The rule covers any device not yet seen, not only Bluetooth (a wired apply is reported at once).
+- F4: fixed in 1cf0745. The plan's D1/D4 checklist and expected log drop `page voice held/released`, marked superseded.
+
+Tests: `AudioRouteTest`, `LiveWatchTest`, `CodexLiveTest` via the local javac+JUnit harness, 50 tests OK on github and
+fdroid (compiled `--release 17`, not 8; no new API used). CI not run. Device checks D1-D5 still open.
