@@ -31,7 +31,8 @@ import java.util.function.IntPredicate;
  * All state lives on the main thread.
  */
 final class AudioRoute {
-    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 30_000; // Android documents up to 30 s for a Bluetooth call device
+    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 30_000, // Android documents up to 30 s for a Bluetooth call device
+            EARPIECE_MS = 5000; // 031: LS2's call link took about 2.7 s, all of it with the earpiece reported
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     private static Context app;
@@ -222,13 +223,27 @@ final class AudioRoute {
     }
 
     /**
-     * 030: a headset Android hasn't reported yet gets time to connect while the reported output is safe; the speaker, a
-     * route seen once and the speaker get 2 s; a headset not seen yet gets none when Android reports the earpiece (the
-     * reply plays there): the next poll after the apply falls back to the speaker.
+     * 030, 031: a route seen once and the speaker get 2 s; a headset not seen yet gets 30 s while the reported output is
+     * safe and 5 s while Android reports the earpiece (the reply plays there, and Android reports it for as long as a
+     * call link connects). Counted from the latest request (lossFrom), then the speaker takes over.
      */
     static long grace(String applied, boolean seen, String actual) {
         if (seen || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")) return CONFIRM_MS;
-        return actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") ? 0 : SETUP_MS;
+        return actual != null && actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":") ? EARPIECE_MS : SETUP_MS;
+    }
+
+    /**
+     * 031: the time a loss counts from: now while Android reports a headset (not the speaker) as the applied device, so
+     * one earpiece report late in a call is no slip; else from (the latest apply; the speaker keeps it, as in 030).
+     */
+    static long lossFrom(String applied, String actual, long from, long now) {
+        return applied != null && applied.equals(actual) && !applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")
+                ? now : from;
+    }
+
+    /** 031: a refused device Android reports as the communication device (not the earpiece) is back: it connected late. */
+    static void unrefuse(Set<String> refused, String actual) {
+        if (actual != null && !actual.startsWith(AudioDeviceInfo.TYPE_BUILTIN_EARPIECE + ":")) refused.remove(actual);
     }
 
     /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
@@ -371,6 +386,8 @@ final class AudioRoute {
             seen = true;
             speakerSlipped = false;
         }
+        appliedAt = lossFrom(applied, curKey, appliedAt, now); // from here on appliedAt is the time a loss counts from
+        unrefuse(liveRefused, curKey);
         if (slipped(applied, curKey, now - appliedAt, grace(applied, seen, curKey))) {
             // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
             if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);
