@@ -37,3 +37,11 @@ F1: fixed in this round's fix commit - blank rows inside the box no longer stop 
 F2: fixed in this round's fix commit - T6 now also asserts the command plus its `⎿` output inside `box(...)`, which only the `/voice hold ⎿` guard rejects (delete the guard and it returns the text).
 
 `ClaudeDictationTest` 14/14 locally. The device check is still pending.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A cancelled tap can reopen the microphone server and leave it running - `app/src/main/java/app/buddy/assistant/ClaudeDictation.java:60` starts the server unconditionally on a worker. If the chat pauses before that worker runs, `cancel()` closes the server, then the worker opens it again. If session startup fails, the stale-listener guard at line 65 skips cleanup. The real server can then accept microphone clients after the voice UI has closed. I ran the production dictation class with a delayed worker, a stand-in for MicServer, and a forced startup failure. After cancellation the listener was inactive in both builds, but the server stayed open on `36d0cbb` and closed on `main`. -> Keep the stale-error guard. Make the worker's listener check and server start atomic with respect to cancellation's server stop, so a cancelled worker cannot reopen the socket. Cover cancellation before the worker starts, including an immediate retry that must retain its own microphone.
+
+Both round 2 findings are resolved. All 14 parser tests passed locally, including the closed-box echo and blank-row cases. The helper-tests and APK jobs passed for the [reviewed commit](https://github.com/nlachica/buddy-android/actions/runs/44683546096). The on-device Talk check is pending, so the original regression trigger remains unconfirmed.
+
+VERDICT: REVISE
