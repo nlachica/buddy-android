@@ -69,3 +69,11 @@
 - F1 is real: Node's bundled ICU has stale rules for America/Vancouver (BC's 2026 permanent UTC-7), so an IANA region id gives Node the wrong hour/date. Change: pass a fixed-offset IANA id computed from the phone's CURRENT offset at process start, `Etc/GMT+7` for UTC-7 (sign inverted per IANA; half-hour offsets fall back to the region id). Node ICU, musl (copy that Etc file from Android's tzdata) and Python all agree, nothing depends on stale rule tables, and DST/travel still follow the phone because each new process re-reads the offset. Long-lived processes across a DST change are an accepted edge.
 - F2: verification only creates and removes its own files; never deletes apk-owned or unexpected entries.
 - Also remove the interim TZ=MST7 from ~/.claude/settings.json after install (orchestrator does this).
+
+## 2026-11-20 - Coder: env and zoneId take a String / (TimeZone, now), and the Etc range is -12..+14
+- The orchestrator's Etc/GMT design changes the plan's `env(TimeZone)` to `env(String zoneId)`, with `zoneId(TimeZone, long now)`
+  computing the id (testable with a fixed instant, no clock in the test). Valid IANA ids are Etc/GMT+12 (UTC-12) to Etc/GMT-14
+  (UTC+14); outside that, and for half-hour offsets, the region id is kept.
+- If the id isn't in Android's index, `copyZone` returns false and `zone()` retries on the next launch (one 31 KB index read);
+  not cached, because a missing file is the case worth retrying.
+- By: Coder (claude-sonnet-5-5)

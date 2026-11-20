@@ -11,9 +11,16 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -95,6 +102,66 @@ final class Linux {
         return h == 0 ? "Etc/GMT" : "Etc/GMT" + (h > 0 ? "-" : "+") + Math.abs(h);
     }
 
+    /** Android's tz database: one TZif file per zone, which musl reads from /usr/share/zoneinfo. */
+    private static final String TZDATA = "/apex/com.android.tzdata/etc/tz/tzdata";
+    private static String zoned;
+
+    /** Makes sure the guest has the zone file for {@code id}: once per app process and zone, and again if it vanished. */
+    private static synchronized void zone(File root, String id) {
+        if (id.equals(zoned) && Files.isRegularFile(new File(root, "usr/share/zoneinfo/" + id).toPath(), LinkOption.NOFOLLOW_LINKS)) return;
+        try {
+            copyZone(new File(TZDATA), root, id);
+            zoned = id;
+        } catch (IOException e) {
+            android.util.Log.w("BuddyLinux", "zone file " + id, e); // TZ is still passed: node and Claude Code are right, musl shows UTC
+        }
+    }
+
+    /**
+     * Copies zone {@code id} from Android's tz database (a 24-byte header, 52-byte index entries of name, start and
+     * length, then the TZif files) to {@code root}/usr/share/zoneinfo/{@code id}. False, and nothing written, if the
+     * database or the id isn't there. Never follows a link in the guest tree; a link or file where a directory belongs
+     * throws. Not covered: a guest that swaps a checked directory for a link mid-copy (it runs as Buddy's uid anyway).
+     */
+    static boolean copyZone(File tzdata, File root, String id) throws IOException {
+        byte[] zone = null;
+        try (RandomAccessFile f = new RandomAccessFile(tzdata, "r")) {
+            byte[] h = new byte[24];
+            f.readFully(h);
+            if (!new String(h, 0, 6, StandardCharsets.US_ASCII).equals("tzdata")) return false;
+            ByteBuffer hb = ByteBuffer.wrap(h);
+            int index = hb.getInt(12), data = hb.getInt(16);
+            if (index < 24 || data <= index || data - index > 1 << 20) return false;
+            byte[] idx = new byte[data - index];
+            f.seek(index);
+            f.readFully(idx);
+            ByteBuffer ib = ByteBuffer.wrap(idx);
+            for (int o = 0; o + 52 <= idx.length; o += 52) {
+                int n = 0;
+                while (n < 40 && idx[o + n] != 0) n++;
+                if (!new String(idx, o, n, StandardCharsets.US_ASCII).equals(id)) continue;
+                int len = ib.getInt(o + 44);
+                if (len <= 0 || len > 1 << 20) return false;
+                zone = new byte[len];
+                f.seek((long) data + ib.getInt(o + 40));
+                f.readFully(zone);
+                break;
+            }
+        }
+        if (zone == null) return false;
+        String[] parts = ("usr/share/zoneinfo/" + id).split("/");
+        Path p = root.toPath();
+        for (int i = 0; i < parts.length; i++) {
+            p = p.resolve(parts[i]);
+            if (i < parts.length - 1 && !Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(p); // fails on a link or file
+        }
+        Path tmp = p.resolveSibling(p.getFileName() + ".tmp");
+        Files.deleteIfExists(tmp); // unlinks a link, never its target
+        Files.write(tmp, zone, StandardOpenOption.CREATE_NEW); // O_EXCL
+        Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE); // rename(2) replaces whatever is there, a link included
+        return true;
+    }
+
     /** The proot command line for running {@code cmd} inside Alpine. */
     static List<String> command(Context c, String... cmd) {
         String lib = c.getApplicationInfo().nativeLibraryDir;
@@ -112,6 +179,7 @@ final class Linux {
         a.add("/usr/bin/env");
         a.add("-i");
         String zid = zoneId(TimeZone.getDefault(), System.currentTimeMillis());
+        zone(root(c), zid);
         a.addAll(env(zid));
         a.addAll(Arrays.asList(cmd));
         return a;
