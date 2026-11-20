@@ -14,3 +14,11 @@ F4 [minor] The README gives an unconditional five-second fallback - `README.md:1
 The regression test at `3985b38` checks the 300 ms report that main treats as a slip. GitHub's Build workflow passed for the reviewed HEAD `2379883`, including the Android unit-test/build step and the F-Droid reproducibility check. The local JVM stopped before Gradle started. The two-way audio checks on the phone with Auto and saved LS2 remain unverified. [CI run 44812996057](https://github.com/nlachica/buddy-android/actions/runs/44812996057)
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+- F1: fixed in a11745c. `unrefuse` now returns true when it took a device out of `liveRefused`; `live()` then sets `applied = null` and `speakerSlipped = false`, so the speaker is not slipped or refused when LS2 comes back, and stays eligible when LS2 leaves. New test `aLateHeadsetKeepsTheSpeakerEligibleForTheNextFallback` runs the sequence through headset removal; `aSpeakerThatNeverTakesTheRouteEndsTheCall` is unchanged. The test repeats live()'s three lines of glue, since `live()` needs a real AudioManager.
+- F2: fixed in a11745c. New `Voice.capturing()` (`current != null || MicServer.recording()`) feeds `want()` for Auto; `Voice.listening()` still drives the UI and the poll, so transcription keeps the poll alive and the next `reconcile` releases the link. The test covers the pure rule (`want("", false, ...)` is empty); `capturing()` itself is a one-line static read and has no unit test.
+- F3: fixed in a11745c. Chat ID, group ID and thread/session IDs are placeholders (`CHAT_ID`, `GROUP_ID`, `THREAD_ID`, `SESSION_ID`). They stay in git history for the earlier commits; rewriting history is Nicholas's call.
+- F4: fixed in a11745c. README now says the steady state is never the earpiece, that the 5 s applies while Android reports the earpiece, and that a headset not yet reported gets 30 s.
+
+Tests: not run here (the JVM does not start on this machine, PaX); CI is the first run of the new and changed tests.

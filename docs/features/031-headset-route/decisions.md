@@ -122,3 +122,8 @@ Tie-breaker: the brief (headset > watch > speaker, never earpiece; "keep it simp
   reasoned by hand (on main `grace(LS2, false, earpiece)` is 0, so `slipped(..., 300, 0)` is true); CI is the first real
   run of all the new tests and of the compile.
 By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: code review round 1
+- F1: a headset handed back (taken out of `liveRefused`) clears `applied` and `speakerSlipped` instead of going through the slip check. Alternative (skip only the refusal) leaves the speaker's slip count stale.
+- F2: Auto dictation follows `Voice.capturing()` (phone recognizer `current`, or `MicServer.recording()`), not `listening()`. Cloud engines in their startup wait are not capturing yet, so the headset link starts when capture begins.
+By: Coder (claude-sonnet-5-5)
