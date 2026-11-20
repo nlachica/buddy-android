@@ -77,3 +77,6 @@
 - If the id isn't in Android's index, `copyZone` returns false and `zone()` retries on the next launch (one 31 KB index read);
   not cached, because a missing file is the case worth retrying.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Orchestrator: code accepted after round 3
+- F1 (private detail in an old branch commit): resolved by squash-merging (main never gets 29f174e) and deleting the branch right after. Remaining checks are the on-phone smoke test after install.
