@@ -37,3 +37,26 @@
   cost is that 001's C1 mid-call switch to the earpiece ends. Nicholas may overrule this (plan Open questions); the flip
   is one condition in `liveDevice`.
 - By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - A live refusal lasts only while the device is listed (plan review round 1 F1)
+- Options: keep 018's "refused until `use()`"; clear every refusal when the device list changes; each `liveAttempt`
+  drops the refused keys that aren't among the communication devices now.
+- Choice: the third, `refused.retainAll(listed keys)`. When the pick (LS2) is switched off, it slips (Android reports
+  another device) and `live()` refuses it. LS2 isn't listed any more, so the same tick removes the refusal, and LS2 is
+  tried again when it comes back, without a `use()`. A device that refuses or slips while it stays listed stays refused
+  until it leaves, so the fallback is still bounded. Clearing on any list change would retry a device that really
+  refuses whenever something else connects. This refines 018's "kept until use() so each is tried once" to "once per
+  connection".
+- By: Planner (claude-opus-5-5)
+
+## 2026-11-19 - The phone's voice is muted until Android reports the device live() applied (plan review round 1 F2)
+- Options: accept the windows (up to ~2.3 s inside the slip grace, and a SCO link's setup after a switch) in which the
+  voice can play on the earpiece; confirm the speaker with no grace (covers only the speaker); mute the page's audio
+  element while the route isn't confirmed; buffer the voice while it is held.
+- Choice: mute. Each `live()` tick sets a volatile `AudioRoute.held = !confirmed(applied, key(getCommunicationDevice()))`.
+  `reconcile()` clears it outside the live rule, and so does `finish()`. The bridge's `toWatch` adds bit 4, and the page
+  mutes `out` while `fwd || held`, the lever 017 uses for the watch. The 2 s grace keeps deciding when to re-apply or
+  refuse, but no longer whether the voice plays. Buffering is far more page code for gaps under ~0.4 s. Cost: words
+  spoken while the voice is held are lost (plan Risk 6). The brief's goal ("must never play on the earpiece") outweighs
+  a short pause.
+- By: Planner (claude-opus-5-5)
