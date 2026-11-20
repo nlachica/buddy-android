@@ -315,6 +315,12 @@ public class SettingsCoverageTest {
     }
 
     @Test
+    public void upstreamOnPhoneThinkIsCovered() { // upstream 2.3.15 control
+        refused(named("onphone_think"), "auto");
+        assertEquals("on", named("onphone_think").check("ON"));
+    }
+
+    @Test
     public void modelsOnThisPhoneAreNotAnApiKeyService() { // their own screen, as on API keys
         for (String n : new String[]{"service/onphone", "service/onphone/key", "service/onphone/name", "service/onphone/models"}) {
             assertTrue(n, SettingsTool.find(null, n) == null);

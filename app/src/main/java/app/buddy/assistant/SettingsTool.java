@@ -209,6 +209,9 @@ final class SettingsTool {
                 throw new IllegalArgumentException("npu and gpu need a Snapdragon phone; this one runs models on its cpu");
             }
         }));
+        // upstream 2.3.15, Models on this phone → Think before answering (off by default: slow on small models)
+        l.add(new Scalar("onphone_think", () -> OnPhone.think(svc) ? "on" : "off", v -> OnPhone.setThink(svc, v.equals("on")),
+                " A model running now finishes its answer first.", "on", "off"));
         safety(svc, l);
         l.add(new Scalar("background_browser", () -> Prefs.browser(svc) ? "on" : "off", v -> {
             Prefs.setBrowser(svc, v.equals("on"));
