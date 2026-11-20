@@ -11,13 +11,21 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.io.RandomAccessFile;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.TimeZone;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.GZIPInputStream;
 
@@ -72,6 +80,88 @@ final class Linux {
         if (!staging.renameTo(root)) throw new IOException(c.getString(R.string.linux_move_failed));
     }
 
+    /**
+     * What survives {@code env -i}. TZ is an IANA id, never a POSIX rule: Claude Code's runtime (bun) and node only
+     * take ids, and they disagree with musl on stale region rules (029).
+     */
+    static List<String> env(String zoneId) {
+        return Arrays.asList("HOME=/root", "LANG=C.UTF-8", "TZ=" + zoneId, "TERM=xterm-256color", "COLORTERM=truecolor",
+                "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+    }
+
+    /**
+     * The phone's zone as a fixed-offset id for the offset it has at {@code now} (UTC-7 is Etc/GMT+7: IANA inverts the
+     * sign). Every runtime then agrees on the hour, whatever rules their own tz data has for the region. Each new
+     * process re-reads the offset, so DST and travel are followed. shortcut: half-hour zones keep the region id,
+     * and a process that lives across a DST change keeps its old offset.
+     */
+    static String zoneId(TimeZone tz, long now) {
+        int ms = tz.getOffset(now);
+        int h = ms / 3_600_000;
+        if (ms % 3_600_000 != 0 || h < -12 || h > 14) return tz.getID();
+        return h == 0 ? "Etc/GMT" : "Etc/GMT" + (h > 0 ? "-" : "+") + Math.abs(h);
+    }
+
+    /** Android's tz database: one TZif file per zone, which musl reads from /usr/share/zoneinfo. */
+    private static final String TZDATA = "/apex/com.android.tzdata/etc/tz/tzdata";
+    private static String zoned;
+
+    /** Makes sure the guest has the zone file for {@code id}: once per app process and zone, and again if it vanished. */
+    private static synchronized void zone(File root, String id) {
+        if (id.equals(zoned) && Files.isRegularFile(new File(root, "usr/share/zoneinfo/" + id).toPath(), LinkOption.NOFOLLOW_LINKS)) return;
+        try {
+            if (copyZone(new File(TZDATA), root, id)) zoned = id; // false (no such id) is retried next launch
+            else android.util.Log.w("BuddyLinux", "zone file " + id + ": not in " + TZDATA);
+        } catch (IOException e) {
+            android.util.Log.w("BuddyLinux", "zone file " + id, e); // TZ is still passed: node and Claude Code are right, musl shows UTC
+        }
+    }
+
+    /**
+     * Copies zone {@code id} from Android's tz database (a 24-byte header, 52-byte index entries of name, start and
+     * length, then the TZif files) to {@code root}/usr/share/zoneinfo/{@code id}. False, and nothing written, if the
+     * database or the id isn't there. Never follows a link in the guest tree; a link or file where a directory belongs
+     * throws. Not covered: a guest that swaps a checked directory for a link mid-copy (it runs as Buddy's uid anyway).
+     */
+    static boolean copyZone(File tzdata, File root, String id) throws IOException {
+        byte[] zone = null;
+        try (RandomAccessFile f = new RandomAccessFile(tzdata, "r")) {
+            byte[] h = new byte[24];
+            f.readFully(h);
+            if (!new String(h, 0, 6, StandardCharsets.US_ASCII).equals("tzdata")) return false;
+            ByteBuffer hb = ByteBuffer.wrap(h);
+            int index = hb.getInt(12), data = hb.getInt(16);
+            if (index < 24 || data <= index || data - index > 1 << 20) return false;
+            byte[] idx = new byte[data - index];
+            f.seek(index);
+            f.readFully(idx);
+            ByteBuffer ib = ByteBuffer.wrap(idx);
+            for (int o = 0; o + 52 <= idx.length; o += 52) {
+                int n = 0;
+                while (n < 40 && idx[o + n] != 0) n++;
+                if (!new String(idx, o, n, StandardCharsets.US_ASCII).equals(id)) continue;
+                int len = ib.getInt(o + 44);
+                if (len <= 0 || len > 1 << 20) return false;
+                zone = new byte[len];
+                f.seek((long) data + ib.getInt(o + 40));
+                f.readFully(zone);
+                break;
+            }
+        }
+        if (zone == null) return false;
+        String[] parts = ("usr/share/zoneinfo/" + id).split("/");
+        Path p = root.toPath();
+        for (int i = 0; i < parts.length; i++) {
+            p = p.resolve(parts[i]);
+            if (i < parts.length - 1 && !Files.isDirectory(p, LinkOption.NOFOLLOW_LINKS)) Files.createDirectory(p); // fails on a link or file
+        }
+        Path tmp = p.resolveSibling(p.getFileName() + ".tmp");
+        Files.deleteIfExists(tmp); // unlinks a link, never its target
+        Files.write(tmp, zone, StandardOpenOption.CREATE_NEW); // O_EXCL
+        Files.move(tmp, p, StandardCopyOption.ATOMIC_MOVE); // rename(2) replaces whatever is there, a link included
+        return true;
+    }
+
     /** The proot command line for running {@code cmd} inside Alpine. */
     static List<String> command(Context c, String... cmd) {
         String lib = c.getApplicationInfo().nativeLibraryDir;
@@ -86,8 +176,11 @@ final class Linux {
         // the phone's own fonts, for every script and emoji: the background browser shows pages in any language
         // without a big font download (Alpine's Chromium only brings a Latin one)
         if (new File("/system/fonts").isDirectory()) a.addAll(Arrays.asList("-b", "/system/fonts:/usr/share/fonts/android"));
-        a.addAll(Arrays.asList("/usr/bin/env", "-i", "HOME=/root", "LANG=C.UTF-8", "TERM=xterm-256color", "COLORTERM=truecolor",
-                "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"));
+        a.add("/usr/bin/env");
+        a.add("-i");
+        String zid = zoneId(TimeZone.getDefault(), System.currentTimeMillis());
+        zone(root(c), zid);
+        a.addAll(env(zid));
         a.addAll(Arrays.asList(cmd));
         return a;
     }
