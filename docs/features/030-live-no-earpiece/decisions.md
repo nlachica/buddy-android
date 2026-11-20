@@ -100,3 +100,15 @@
 - The plan grew a mute/hold mechanism to guard millisecond races. Nicholas wants simple: drop the hold/mute machinery (F1, F3 go away with it). Accepted risk: up to a fraction of a word on the earpiece in the instant a headset disconnects; the steady-state route must never be the earpiece.
 - Core change only: during a phone live call, noEarpiece is true regardless of watch outcome or saved key, so reconcile() always uses live() (connected saved device > headset > watch > speaker).
 - F2 kept: a watch handoff stops only when the confirmed route equals the explicit saved device key, not any headset. Test LS2 absent + other buds, then LS2 arrives.
+
+## 2026-11-20 - Coder: built the simplified plan; how F2 knows the pick is back
+- Options: `plan.md` still describes the hold/mute design (its Step 3, Design 4); the orchestrator entry above drops it.
+  For F2, "the confirmed route equals the explicit saved key": a new `Out.pickApplied(saved)`, or reading Android's
+  communication device from LiveWatch.
+- Choice: followed the orchestrator entry. No `held`, `confirmed`, `refuseSlip`, `speakerSlipped`, no bridge bit 4 and
+  no page change; `live()` keeps its speaker exemption from a slip refusal. Steps 1, 2 and 4 are built; Step 3 is not.
+  F2: `Out.pickApplied(saved)` is `AudioRoute.applied(saved)`, the key `live()` applied after Android accepted it (a
+  slip clears it). `Call.poll()`'s branch is `watch && out.pickApplied(saved)`, with no `watchWins()` test: other buds
+  can't match, and Auto (`""`) and Watch never equal a device key. README states the earpiece instant after a headset
+  drops, as Nicholas accepted it.
+- By: Coder (claude-sonnet-5-5)
