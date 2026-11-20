@@ -112,3 +112,15 @@
   can't match, and Auto (`""`) and Watch never equal a device key. README states the earpiece instant after a headset
   drops, as Nicholas accepted it.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-20 - Coder: code review round 1 (F1-F3), smallest fixes
+- F1: `AudioRoute.applied(key)` (the `pickApplied` seam) also reads Android's communication device; the pure
+  `pickOn(pick, applied, actual)` needs both to match. The watch lets go only when Android reports the pick.
+- F2: the speaker's first slip is applied again; `refuseSlip(applied, speakerSlipped)` refuses the second in a row.
+  `speakerSlipped` is cleared when Android reports the applied device, and where `liveRefused` is cleared. With no
+  headset, `liveAttempt` then gives `NONE` and the existing "no safe device" ends the call. Not the plan's old
+  Design 4 hold: no page change.
+- F3: `seen` is set when Android first reports the applied device and cleared on each apply. `grace(applied, seen)` is
+  2 s for the speaker and for a route seen once, `SETUP_MS` (8 s) for a device not yet seen. `slipped` takes the grace.
+  Any device, not only Bluetooth: a wired or USB apply is reported at once, so the longer wait only costs a failed one.
+- F4: the plan's D1/D4 checklist and expected log no longer require `page voice held/released`.

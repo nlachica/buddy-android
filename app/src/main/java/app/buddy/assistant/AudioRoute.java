@@ -31,11 +31,11 @@ import java.util.function.IntPredicate;
  * All state lives on the main thread.
  */
 final class AudioRoute {
-    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000;
+    private static final long POLL_MS = 300, QUIET_MS = 1500, NEVER_STARTED_MS = 10_000, CONFIRM_MS = 2000, SETUP_MS = 8000;
     private static final Handler main = new Handler(Looper.getMainLooper());
 
     private static Context app;
-    private static boolean on, other, ownMode, dirty, sawLive, heard, stuck;
+    private static boolean on, other, ownMode, dirty, sawLive, heard, stuck, seen, speakerSlipped;
     private static String applied, refused;
     private static long began, quietSince, appliedAt;
     /** 017: devices a phone live call couldn't use; kept until use() or until the device leaves the list (030). */
@@ -217,8 +217,23 @@ final class AudioRoute {
     }
 
     /** 017: the device applied isn't Android's communication device any more, after the time it needs to take. */
-    static boolean slipped(String applied, String actual, long sinceMs) {
-        return applied != null && sinceMs >= CONFIRM_MS && !applied.equals(actual);
+    static boolean slipped(String applied, String actual, long sinceMs, long graceMs) {
+        return applied != null && sinceMs >= graceMs && !applied.equals(actual);
+    }
+
+    /** 030: a headset Android hasn't reported yet gets time to connect; the speaker, and a route seen once, don't. */
+    static long grace(String applied, boolean seen) {
+        return seen || applied == null || applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":") ? CONFIRM_MS : SETUP_MS;
+    }
+
+    /** 030: a slip refuses the device, except the speaker's first since Android last reported it (applied again once). */
+    static boolean refuseSlip(String applied, boolean speakerSlipped) {
+        return speakerSlipped || !applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":");
+    }
+
+    /** 030: the pick is on only when Buddy applied it and Android reports it as the communication device. */
+    static boolean pickOn(String pick, String applied, String actual) {
+        return pick.equals(applied) && pick.equals(actual);
     }
 
     private static String label(Context c, AudioDeviceInfo d) {
@@ -258,7 +273,7 @@ final class AudioRoute {
             if (!want(a).isEmpty() || LiveWatch.noEarpiece()) applied = null;
             refused = null;
             liveRefused.clear();
-            stuck = false;
+            stuck = speakerSlipped = false;
             try {
                 reconcile();
             } catch (Exception ignored) {
@@ -274,9 +289,12 @@ final class AudioRoute {
         return WatchVoice.KEY.equals(w) ? "" : w;
     }
 
-    /** Buddy applied this device key (a phone live call, 030). Main thread. */
+    /** Buddy applied this device key and Android reports it as the communication device (030). Main thread. */
+    @TargetApi(31)
     static boolean applied(String key) {
-        return key.equals(applied);
+        if (!key.equals(applied)) return false;
+        AudioDeviceInfo d = app.getSystemService(AudioManager.class).getCommunicationDevice();
+        return pickOn(key, applied, d == null ? null : key(d));
     }
 
     /** Buddy itself holds communication mode (AutoPause doesn't count that as a call). */
@@ -343,9 +361,15 @@ final class AudioRoute {
     private static void live(AudioManager am) {
         final long now = SystemClock.elapsedRealtime();
         AudioDeviceInfo cur = am.getCommunicationDevice();
-        if (slipped(applied, cur == null ? null : key(cur), now - appliedAt)) {
-            // a headset's call link that failed; the speaker, or Chromium's earpiece pick over it, is applied again
-            if (!applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":")) liveRefused.add(applied);
+        final String curKey = cur == null ? null : key(cur);
+        if (applied != null && applied.equals(curKey)) {
+            seen = true;
+            speakerSlipped = false;
+        }
+        if (slipped(applied, curKey, now - appliedAt, grace(applied, seen))) {
+            // a headset's call link that failed, or a speaker that twice didn't take: refused; else applied again
+            if (refuseSlip(applied, speakerSlipped)) liveRefused.add(applied);
+            else speakerSlipped = true;
             CodexLive.log("route: slipped from " + applied + " to " + (cur == null ? "none" : key(cur)));
             applied = null;
         }
@@ -372,6 +396,7 @@ final class AudioRoute {
             if (ok) {
                 applied = k;
                 appliedAt = now;
+                seen = false;
                 dirty = true;
             }
             return ok;
@@ -390,7 +415,7 @@ final class AudioRoute {
             sawLive = false;
             applied = refused = null;
             liveRefused.clear();
-            stuck = false;
+            stuck = speakerSlipped = false;
         }
     }
 
@@ -399,7 +424,7 @@ final class AudioRoute {
         if (applied != null) am.clearCommunicationDevice();
         applied = refused = null;
         liveRefused.clear();
-        stuck = false;
+        stuck = speakerSlipped = false;
         dropMode(am);
     }
 
@@ -443,7 +468,7 @@ final class AudioRoute {
             dropMode(am);
         } catch (Exception ignored) {
         }
-        on = other = ownMode = dirty = sawLive = stuck = false;
+        on = other = ownMode = dirty = sawLive = stuck = speakerSlipped = false;
         applied = refused = null;
         liveRefused.clear();
     }

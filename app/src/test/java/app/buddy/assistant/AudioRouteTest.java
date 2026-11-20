@@ -2,6 +2,7 @@ package app.buddy.assistant;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
+import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertTrue;
 
 import android.media.AudioDeviceInfo;
@@ -200,10 +201,47 @@ public class AudioRouteTest {
 
     @Test
     public void slipped() {
-        assertFalse(AudioRoute.slipped("2:Speaker", "1:Earpiece", 1999));
-        assertFalse(AudioRoute.slipped("2:Speaker", "2:Speaker", 5000));
-        assertTrue(AudioRoute.slipped("2:Speaker", "1:Earpiece", 2000));
-        assertTrue(AudioRoute.slipped("2:Speaker", null, 2000));
-        assertFalse(AudioRoute.slipped(null, "1:Earpiece", 5000));
+        assertFalse(AudioRoute.slipped("2:Speaker", "1:Earpiece", 1999, 2000));
+        assertFalse(AudioRoute.slipped("2:Speaker", "2:Speaker", 5000, 2000));
+        assertTrue(AudioRoute.slipped("2:Speaker", "1:Earpiece", 2000, 2000));
+        assertTrue(AudioRoute.slipped("2:Speaker", null, 2000, 2000));
+        assertFalse(AudioRoute.slipped(null, "1:Earpiece", 5000, 2000));
+    }
+
+    @Test
+    public void aHeadsetNotSeenYetGetsTimeToConnect() { // round 1 F3
+        String ls2 = "7:LS2 Freecom";
+        assertTrue(AudioRoute.grace(ls2, false) > 3000);
+        assertEquals(2000, AudioRoute.grace(ls2, true)); // once seen, a loss is a slip after 2 s
+        assertEquals(2000, AudioRoute.grace("2:Speaker", false));
+        // LS2 reports itself after 3 s: not a slip
+        assertFalse(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, false)));
+        assertTrue(AudioRoute.slipped(ls2, "1:Earpiece", 3000, AudioRoute.grace(ls2, true)));
+        assertTrue(AudioRoute.slipped(ls2, "1:Earpiece", 8000, AudioRoute.grace(ls2, false))); // a link that never comes
+    }
+
+    @Test
+    public void aSpeakerThatNeverTakesTheRouteEndsTheCall() { // round 1 F2
+        assertTrue(AudioRoute.refuseSlip("7:LS2 Freecom", false));
+        assertFalse(AudioRoute.refuseSlip("2:SM-G990W", false)); // the first slip: applied again
+        assertTrue(AudioRoute.refuseSlip("2:SM-G990W", true)); // the second with no sighting between
+        Set<String> refused = new HashSet<>();
+        refused.add("2:SM-G990W");
+        int[] comm = {EARPIECE, SPEAKER};
+        String[] cn = {"Earpiece", "SM-G990W"};
+        int[] out = {SPEAKER};
+        String[] on = {"SM-G990W"};
+        assertEquals(AudioRoute.NONE, AudioRoute.liveAttempt("", comm, cn, out, on, refused, j -> {
+            assertNotEquals(0, j); // never the earpiece
+            return true;
+        }));
+    }
+
+    @Test
+    public void aPickIsOnOnlyWhenAndroidReportsIt() { // round 1 F1
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", "2:Speaker")); // accepted, speaker still active
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", null));
+        assertFalse(AudioRoute.pickOn("7:LS2 Freecom", null, "7:LS2 Freecom"));
+        assertTrue(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", "7:LS2 Freecom"));
     }
 }

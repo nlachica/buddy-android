@@ -130,9 +130,8 @@ up mid-call changes: a pick that connects or leaves, a headset, and a setting ch
 LiveWatch's own 500 ms poll moves the voice off the watch when an explicit pick comes back (Design 5).
 
 Expected live.log for done-when 1: `watch: looking`, `watch: none found: phone`, `route: 2:<phone model> applied`
-(2 = `TYPE_BUILTIN_SPEAKER`), then `page voice released` (the page starts held). The route line can come before or after
-the watch lines, because the two run independently. Around each later apply there can be `page voice held: route not
-confirmed`, then `page voice released` one or two ticks later.
+(2 = `TYPE_BUILTIN_SPEAKER`). The route line can come before or after the watch lines, because the two run
+independently. (The `page voice held` / `released` lines are superseded: the hold mechanism was dropped.)
 
 ## Steps
 1. **The pick goes first in `live()`. Nothing changes on its own, because `"watch"` and `""` match no device key.**
@@ -222,8 +221,8 @@ speech arrived. Whether it was heard, and where, is Nicholas's ear (round 2 F5).
 - **D1:** Auto, the watch's Bluetooth off or out of range, no headset. Start a phone live call and ask something.
   Nicholas listens at the earpiece for the first reply, then holds the phone away. The reply plays on the loudspeaker
   from its first word, and nothing comes from the earpiece. live.log has `watch: none found: phone`, `route: 2:<phone>
-  applied`, and `page voice released` after that route line. Every later `page voice held` is followed by `page voice
-  released`, and no route ends on anything but the speaker.
+  applied`. No route ends on anything but the speaker. (The `page voice held` / `released` lines are superseded: the
+  hold mechanism was dropped, see decisions.md.)
 - **D2:** LS2 Freecom picked and switched off, the watch unreachable (its Bluetooth off), no other headset. The
   loudspeaker plays, and live.log has `route: 2:… applied`.
 - **D3:** LS2 Freecom picked and on (the watch's Bluetooth off). The voice is heard in LS2 from the first word to the
@@ -235,8 +234,7 @@ speech arrived. Whether it was heard, and where, is Nicholas's ear (round 2 F5).
   switch Buddy makes), nothing comes from the earpiece. When LS2 goes off (a switch Android makes first), at most a
   split second may come from the earpiece (Open question 2). A word there, or anything longer than about half a
   second, fails D4. live.log has, in order, `route: 7:LS2 Freecom applied`, `route: slipped from 7:LS2 Freecom to …`,
-  `route: 2:… applied` and `route: 7:LS2 Freecom applied`, and a `page voice held` / `page voice released` pair may
-  come at each switch.
+  `route: 2:… applied` and `route: 7:LS2 Freecom applied` (hold lines superseded, as in D1).
 - **D5 (round 2 F3):** LS2 Freecom picked and switched off, the watch on the wrist and reachable. Start a phone live
   call. The voice plays on the watch. Switch LS2 on, with no voice bar or settings change. The current reply may finish
   on the watch. The next reply is heard in LS2, and nothing more comes from the watch. live.log has `watch: 7:LS2 Freecom
