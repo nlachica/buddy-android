@@ -407,6 +407,14 @@
     <!-- The card's label when the request comes from an agent session outside Buddy's chats (e.g. a terminal).
          %1$s: card_label_approval or card_label_question. All caps. -->
     <string name="card_label_other_session">%1$s · 来自其他会话</string>
+    <string name="card_label_from">%1$s · 来自 %2$s</string>
+    <string name="outside_terminal">本手机的终端</string>
+    <string name="outside_computer">一台电脑</string>
+    <string name="monitor_outside">Buddy 之外</string>
+    <string name="monitor_outside_hidden">在它自己的隐藏屏幕上 · 上一步 %1$s</string>
+    <string name="monitor_outside_screen">在你的屏幕上 · 上一步 %1$s</string>
+    <string name="monitor_outside_bring">移到我的屏幕</string>
+    <string name="monitor_outside_stopped">已停止。它的手机工具在一分钟内会被拒绝，等待中的卡片已被拒绝。</string>
     <string name="card_label_queue">%1$s · 第 1 个，共 %2$d 个</string>
     <!-- Buttons side by side at the bottom of the card: keep them short. -->
     <string name="card_deny">拒绝</string>
@@ -637,6 +645,26 @@
     <!-- Chat messages -->
     <!-- Toast after a long press copies a message. -->
     <string name="chat_copied">已复制</string>
+    <string name="chat_copy">复制</string>
+    <string name="chat_quote">引用</string>
+    <string name="chat_quote_remove">移除引用</string>
+    <string name="chat_edit">编辑</string>
+    <string name="chat_fork">从这里分支</string>
+    <string name="chat_fork_title">%1$s · 分支</string>
+    <string name="chat_forked_from">从“%1$s”分支</string>
+    <string name="chat_forked">已分支：从这里开始的新对话</string>
+    <string name="chat_before_edit_title">%1$s（编辑前）</string>
+    <string name="chat_edit_running">请等这个对话完成后再编辑。</string>
+    <string name="chat_edit_failed">无法编辑这条消息。</string>
+    <string name="chat_edit_title">编辑你的消息</string>
+    <string name="chat_edit_info">智能体会从这里重新回答，并以这条消息之前的对话重新开始。之后的内容会从这个对话中移除；原来的对话保存在已归档中。</string>
+    <string name="chat_edit_send">发送</string>
+    <string name="chat_edited">已编辑</string>
+    <string name="setup_voice_pause">停顿多久后停止聆听</string>
+    <string name="setup_voice_auto">自动</string>
+    <string name="setup_voice_pause_info">当听到的文字在这段时间内没有变化时，即使周围有音乐或车流声，Buddy 也会停止并发送。自动：由语音引擎决定，它会等到安静为止。</string>
+    <string name="setup_voice_max">最长录音</string>
+    <string name="setup_voice_no_limit">不限</string>
     <string name="chat_copy_whole_reply">复制整条回复</string>
     <!-- Header of a collapsible group of the agent's steps in the chat. -->
     <plurals name="chat_tool_calls">
@@ -2002,6 +2030,8 @@
     <string name="backup_not_one">该文件不是 Buddy 备份。</string>
     <string name="chat_incognito">无痕</string>
     <string name="chat_incognito_info">Buddy 重启时，此对话及其智能体保留的相关内容会被删除。</string>
+    <string name="chat_lite">轻量模式</string>
+    <string name="chat_lite_info">适用于小模型：用十几个手机工具简短开始，代理需要时再加载更多。使用本机模型时自动开启。开启时没有 Linux 工具。</string>
     <string name="api_keys_remove_title">移除 %1$s?</string>
     <string name="api_keys_remove">移除</string>
     <string name="api_keys_failed">无法用此密钥列出该服务的模型:%1$s</string>
@@ -2091,6 +2121,9 @@
     <string name="api_keys_local_info">如果是你自己的服务器（Ollama、LM Studio、llama.cpp）：API 密钥留空。若在电脑上运行，请把 localhost 换成电脑在 Wi-Fi 中的地址，例如 http://192.168.1.20:11434/v1。</string>
     <string name="main_section_pinned">已置顶</string>
     <string name="main_section_archived">已归档 (%1$d)</string>
+    <string name="main_archived_title">已归档</string>
+    <string name="main_archived_open">已归档的对话</string>
+    <string name="main_archived_back">返回对话</string>
     <string name="chat_pinned_marker">已置顶</string>
     <string name="chat_menu_rename">重命名</string>
     <string name="chat_menu_pin">置顶</string>
@@ -2102,4 +2135,37 @@
     <string name="chat_rename_title">重命名聊天</string>
     <string name="chat_rename_hint">留空：使用第一条消息</string>
     <string name="chat_rename_save">保存</string>
+    <string name="onphone_title">本机模型</string>
+    <string name="onphone_row_none">在手机本身上离线运行模型</string>
+    <string name="onphone_intro">下载一个模型，Buddy 会在手机本身上运行它：数据不离开手机，没有网络也能用。小模型能处理简单请求（电量、计时器、快速看一眼某个应用），较长的任务会出错。在 OpenCode 聊天的模型菜单中“本机”下选择它；这些聊天使用轻量模式。</string>
+    <string name="onphone_runs_on">运行于</string>
+    <string name="onphone_dev_auto">自动</string>
+    <string name="onphone_dev_npu">NPU</string>
+    <string name="onphone_dev_gpu">GPU</string>
+    <string name="onphone_dev_cpu">CPU</string>
+    <string name="onphone_runs_on_info">自动会选能启动的最快一种：先 NPU，再 GPU，最后 CPU。</string>
+    <string name="onphone_ran_on">上次：%s。</string>
+    <string name="onphone_not_snapdragon">这台手机上模型在 CPU 上运行：NPU 和 GPU 引擎适用于骁龙手机。</string>
+    <string name="onphone_models">模型</string>
+    <string name="onphone_download">下载</string>
+    <string name="onphone_delete">删除</string>
+    <string name="onphone_cancel">取消</string>
+    <string name="onphone_size_license">%1$s · %2$s</string>
+    <string name="onphone_downloaded">已在手机上</string>
+    <string name="onphone_downloading">正在下载… %1$d%%</string>
+    <string name="onphone_engine_downloading">正在获取引擎… %1$d%%</string>
+    <string name="onphone_failed">没有成功：%s</string>
+    <string name="onphone_metered_title">用移动数据下载？</string>
+    <string name="onphone_metered_text">%1$s 大小为 %2$s。用移动数据可能产生费用。</string>
+    <string name="onphone_no_space">空间不足：需要 %1$s，可用 %2$s。</string>
+    <string name="onphone_delete_title">删除 %s？</string>
+    <string name="onphone_delete_text">它会从手机上删除。你随时可以重新下载。</string>
+    <string name="onphone_source">引擎是 GitHub 上 llama.cpp 的官方 Android 版本（%s），模型来自 Hugging Face。Buddy 会用校验和检查每次下载。</string>
+    <string name="onphone_service">本机</string>
+    <string name="onphone_note_gemma_e2b">Google 出品。在骁龙 NPU 上很快：适合简单的一步请求。</string>
+    <string name="onphone_note_gemma_e4b">Google 出品。比 E2B 大，速度约为一半。需要较多空闲内存。</string>
+    <string name="onphone_note_qwen_2b">阿里巴巴出品。下载最小，回答最快。</string>
+    <string name="onphone_note_qwen_4b">阿里巴巴出品。比 2B 大，速度约为一半。</string>
+    <string name="hub_still_reading_phone">仍在处理… 本机模型需要一点时间，尤其是第一次回答。</string>
+    <string name="onphone_too_hot">手机现在太热，无法运行模型。请让它冷却几分钟后再试。</string>
 </resources>

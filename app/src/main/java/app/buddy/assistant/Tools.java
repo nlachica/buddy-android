@@ -45,6 +45,8 @@ final class Tools {
     /** fork 027: the screen key and display of the read_screen that made lastNodes (this Tools is shared by all chats). */
     private String readKey;
     private int readDisplay;
+    /** This call reads the user's real screen for a background chat (read_screen/screenshot with screen "user"). */
+    private static final ThreadLocal<Boolean> USER_SCREEN = new ThreadLocal<>();
     private final BrowserTools browser;
     private final PhoneTools phone;
     private final SettingsTool settings;
@@ -65,7 +67,9 @@ final class Tools {
                         + "Call this first and after every action to see the result. Element ids are only valid until the next read_screen. "
                         + "Elements can also show a field's error, its hint, a heading, a tooltip or a pane title; \"(covered by ...)\" means "
                         + "a tap there would land on something else. A toast that just showed is listed at the end.",
-                props()));
+                props().put("screen", strProp("Only in background mode, where you work on a hidden screen of your own: "
+                        + "\"own\" (the default) reads that screen; \"user\" reads the user's real screen instead, read only, "
+                        + "e.g. when they ask about what they're looking at. Taps and typing always go to your own screen."))));
         t.put(tool("tap",
                 "Tap an element (by id from the last read_screen) or a screen coordinate in pixels. The result says NOTHING CHANGED "
                         + "when the screen reads the same afterwards, and an element under another window isn't tapped.",
@@ -128,7 +132,9 @@ final class Tools {
         t.put(tool("screenshot",
                 "Take a screenshot (JPEG). Use only when read_screen is not enough (images, games, canvas UIs). "
                         + "The reply says how to convert image coordinates to screen pixels.",
-                props()));
+                props().put("screen", strProp("Only in background mode, where you work on a hidden screen of your own: "
+                        + "\"own\" (the default) reads that screen; \"user\" reads the user's real screen instead, read only, "
+                        + "e.g. when they ask about what they're looking at. Taps and typing always go to your own screen."))));
         t.put(tool("wait", "Wait for the UI to settle, up to 10000 ms. To wait for something to happen, wait_for is "
                         + "quicker and surer.",
                 props().put("ms", intProp("Milliseconds")), "ms"));
@@ -399,7 +405,27 @@ final class Tools {
             "reply_notification", "schedule_message", "clipboard_write", "phone_shell", "add_notification_rule"));
 
     JSONObject call(String name, JSONObject a) throws Exception {
-        JSONObject r = call0(name, a);
+        // a session from outside Buddy counts as working for as long as its call goes (Sessions tab, Stop)
+        final String outside = Background.outside(screenKey()) ? screenKey() : null;
+        JSONObject r;
+        boolean was = false, hidden = false;
+        if (outside != null) {
+            was = Background.outsideIsActive(outside);
+            hidden = Background.outsideHidden(outside);
+            Background.outsideCall(outside, 1);
+            // the "working" notification names it (once it has used the phone: browser_* calls alone don't count)
+            if (!was && Background.outsideLastCall(outside) > 0) svc.runOnMain(svc::outsideChanged);
+        }
+        try {
+            r = call0(name, a);
+        } finally {
+            if (outside != null) {
+                Background.outsideCall(outside, -1);
+                // its hidden screen opened (or closed) in this call: the notification, which names only those, again
+                if (was != Background.outsideIsActive(outside) || hidden != Background.outsideHidden(outside))
+                    svc.runOnMain(svc::outsideChanged);
+            }
+        }
         if (STEPPED.contains(name)) {
             JSONArray content = r.optJSONArray("content");
             JSONObject first = content == null ? null : content.optJSONObject(0);
@@ -432,8 +458,11 @@ final class Tools {
 
     private JSONObject call0(String name, JSONObject a) throws Exception {
         DISPLAY.remove(); // this thread's last call may have been a background chat's
+        USER_SCREEN.remove();
         String revoked = svc.controlRevoked();
         if (revoked != null && !"notify".equals(name)) return text(revoked);
+        String stopped = stoppedNow();
+        if (stopped != null) return text(stopped); // the user stopped this session in Buddy
         String capped = countStep(name, a);
         if (capped != null) return text(capped);
         if (Helpers.is(svc, McpServer.CALLER_CHAT.get())) { // a helper only looks things up, by itself (see Helpers)
@@ -443,6 +472,7 @@ final class Tools {
             if (SCREEN.contains(name) && !Background.on(svc, McpServer.CALLER_CHAT.get()))
                 return text(Helpers.refuse("you have no phone screen, only the browser_* tools"));
         }
+        if (Lite.MORE.equals(name)) return text(Lite.more(svc, a)); // lite mode loads a group of tools
         // starting helpers or waiting for them isn't using the phone: no "Using your phone", no wait for a pause to end
         if ("delegate".equals(name)) return text(Helpers.delegate(svc, McpServer.CALLER_CHAT.get(), a));
         if ("subagents".equals(name)) return text(Helpers.status(svc, McpServer.CALLER_CHAT.get(), a));
@@ -452,8 +482,13 @@ final class Tools {
         }
         // a chat in background mode works on a display of its own: it needs no unlocked screen and no turn at it; so
         // do sessions outside Buddy when the user switched that on
-        if (SCREEN.contains(name) && Background.onFor(svc, screenKey())) {
+        // a background chat may look at the user's real screen (read only): no hidden screen, no helper, no adb
+        boolean userScreen = ("read_screen".equals(name) || "screenshot".equals(name)) && "user".equals(a.optString("screen"));
+        USER_SCREEN.set(userScreen && Background.onFor(svc, screenKey()));
+        if (SCREEN.contains(name) && !userScreen && Background.onFor(svc, screenKey())) {
             if ("point_out".equals(name)) return text(toScreen("point_out marks things on the user's screen"));
+            stopped = stoppedNow(); // Stop came while this call was on its way: its screen stays closed
+            if (stopped != null) return text(stopped);
             try {
                 DISPLAY.set(Background.display(svc, screenKey()));
             } catch (Background.Unavailable e) {
@@ -1110,7 +1145,10 @@ final class Tools {
         StringBuilder sb = new StringBuilder();
         sb.append("Screen ").append(dm.widthPixels).append('x').append(dm.heightPixels).append(" px\n");
         if (background()) sb.append("This is " + (Background.outside(screenKey()) ? "your" : "the chat's") + " background screen: the user doesn't see it and keeps using their "
-                + "phone meanwhile. It starts empty; open_app and open_url put an app on it.\n");
+                + "phone meanwhile. It starts empty; open_app and open_url put an app on it. To see what the user is "
+                + "looking at instead (read only), call read_screen with screen \"user\".\n");
+        else if (Boolean.TRUE.equals(USER_SCREEN.get())) sb.append("This is the user's real screen, read only: your taps and typing go "
+                + "to your own background screen, not here, and these element ids can't be used there.\n");
         synchronized (lock) {
             for (AccessibilityNodeInfo n : lastNodes) n.recycle();
             lastNodes.clear();
@@ -1320,7 +1358,11 @@ final class Tools {
         int id = a.optInt("element", -1);
         synchronized (lock) {
             if (!sameRead(readKey, readDisplay, screenKey(), display()))
-                throw new IllegalArgumentException("Element ids are from another chat's read_screen. Call read_screen again.");
+                throw new IllegalArgumentException(!Objects.equals(readKey, screenKey())
+                        ? "Element ids are from another chat's read_screen. Call read_screen again."
+                        // this chat's last read was of the other screen (the user's real one, or its own)
+                        : "Element " + id + " is from the other screen's read. Call read_screen "
+                        + "(without screen \"user\") to read the screen you act on.");
             if (id < 0 || id >= lastNodes.size())
                 throw new IllegalArgumentException("Unknown element " + id + ". Call read_screen again.");
             AccessibilityNodeInfo n = AccessibilityNodeInfo.obtain(lastNodes.get(id));
@@ -1396,6 +1438,8 @@ final class Tools {
         String last = null;
         long stableSince = start;
         while (true) {
+            String stopped = stoppedNow();
+            if (stopped != null) return stopped;
             List<String> now = visibleTexts();
             String joined = String.join("\n", now).toLowerCase(Locale.ROOT);
             boolean ok = true;
@@ -1436,6 +1480,12 @@ final class Tools {
         return a.put("x", r.centerX()).put("y", r.centerY()).put("found", q);
     }
 
+    /** The user stopped this outside session while its call ran (the Sessions tab, the notification): STOPPED, else null. */
+    private String stoppedNow() {
+        String k = screenKey();
+        return Background.outside(k) ? Background.outsideStopped(k) : null;
+    }
+
     /** do_steps: one action after another, each through the same checks as on its own; stops at the first problem. */
     private String doSteps(JSONArray steps) throws Exception {
         StringBuilder out = new StringBuilder();
@@ -1446,6 +1496,7 @@ final class Tools {
             String tool = "type".equals(action) ? "type_text" : action;
             String before = frontPkg();
             String held = svc.awaitResume(tool);
+            if (held == null) held = stoppedNow();
             if (held != null) {
                 out.append(i + 1).append(". stopped: ").append(held).append('\n');
                 break;
@@ -1558,6 +1609,7 @@ final class Tools {
             if (quiet >= 2 || scrolls >= max || seen.size() > 1500) break;
             if (app != null && !app.equals(frontPkg())) break;
             String capped = countStep("scroll", sc);
+            if (capped == null) capped = stoppedNow();
             if (capped != null) return capped;
             String r = scroll(sc);
             if (!r.startsWith("Scrolled")) break;
@@ -1601,6 +1653,7 @@ final class Tools {
             }
             last = now;
             String capped = countStep("scroll", sc);
+            if (capped == null) capped = stoppedNow();
             if (capped != null) return capped;
             String r = scroll(sc);
             if (!r.startsWith("Scrolled")) return "NOT FOUND: " + r;
@@ -2363,7 +2416,8 @@ final class Tools {
 
     /** Is an installer / Play Protect dialog what the user is looking at? */
     private boolean installerOnScreen() {
-        for (AccessibilityWindowInfo w : windows()) {
+        // on the user's real screen, where installers always open (Background.startOnUserScreen)
+        for (AccessibilityWindowInfo w : svc.getWindows()) {
             AccessibilityNodeInfo r = w.getRoot();
             if (r == null || r.getPackageName() == null) continue;
             String p = r.getPackageName().toString();
@@ -2451,12 +2505,12 @@ final class Tools {
                 }
             }
             if (!svc.getPackageManager().canRequestPackageInstalls()) {
-                svc.startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                Background.startOnUserScreen(svc, new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         android.net.Uri.parse("package:" + svc.getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                 return "Buddy isn't allowed to install apps yet. Android's settings page for that is open now: ask the user to "
                         + "turn on 'Allow from this source' for Buddy, wait until they say it's done, then call install_apk again.";
             }
-            svc.startActivity(new Intent(Intent.ACTION_VIEW)
+            Background.startOnUserScreen(svc, new Intent(Intent.ACTION_VIEW)
                     .setDataAndType(FilesProvider.apkUri(out), "application/vnd.android.package-archive")
                     .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_GRANT_READ_URI_PERMISSION));
             opened = true;

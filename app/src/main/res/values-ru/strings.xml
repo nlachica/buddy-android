@@ -419,6 +419,14 @@
     <!-- The card's label when the request comes from an agent session outside Buddy's chats (e.g. a terminal).
          %1$s: card_label_approval or card_label_question. All caps. -->
     <string name="card_label_other_session">%1$s · ИЗ ДРУГОГО СЕАНСА</string>
+    <string name="card_label_from">%1$s · ОТ %2$s</string>
+    <string name="outside_terminal">Терминал этого телефона</string>
+    <string name="outside_computer">Компьютер</string>
+    <string name="monitor_outside">Вне Buddy</string>
+    <string name="monitor_outside_hidden">На своём скрытом экране · последний шаг %1$s</string>
+    <string name="monitor_outside_screen">На вашем экране · последний шаг %1$s</string>
+    <string name="monitor_outside_bring">Перенести на мой экран</string>
+    <string name="monitor_outside_stopped">Остановлено. Его инструменты телефона отклоняются в течение минуты, а ожидающие карточки отклонены.</string>
     <string name="card_label_queue">%1$s · 1 ИЗ %2$d</string>
     <!-- Buttons side by side at the bottom of the card: keep them short. -->
     <string name="card_deny">Отклонить</string>
@@ -652,6 +660,26 @@
     <!-- Chat messages -->
     <!-- Toast after a long press copies a message. -->
     <string name="chat_copied">Скопировано</string>
+    <string name="chat_copy">Копировать</string>
+    <string name="chat_quote">Цитировать</string>
+    <string name="chat_quote_remove">Убрать цитату</string>
+    <string name="chat_edit">Изменить</string>
+    <string name="chat_fork">Ответвить отсюда</string>
+    <string name="chat_fork_title">%1$s · ответвление</string>
+    <string name="chat_forked_from">Ответвлено от «%1$s»</string>
+    <string name="chat_forked">Ответвлено: новый чат отсюда</string>
+    <string name="chat_before_edit_title">%1$s (до изменения)</string>
+    <string name="chat_edit_running">Дождитесь, пока этот чат закончит, и тогда измените.</string>
+    <string name="chat_edit_failed">Не удалось изменить сообщение.</string>
+    <string name="chat_edit_title">Изменить сообщение</string>
+    <string name="chat_edit_info">Агент ответит заново с этого места, начав с чистого листа с чатом до этого сообщения. Всё после него уйдёт из этого чата; чат в прежнем виде останется в архиве.</string>
+    <string name="chat_edit_send">Отправить</string>
+    <string name="chat_edited">изменено</string>
+    <string name="setup_voice_pause">Прекращать слушать после паузы</string>
+    <string name="setup_voice_auto">Авто</string>
+    <string name="setup_voice_pause_info">Buddy останавливается и отправляет, когда услышанные слова не меняются столько времени, даже если рядом музыка или шум. Авто: решает голосовой движок, а он ждёт тишины.</string>
+    <string name="setup_voice_max">Самая длинная запись</string>
+    <string name="setup_voice_no_limit">Без ограничения</string>
     <string name="chat_copy_whole_reply">Копировать весь ответ</string>
     <!-- Header of a collapsible group of the agent's steps in the chat. -->
     <plurals name="chat_tool_calls">
@@ -2041,6 +2069,8 @@
     <string name="backup_not_one">Этот файл не резервная копия Buddy.</string>
     <string name="chat_incognito">Инкогнито</string>
     <string name="chat_incognito_info">Этот чат удалится при перезапуске Buddy вместе с тем, что агент из него запомнил.</string>
+    <string name="chat_lite">Облегчённый режим</string>
+    <string name="chat_lite_info">Для небольших моделей: короткий старт с дюжиной инструментов телефона, агент загружает остальные по мере надобности. Включается сам для модели на этом телефоне. Пока он включён, инструментов Linux нет.</string>
     <string name="api_keys_remove_title">Удалить %1$s?</string>
     <string name="api_keys_remove">Удалить</string>
     <string name="api_keys_failed">Не удалось получить список моделей сервиса с этим ключом: %1$s</string>
@@ -2130,6 +2160,9 @@
     <string name="api_keys_local_info">Для своего сервера (Ollama, LM Studio, llama.cpp): оставьте API-ключ пустым. Если сервер на ПК, укажите его адрес в вашей сети Wi-Fi вместо localhost, например http://192.168.1.20:11434/v1.</string>
     <string name="main_section_pinned">Закреплённые</string>
     <string name="main_section_archived">Архив (%1$d)</string>
+    <string name="main_archived_title">Архив</string>
+    <string name="main_archived_open">Архивные чаты</string>
+    <string name="main_archived_back">Назад к чатам</string>
     <string name="chat_pinned_marker">Закреплён</string>
     <string name="chat_menu_rename">Переименовать</string>
     <string name="chat_menu_pin">Закрепить сверху</string>
@@ -2141,4 +2174,37 @@
     <string name="chat_rename_title">Переименовать чат</string>
     <string name="chat_rename_hint">Пусто: первое сообщение</string>
     <string name="chat_rename_save">Сохранить</string>
+    <string name="onphone_title">Модели на этом телефоне</string>
+    <string name="onphone_row_none">Запуск модели на самом телефоне, без интернета</string>
+    <string name="onphone_intro">Скачайте модель, и Buddy запустит её на самом телефоне: ничего не уходит с телефона, и всё работает без интернета. Небольшие модели справляются с простыми просьбами (заряд, таймер, быстро заглянуть в приложение) и ошибаются в длинных задачах. Выберите её в меню моделей чата OpenCode, в разделе «На этом телефоне»; такие чаты используют облегчённый режим.</string>
+    <string name="onphone_runs_on">Работает на</string>
+    <string name="onphone_dev_auto">Авто</string>
+    <string name="onphone_dev_npu">NPU</string>
+    <string name="onphone_dev_gpu">GPU</string>
+    <string name="onphone_dev_cpu">CPU</string>
+    <string name="onphone_runs_on_info">«Авто» берёт самое быстрое из того, что запустится: NPU, затем GPU, затем CPU.</string>
+    <string name="onphone_ran_on">В прошлый раз: %s.</string>
+    <string name="onphone_not_snapdragon">На этом телефоне модели работают на CPU: движок для NPU и GPU — для телефонов на Snapdragon.</string>
+    <string name="onphone_models">Модели</string>
+    <string name="onphone_download">Скачать</string>
+    <string name="onphone_delete">Удалить</string>
+    <string name="onphone_cancel">Отмена</string>
+    <string name="onphone_size_license">%1$s · %2$s</string>
+    <string name="onphone_downloaded">На телефоне</string>
+    <string name="onphone_downloading">Загрузка… %1$d%%</string>
+    <string name="onphone_engine_downloading">Загрузка движка… %1$d%%</string>
+    <string name="onphone_failed">Не получилось: %s</string>
+    <string name="onphone_metered_title">Скачать по мобильной сети?</string>
+    <string name="onphone_metered_text">%1$s занимает %2$s. По мобильной сети это может стоить денег.</string>
+    <string name="onphone_no_space">Мало места: нужно %1$s, свободно %2$s.</string>
+    <string name="onphone_delete_title">Удалить %s?</string>
+    <string name="onphone_delete_text">Модель будет удалена с телефона. Её можно скачать снова в любой момент.</string>
+    <string name="onphone_source">Движок — официальная сборка llama.cpp для Android (%s) с GitHub; модели загружаются с Hugging Face. Buddy проверяет каждую загрузку по контрольной сумме.</string>
+    <string name="onphone_service">На этом телефоне</string>
+    <string name="onphone_note_gemma_e2b">От Google. Быстрая на NPU Snapdragon: для простых просьб в один шаг.</string>
+    <string name="onphone_note_gemma_e4b">От Google. Больше и примерно вдвое медленнее E2B. Нужно много свободной памяти.</string>
+    <string name="onphone_note_qwen_2b">От Alibaba. Самая маленькая загрузка и самые быстрые ответы.</string>
+    <string name="onphone_note_qwen_4b">От Alibaba. Больше и примерно вдвое медленнее 2B.</string>
+    <string name="hub_still_reading_phone">Всё ещё работает… Модели на этом телефоне нужно немного времени, особенно для первого ответа.</string>
+    <string name="onphone_too_hot">Телефон сейчас слишком горячий для запуска модели. Дайте ему остыть несколько минут и попробуйте снова.</string>
 </resources>

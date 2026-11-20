@@ -195,3 +195,9 @@
   By: Orchestrator (claude-sonnet-5-5)
 
 2026-11-17 (orchestrator, 2.3.12 sync): reverted the `tailnet/<name>` revoke (a stale card could remove a re-paired computer) and the Bypass path for add_notification_rule (a code given as the keyword escaped the secret check). Safe defaults: removing a computer only in Settings, adding a rule always asks. Stop's 20-s give-up race is upstream's own (as shipped in official 2.3.12) and stays listed as an upstream issue.
+
+## 2026-11-20 - Upstream 2.3.14 sync: new controls in buddy_settings
+- Codex review of the sync: upstream 2.3.13/2.3.14 added Settings controls that `buddy_settings` didn't cover. Added `voice_pause` (auto, 1s, 2s, 3s), `voice_max` (none, 1m, 2m, 5m) (Settings → Voice, #60) and `onphone_device` (auto, npu, gpu, cpu; npu/gpu refused off Snapdragon, as the screen greys them out) (Models on this phone → Runs on). Model downloads on that screen stay excluded (non-goal 2: installs/user-only flows).
+- Upstream's new on-phone provider (`onphone`) is hidden from the API key services list and every `service/onphone[/...]` name is unknown, as upstream's API keys screen hides it (it has its own screen): `service/onphone=off` would otherwise hide downloaded models with no switch to bring them back.
+- Not patched: Codex also asked to deny Linux tools to Lite-mode chats; upstream's own `devFor` ignores Lite too (Lite is a prompt-size mode for small models, not a permission), so it isn't a fork gap.
+- By: sync (claude-opus-5-5)
