@@ -159,7 +159,7 @@ final class AudioRoute {
             label.accept(androidNow(c));
             return;
         }
-        WatchVoice.find(c, node -> label.accept(node != null ? c.getString(R.string.audio_watch) : androidNow(c)));
+        WatchVoice.find(c, node -> label.accept(node != null && headsetNow(c) == null ? c.getString(R.string.audio_watch) : androidNow(c))); // a headset may have come while asked
     }
 
     /** Index of the key in choices(), or -1 when that device isn't there. */

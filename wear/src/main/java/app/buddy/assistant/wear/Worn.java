@@ -7,7 +7,7 @@ import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 
 import java.util.List;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /**
  * The off-body sensor (docs/features/033-watch-worn-audio/plan.md): hands each event on as worn / not worn. Used by
@@ -16,9 +16,10 @@ import java.util.function.Consumer;
  */
 final class Worn implements SensorEventListener {
     private final SensorManager sm;
-    private final Consumer<Boolean> out;
+    /** Gets worn and the sensor event's own time on the elapsedRealtime clock (ms). */
+    private final BiConsumer<Boolean, Long> out;
 
-    Worn(Context c, Consumer<Boolean> out) {
+    Worn(Context c, BiConsumer<Boolean, Long> out) {
         sm = c.getSystemService(SensorManager.class);
         this.out = out;
     }
@@ -26,6 +27,11 @@ final class Worn implements SensorEventListener {
     /** The sensor's value: 1.0 on the body, 0.0 off it (floats: compare, don't equal). */
     static boolean worn(float v) {
         return v >= 0.5f;
+    }
+
+    /** Ms from the ask's receipt to the sample, or -1 for one taken before the ask (an old one: not trusted). 1 s of clock slack. */
+    static long offset(long eventMs, long askedMs) {
+        return eventMs < askedMs - 1000 ? -1 : Math.max(0, eventMs - askedMs);
     }
 
     /** Why there is no answer: "no sensor", "refused" (registration failed), or null. */
@@ -51,7 +57,7 @@ final class Worn implements SensorEventListener {
 
     @Override
     public void onSensorChanged(SensorEvent e) {
-        out.accept(worn(e.values[0]));
+        out.accept(worn(e.values[0]), e.timestamp / 1_000_000);
     }
 
     @Override

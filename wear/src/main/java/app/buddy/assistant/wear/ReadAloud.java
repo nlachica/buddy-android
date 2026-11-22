@@ -67,15 +67,16 @@ public class ReadAloud extends WearableListenerService {
         final CountDownLatch got = new CountDownLatch(1);
         final Boolean[] worn = new Boolean[1];
         final long[] ms = new long[1];
-        Worn sensor = new Worn(this, w -> {
+        Worn sensor = new Worn(this, (w, at) -> { // the sample's own time: a callback delivered late is no fresher
             if (got.getCount() == 0) return;
             worn[0] = w;
-            ms[0] = SystemClock.elapsedRealtime() - t0;
+            ms[0] = Worn.offset(at, t0);
             got.countDown();
         });
         String why = sensor.start();
         try {
             if (why == null && !got.await(5, TimeUnit.SECONDS)) why = "no event";
+            else if (why == null && ms[0] < 0) why = "old sample";
         } catch (InterruptedException x) {
             Thread.currentThread().interrupt();
             why = "no event";
@@ -161,7 +162,7 @@ public class ReadAloud extends WearableListenerService {
             speaker = sp;
             if (push == null) { // 033: the phone hears the wrist state at the start of the reading and each change
                 final String phone = ch.getNodeId();
-                push = new Worn(this, w -> Wearable.getMessageClient(app).sendMessage(phone, Phone.WORN,
+                push = new Worn(this, (w, at) -> Wearable.getMessageClient(app).sendMessage(phone, Phone.WORN,
                         ("{\"worn\":" + w + "}").getBytes(StandardCharsets.UTF_8)));
                 push.start(); // no sensor or refused: the phone hears nothing and keeps its own answer
             }

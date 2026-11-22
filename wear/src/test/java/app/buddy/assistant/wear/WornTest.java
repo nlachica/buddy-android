@@ -22,4 +22,11 @@ public class WornTest {
         assertEquals("refused", Worn.why(true, false));
         assertNull(Worn.why(true, true));
     }
+
+    @Test
+    public void theOffsetIsTheSamplesOwnAgeNotTheCallbacks() {
+        assertEquals(100, Worn.offset(10_100, 10_000)); // delivered 4 s late, still 100 ms after the ask
+        assertEquals(0, Worn.offset(9_500, 10_000)); // clock slack
+        assertEquals(-1, Worn.offset(5_000, 10_000)); // taken long before the ask
+    }
 }
