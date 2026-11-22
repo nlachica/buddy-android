@@ -236,3 +236,19 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - Gradle: the unit-test runtime classpath of the github flavor excludes `onnxruntime-android` (the JVM
   `onnxruntime` jar, same classes, is what loads natively on the CI runner). CI-only, unverified here.
 - `OnnxWakeEngine` is public with a public constructor `(classifier, mel, embedding)` so `src/main` can reach it by name.
+
+## 2026-11-22 - Steps 2-3 details the plan left open (coder)
+- `WakeWord.overlapped(speakingNow, speechEndedAt, detectedAt)` takes the speaking flag as its own argument (0 = never
+  spoke), because "unset" can't mean both "speaking now" and "never spoke". `WakeWord.Inputs` carries
+  `msSinceCause` for the 1 s resume delay (the service keeps the time a cause was last seen); `cause(Inputs)` is the
+  shared part of rows 2, 3 and 5, so the service can update that time with the same rule `state` uses.
+- `MicServer.adopt()` returns 0 (no capture) when another capture is recording on its own; the caller then treats the
+  window as unfed. Capture ids start at 1.
+- `WakeLoop`: limits are counted in bytes of audio, not clock time (HOLD 90 s, FEED 2 min); both announce
+  `Host.onHoldExpired(seq)` and drop to DETECT. `drop()` also resets `WakeFeatures`, so the phrase still in its ring
+  can't retrigger. The pre-roll is held as 40 ms chunks, so `MicServer.levels` (end-of-speech) sees them like a recorder's.
+- `MicServer.streamCapture` ends on a `stopped` flag (set by `stop()`, cleared by `start()`) instead of `server != null`,
+  so a unit test can run it; behaviour is the same where a server exists. `drained` is now set under the buffer lock.
+- Tests could not exercise: `WakeMic` (needs `AudioRecord`) and `WakeIdleTest` (real models, CI-only like
+  `OnnxWakeEngineTest`; compiled here against the ORT jar). `BypassTest.everyShortLabelOfATapReachesTheDecision` fails
+  in this machine's hand-made harness (real `android.jar` has native `Log.isLoggable`); it does not touch these files.

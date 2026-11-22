@@ -46,6 +46,16 @@ final class MicServer {
     private static volatile boolean captureOn, recording;
     /** A recorder has received everything captured, after the capture stopped. */
     static volatile boolean drained;
+    /**
+     * Every capture has an id (a counter that adopt, startCapture and endCapture advance): a reader or writer holding an
+     * older id is refused, so a late callback of a finished listening window can't touch the next one's audio.
+     * adopted: the current capture's audio comes from the wake-word detector (feed), not from an AudioRecord of ours.
+     * Both guarded by chunks.
+     */
+    private static int captureId;
+    private static boolean adopted;
+    /** stop() was called: socket readers of the captured buffer end. */
+    private static volatile boolean stopped;
     private static ServerSocket server;
     private static Host host;
     private static String token;
@@ -57,6 +67,7 @@ final class MicServer {
     /** Start accepting (Terminal visible). Writes a fresh token where the stand-in recorder reads it. */
     static synchronized void start(Context c, Host h) {
         host = h;
+        stopped = false;
         if (server != null) return;
         try {
             byte[] b = new byte[16];
@@ -93,6 +104,7 @@ final class MicServer {
     /** Stop accepting and end any recording (Terminal left the screen). */
     static synchronized void stop() {
         host = null;
+        stopped = true;
         if (server != null) {
             try {
                 server.close();
@@ -104,6 +116,9 @@ final class MicServer {
 
     /** Start recording now (the user tapped the mic). False if the microphone isn't available. */
     static boolean startCapture(Context c) {
+        synchronized (chunks) {
+            if (adopted && captureOn) return true; // a wake turn's audio is already coming in, pre-roll first: keep it
+        }
         endCapture();
         if (c.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false;
         int rate = 16000, ch = AudioFormat.CHANNEL_IN_MONO;
@@ -122,6 +137,7 @@ final class MicServer {
         synchronized (chunks) {
             chunks.clear();
             pullChunk = pullOff = 0;
+            captureId++;
         }
         drained = false;
         captureOn = true;
@@ -190,29 +206,90 @@ final class MicServer {
         synchronized (chunks) {
             chunks.clear();
             pullChunk = pullOff = 0;
+            captureId++;
+            adopted = false;
             chunks.notifyAll();
         }
     }
 
+    /**
+     * A wake turn takes the capture: the detector's recorder stays open and feeds this buffer (pre-roll first) instead
+     * of a recorder of ours. Returns the new capture id, or 0 when another capture is recording on its own.
+     */
+    static int adopt() {
+        synchronized (chunks) {
+            if (recording && !adopted) return 0;
+            chunks.clear();
+            pullChunk = pullOff = 0;
+            drained = false;
+            adopted = true;
+            captureOn = true;
+            recording = true;
+            chunks.notifyAll();
+            return ++captureId;
+        }
+    }
+
+    /** Audio for an adopted capture. False (nothing kept) once the capture isn't the current one or its input has ended. */
+    static boolean feed(int capture, byte[] chunk) {
+        synchronized (chunks) {
+            if (capture != captureId || !adopted || !recording) return false;
+            chunks.add(chunk);
+            chunks.notifyAll();
+        }
+        Levels lv = levels;
+        if (lv != null) lv.onLevel(loudness(chunk, chunk.length));
+        return true;
+    }
+
+    /** The turn is over: end the capture, but only if it is still this one. */
+    static void release(int capture) {
+        synchronized (chunks) {
+            if (capture != captureId) return;
+        }
+        endCapture();
+    }
+
+    /** The current capture is one a wake turn adopted. */
+    static boolean adopted() {
+        synchronized (chunks) {
+            return adopted && captureOn;
+        }
+    }
+
+    /** {@link #pull(int)} for capture; null, and the cursor untouched, when it isn't the current one. */
+    static byte[] pull(int capture, int max) {
+        synchronized (chunks) {
+            if (capture != captureId) return null;
+            return pull(max);
+        }
+    }
+
+    /** Whether the Terminal's recorder may be given the captured buffer: Claude's dictation is the engine listening. */
+    static boolean shares(boolean captureOn, boolean claudeListening, int rate, int channels) {
+        return captureOn && claudeListening && rate == 16000 && channels == 1;
+    }
+
     /** Captured audio from the start, then live; silence once it's all sent (the recorder decides when to stop). */
-    private static void streamCapture(OutputStream out) throws IOException, InterruptedException {
+    static void streamCapture(OutputStream out, int capture) throws IOException, InterruptedException {
         int i = 0;
         byte[] silence = new byte[1280];
-        while (server != null && captureOn) {
+        while (!stopped && captureOn) {
             byte[] next = null;
             boolean live;
             synchronized (chunks) {
+                if (capture != captureId) return; // the capture this reader was admitted for is over: read none of the next
                 if (i < chunks.size()) next = chunks.get(i++);
                 live = recording;
                 if (next == null && live) {
                     chunks.wait(200);
                     continue;
                 }
+                if (next == null) drained = true; // under the lock, so a capture that ended meanwhile isn't marked
             }
             if (next != null) {
                 out.write(next);
             } else {
-                drained = true;
                 out.write(silence);
                 Thread.sleep(40);
             }
@@ -234,8 +311,14 @@ final class MicServer {
                 if (h != null) h.needMicPermission();
                 return;
             }
-            if (captureOn && rate == 16000 && channels == 1) {
-                streamCapture(s.getOutputStream());
+            int capture;
+            boolean share;
+            synchronized (chunks) {
+                capture = captureId;
+                share = shares(captureOn, ClaudeDictation.active(), rate, channels);
+            }
+            if (share) {
+                streamCapture(s.getOutputStream(), capture);
                 return;
             }
             int chMask = channels == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
