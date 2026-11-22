@@ -81,3 +81,7 @@
   transcript or wrong spoken answer is a failed try and goes back to the Planner without a diagnostic release. Deep
   doze is reached naturally; forcing needs his agreement and `unforce` afterwards. Round 2, F2, F3 and F5.
 - By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 Orchestrator: plan loop ended without APPROVE (exit 3)
+- Accepting the diagnose-first plan as the frame; step 0 (a live locked test with Nicholas) runs before any code.
+  Remaining round-3 findings go to the next Planner round, which will have step 0's evidence.
