@@ -367,3 +367,17 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   so far and the options. F7: `WakeMic.isOpen()` removed.
 - Not run: nothing. No JVM works on this phone ("Failed to mark memory page as executable"), so the new and changed tests
   (`WakeLoopTest`, `CodexDictationTest`, `SpokenAskTest`) and the ONNX tests are CI-only.
+
+## 2026-11-22 - Orchestrator ruling after code review round 3 (no APPROVE in 3 rounds)
+- CI green on b438bdc (run 45003087939): real-model tests, both release APKs, flavor isolation, F-Droid reproducibility.
+- **THRESHOLD 0.12** (coder, round 2 F1) accepted: between the sound-alike's 0.057 and the augmented clip's 0.172; the
+  clean clip scores 0.99. Margin over the sound-alike is only 2x, so false triggers are the first post-release check
+  (P1: 30 min TV/podcast, ≤ 2) and the value is the first thing to tune; verify.md says so.
+- **Round 3 F2 and F4: fix** (one scoped coder run, then CI and a reviewer on that diff only): an always-on detector
+  must not silently disable Phone wake turns (F2: count `ERROR_CLIENT` on the current fed window toward the fallback)
+  or fight Live for the microphone (F4: phone Live waits for the confirmed detector release, as Talk does).
+- **Round 3 F1 and F3: fix only if small (a few lines each), otherwise accepted** as rare races with a mild outcome:
+  F1 (a typed send completing between a wake note being queued and taken leaves that one reply unspoken), F3 (a
+  ChatGPT dictation cancelled mid-startup and replaced within the same instant can end the replacement). The coder
+  records which.
+- By: orchestrator (claude-opus-5-5)
