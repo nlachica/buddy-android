@@ -126,3 +126,55 @@
   `app/src/watchlink/AndroidManifest.xml` for the service and both foreground-service permissions, checked in CI on
   the merged manifests (F10).
 - By: Planner (claude-fable-5-2), on Plan Reviewer F5/F10
+
+## 2026-11-22 - Held audio lasts the whole wait for a transcript; only "nothing heard" opens the second window
+- Options: drop the hold after 10 s (round 1); keep it for the turn with a limit above every engine's own wait; no
+  limit.
+- Choice: keep it, limit 90 s (Claude's own waits add up to 80 s), and at the limit cancel the turn instead of going
+  on with audio missing. Android's recognizer marks the end of input like the other engines (`onEndOfSpeech` →
+  `MicServer.stopCapture()`). `Voice.Listener.onNothing` (default: `onEnd`) tells "nothing heard" from an error; an
+  error ends the turn with its message, no retry. A type, not a comparison of message strings, so a reworded string
+  can't change behaviour.
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F1
+
+## 2026-11-22 - Whether Phone turns are fed is decided by the probe and compiled in; nothing is learned at run time
+- Options: downgrade to unfed after a foreign recording in a fed Phone turn (round 1); probe the recognizer at run
+  time with a bundled clip; decide once from probe gate P6 (`Voice.PHONE_FEED`).
+- Choice: P6, because recording configurations don't say who is recording, so an unrelated recorder would have
+  downgraded every later turn, and a run-time probe is a second recognizer session nobody asked for. A foreign
+  recording cancels one turn, no more. Cost accepted: on a recognizer that ignores supplied audio (not this phone's,
+  if P6 passes) Phone-input turns are cancelled each time and the guide says to use Claude or ChatGPT. The unfed
+  path exists only if P6 fails and Nicholas accepts pause-only (Q1); there the state function expects the
+  recognizer's one recording and cancels on a second.
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F2
+
+## 2026-11-22 - A listening window has an identity: the recognizer instance and a MicServer capture id
+- Options: check the turn id in the bubble's listener only (round 1); a window object per engine; the recognizer
+  instance + a capture id per `adopt`/`startCapture`.
+- Choice: the last. Phone callbacks check `recognizer != mine` before `finish()`; `MicServer.feed/release/pull` take
+  the capture id and refuse a stale one without touching the buffer or cursor; the second window of a turn gets its
+  own id. Fixes a late callback destroying a newer recognizer for manual Talk as well.
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F3
+
+## 2026-11-22 - MicServer's captured buffer goes to the socket only for Claude's dictation
+- Options: leave `serve` as is; mark each capture with its consumer; gate on `ClaudeDictation.active()`.
+- Choice: the gate, one condition, no new state. A Terminal recording during a Phone or ChatGPT turn (or a manual
+  ChatGPT dictation) opens its own recorder and never sees the pre-roll; the turn goes on beside it. Not solved, as
+  today: Claude's hidden session and a Terminal `/voice` during Claude dictation use the same program and token.
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F4
+
+## 2026-11-22 - The probe comes after the shared capture code, and P1, P2, P6 block
+- Options: probe as step 2 with copies and an "after the release" way out (round 1); probe after `WakeLoop`/`WakeMic`
+  exist, compiled from the same files, gates blocking.
+- Choice: the second. The service and the wake turn are written only with P1 (model), P2 (microphone while
+  speaking) and P6 (Phone feed) measured; a gate that can't be measured stops the pipeline for Nicholas. Fallback
+  build route: a temporary Gradle module built by CI on the branch. `WakeMic` holds the two microphone setups so the
+  probe measures the code that ships.
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F5
+
+## 2026-11-22 - A stop word counts only when playback overlapped the wake phrase
+- Options: speaking at the wake or up to 2 s before (round 1); speaking at the detection or speech ended within the
+  phrase's span (1 s) before the capture thread's detection time.
+- Choice: the overlap (`WakeWord.overlapped`, pure), so "hey buddy, cancel" said after a reply has ended is sent as
+  a request. The service knows the end of speech to 100 ms (it checks that often while Buddy speaks).
+- By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F6

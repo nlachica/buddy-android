@@ -100,3 +100,57 @@ F5 [major] The release can bypass the phone checks that decide the design - Step
 F6 [minor] The two-second grace period still swallows idle requests - `plan.md:168–169,188–192` classifies “hey buddy, cancel” as a playback control even when the user starts speaking after the reply has finished. T4 tests the boolean after classification, so it misses this boundary. -> Tie the decision to whether playback overlapped the detected wake phrase. Test both a phrase that straddles the end of playback and one that begins just afterwards.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+<!-- claude-fable-5-2, 2026-11-22. Section numbers are plan.md's after this round. -->
+
+F1: accepted - three changes (§6). (a) The audio held while a transcript is awaited is kept for the whole wait: the
+hold's limit is 90 s, longer than any engine allows itself (Claude 45 s to start + 15 s to deliver + 20 s to read;
+ChatGPT 30 + 20), and when it runs out the turn is cancelled outright (recognizer cancelled, pill gone, a log line),
+never continued with missing audio. (b) Phone's `onEndOfSpeech` now marks the end of input like the other engines'
+`finish()`: in a fed window it calls `MicServer.stopCapture()`, so the capture loop holds everything from that
+moment. (c) Only "nothing heard" opens the second window. `Voice.Listener` gets `onNothing(message)` (default:
+`onEnd(message)`), called where the three engines report an empty result or no-match; any other `onEnd` message is
+an error: it is shown as Talk shows it and ends the turn. Tests (CI): 30 s of blocks arriving after the first
+window stopped are all in the second window, in order; the 90 s limit drops the audio and reports once; `Turn`:
+nothing heard → AGAIN, then END; "nothing heard" and an error reach the listener as different callbacks, also
+through `Voice.endpoint`'s wrapper (an error never reaches `Turn`).
+
+F2: accepted - `Voice.phoneFeedRefused` and the run-time downgrade are gone. A foreign recording during a turn only
+cancels that turn; the next turn is fed again. Whether Phone turns are fed is decided once, by the controlled probe
+P6 (§6 "Phone"), and compiled in. The unfed path exists only if P6 fails for both recognizers and Nicholas accepts
+it (Q1); in it the turn expects exactly one other recording (the recognizer's) and a second one cancels it: row 3
+of the state table now counts against what the turn expects, and it still ranks above TURN. T5 gains: Samsung
+Voice Recorder started and stopped during a Phone-input turn, then a whole one-breath request must arrive.
+
+F3: accepted - a listening window now has an identity that is checked before anything else (§6 "Windows"). In
+`Voice`'s phone branch every recognizer callback starts with `if (recognizer != mine) return;`, before `finish()`,
+so a late `onResults`/`onError` of a cancelled recognizer can neither destroy the newer one nor deliver. The
+window's pipe is closed in `finish()`. `MicServer` ownership is by capture id, new for every window (the second
+window no longer shares the first one's id), and the pump reads with `pull(capture, max)`, which returns null
+without moving the cursor once that capture is over; the pump then closes its pipe and exits. Tests (CI): a stale
+capture id can't feed, pull or release while a newer capture keeps all its audio; a cancelled phone window's late
+error leaves the next window alone, which delivers once.
+
+F4: accepted - `MicServer.serve` hands the captured buffer to a socket reader only while Claude's dictation is the
+engine listening (`ClaudeDictation.active()`). In a Phone or ChatGPT turn (and in a manual ChatGPT dictation, where
+this was already possible) a Terminal recording opens its own `AudioRecord` as it does when nothing else records,
+and is counted as Buddy's own (row 5 after the turn). Tests: the predicate in CI; on the phone, `arecord` in the
+Terminal during a Phone-input wake turn records only what is said after it started (T5). Not changed: during a
+Claude turn the hidden session and the Terminal can't be told apart on the socket (same token, same program); that
+is today's behaviour for manual Claude dictation.
+
+F5: accepted - the "if the probe can't be built, check after the release" sentence is deleted. The probe is now
+step 4, after the capture code it shares (`WakeLoop`, `WakeMic`, the engine), compiled from the same files, not
+copies. P1, P2 and P6 are gates: steps 7 and 8 (the service, the wake turn) are not written until `probe.md` has
+their results, and if a gate
+can't be measured the pipeline stops for Nicholas; nothing is released on an assumption. A second way to build the
+probe (a temporary Gradle module built by CI on the branch) is named so "can't be built on the phone" isn't the
+end. P6's clip is two recordings: "hey buddy what's the weather" written whole into the pipe before
+`startListening`, then "like in Lisbon tomorrow" in real time; pass needs "weather" and then "tomorrow" in the
+transcript. P1 gains 5 spoken "hey buddy" after 5 minutes with the screen off, unplugged.
+
+F6: accepted - the 2 s grace is gone. A stop word is swallowed only when playback overlapped the wake phrase:
+Buddy was speaking at the detection, or its speech ended less than 1 s (the phrase's span) before the detection
+time, which the capture thread stamps. `WakeWord.overlapped(speechEndedAt, detectedAt)` is pure; CI tests a phrase
+that straddles the end of playback (cut → swallowed) and one that begins just after it (sent).
