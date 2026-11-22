@@ -529,13 +529,21 @@ final class AudioRoute {
             int[] n = media.clone();
             int w = mediaStep(speakerCall, now, call, mediaFor(call, callMax, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)), n);
             if (java.util.Arrays.equals(n, media)) return;
-            if (w >= 0) {
-                if (speakerCall && !Prefs.setLiveMedia(app, n[SAVED], n[SET], now)) return;
-                if (!onSpeaker(am) || am.isStreamMute(AudioManager.STREAM_MUSIC) || am.getStreamVolume(AudioManager.STREAM_MUSIC) != now) {
-                    if (speakerCall) Prefs.setLiveMedia(app, media[SAVED], media[SET], media[FROM]);
-                    return;
+            if (!change(speakerCall, now, w, media, n, new Vol() {
+                public boolean save(int saved, int set, int from) {
+                    return Prefs.setLiveMedia(app, saved, set, from);
                 }
-                am.setStreamVolume(AudioManager.STREAM_MUSIC, w, 0);
+
+                public boolean at(int level) {
+                    return onSpeaker(am) && !am.isStreamMute(AudioManager.STREAM_MUSIC)
+                            && am.getStreamVolume(AudioManager.STREAM_MUSIC) == level;
+                }
+
+                public void put(int level) {
+                    am.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0);
+                }
+            })) return;
+            if (w >= 0) {
                 CodexLive.log(speakerCall ? "volume: media " + now + " -> " + w + " (call " + call + "/" + callMax + ")"
                         : "volume: media back to " + w);
             } else if (!speakerCall) {
@@ -545,6 +553,34 @@ final class AudioRoute {
             Prefs.setLiveMedia(app, n[SAVED], n[SET], n[FROM]);
         } catch (RuntimeException ignored) { // a refused write: the next tick asks again
         }
+    }
+
+    /** 035: what change() asks of Android and the disk (a fake in the tests). at: speaker alone, unmuted, at that index. */
+    interface Vol {
+        boolean save(int saved, int set, int from);
+
+        boolean at(int level);
+
+        void put(int level);
+    }
+
+    /**
+     * 035: the write order for a new record n (old = the record now). A take or key write commits the record first (a
+     * failed commit writes nothing); every change, a give-back or a drop of the record too, asks again for the speaker
+     * alone, the mute and the same index (a headset can take media meanwhile) and on failure puts the old record back and
+     * changes nothing; a write that Android ignored (the index isn't w after it) isn't accepted either, so the record
+     * stays and the next tick tries again. True: n is the record now.
+     */
+    static boolean change(boolean speakerCall, int now, int w, int[] old, int[] n, Vol v) {
+        boolean take = w >= 0 && speakerCall;
+        if (take && !v.save(n[SAVED], n[SET], now)) return false;
+        if (!v.at(now)) {
+            if (take) v.save(old[SAVED], old[SET], old[FROM]);
+            return false;
+        }
+        if (w < 0) return true;
+        v.put(w);
+        return v.at(w);
     }
 
     @TargetApi(33)

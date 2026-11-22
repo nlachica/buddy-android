@@ -496,4 +496,92 @@ public class AudioRouteTest {
         assertEquals(6, step(false, 15, 15, s));
         assertEquals(15, step(true, 6, 15, s));
     }
+
+    /** 035: Android and the disk as the tests script them. */
+    private static class FakeVol implements AudioRoute.Vol {
+        boolean commitOk = true, speaker = true, applies = true;
+        int level, writes;
+        Runnable onFirstSave;
+        final java.util.List<String> saves = new java.util.ArrayList<>();
+
+        public boolean save(int saved, int set, int from) {
+            saves.add(saved + "," + set + "," + from);
+            if (saves.size() == 1 && onFirstSave != null) onFirstSave.run();
+            return commitOk;
+        }
+
+        public boolean at(int l) {
+            return speaker && level == l;
+        }
+
+        public void put(int l) {
+            writes++;
+            if (applies) level = l;
+        }
+    }
+
+    private static boolean change(boolean speakerCall, int now, int call, int[] old, FakeVol v) {
+        int[] n = old.clone();
+        int w = step(speakerCall, now, call, n);
+        return AudioRoute.change(speakerCall, now, w, old, n, v);
+    }
+
+    @Test
+    public void aTakeCommitsBeforeItWrites() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        assertTrue(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(1, v.writes);
+        assertEquals("6,15,6", v.saves.get(0));
+        assertEquals(15, v.level);
+    }
+
+    @Test
+    public void aFailedCommitWritesNothing() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.commitOk = false;
+        assertFalse(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void aHeadsetTakingMediaDuringTheCommitWritesNothingAndKeepsTheOldRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.onFirstSave = () -> v.speaker = false;
+        int[] old = st(4, 6, -1, 15);
+        assertFalse(change(true, 6, 13, old, v));
+        assertEquals(0, v.writes);
+        assertEquals("4,6,-1", v.saves.get(v.saves.size() - 1)); // the old record is back on disk
+    }
+
+    @Test
+    public void aMuteDuringTheCommitWritesNothing() {
+        FakeVol v = new FakeVol();
+        v.level = 0; // Android reads a muted stream as not at 6
+        assertFalse(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void aHandoffAtHangUpKeepsTheSpeakersRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 7; // LS2's index, read after the first route query saw the speaker
+        v.speaker = false;
+        assertFalse(change(false, 7, 15, st(6, 15, -1, 15), v)); // would drop the record as "he moved Media"
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void anIgnoredRestoreKeepsTheRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 15;
+        v.applies = false;
+        assertFalse(change(false, 15, 15, st(6, 15, -1, 15), v));
+        assertEquals(1, v.writes);
+        v.applies = true;
+        assertTrue(change(false, 15, 15, st(6, 15, -1, 15), v)); // the next tick
+        assertEquals(6, v.level);
+    }
 }

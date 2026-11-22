@@ -910,9 +910,14 @@ final class Prefs {
         sp(c).edit().putString("audio_device", k).apply();
     }
 
+    /** 035: its own file, not "buddy": a backup must not carry this phone's pending restore to another phone. */
+    private static SharedPreferences mediaSp(Context c) {
+        return c.getSharedPreferences("live_media", Context.MODE_PRIVATE);
+    }
+
     /** 035: media volume Buddy moved for a live call on the speaker: {saved, set, from}, -1 = none (see AudioRoute.mediaStep). */
     static int[] liveMedia(Context c) {
-        String[] p = sp(c).getString("live_media", "").split(",");
+        String[] p = mediaSp(c).getString("live_media", "").split(",");
         int[] r = {-1, -1, -1};
         if (p.length == 3) {
             try {
@@ -926,7 +931,7 @@ final class Prefs {
 
     /** 035: on disk before Android's volume is touched, so commit(); false when the write failed. saved < 0 clears it. */
     static boolean setLiveMedia(Context c, int saved, int set, int from) {
-        SharedPreferences.Editor e = sp(c).edit();
+        SharedPreferences.Editor e = mediaSp(c).edit();
         if (saved < 0) e.remove("live_media");
         else e.putString("live_media", saved + "," + set + "," + from);
         return e.commit();
