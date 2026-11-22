@@ -698,6 +698,14 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
                 if (on && !Voice.micAllowed(this)) Voice.askMic(this, REQ_MIC);
                 render();
             }));
+            vc.addView(fieldLabel(getString(R.string.setup_wake_sensitivity), null), topGap(12));
+            vc.addView(segmented(this, new String[][]{{"low", getString(R.string.models_effort_low)},
+                    {"medium", getString(R.string.models_effort_medium)}, {"high", getString(R.string.models_effort_high)}},
+                    Prefs.wakeSensitivity(this), false, v -> {
+                        Prefs.setWakeSensitivity(this, v);
+                        render();
+                    }), topGap(8));
+            vc.addView(text(this, getString(R.string.setup_wake_sensitivity_info), 13, MUTED), topGap(8));
         }
         vc.addView(fieldLabel(getString(R.string.setup_voice_input), null), topGap(WakeWord.available() ? 16 : 0));
         String engine = Prefs.voiceEngine(this);

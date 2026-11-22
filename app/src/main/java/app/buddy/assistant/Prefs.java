@@ -353,6 +353,17 @@ final class Prefs {
         sp(c).edit().putBoolean("wake_word", on).apply();
     }
 
+    /** 034: how sure "hey buddy" must be: low, medium or high (see WakeLoop.Rule); a bad stored value reads as medium. */
+    static final String WAKE_SENSITIVITY_DEFAULT = "medium";
+
+    static String wakeSensitivity(Context c) {
+        return WakeLoop.Rule.of(sp(c).getString("wake_sensitivity", WAKE_SENSITIVITY_DEFAULT)).name;
+    }
+
+    static void setWakeSensitivity(Context c, String v) {
+        sp(c).edit().putString("wake_sensitivity", v).apply();
+    }
+
     /** An animated picture on the bubble (issue #68): "loop" (the default), "once" each time the phone is unlocked, or "off". */
     static String faceAnim(Context c) {
         return sp(c).getString("face_anim", "loop");

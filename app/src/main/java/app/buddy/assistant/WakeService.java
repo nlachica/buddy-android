@@ -229,6 +229,16 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
     }
 
     @Override
+    public WakeLoop.Rule rule() {
+        return WakeLoop.Rule.of(Prefs.wakeSensitivity(this));
+    }
+
+    @Override
+    public void log(String line) {
+        Log.i("HeyBuddy", line);
+    }
+
+    @Override
     public void onWake(int seq, long detectedAt) {
         main.post(() -> WakeWord.onWake(seq, detectedAt));
     }

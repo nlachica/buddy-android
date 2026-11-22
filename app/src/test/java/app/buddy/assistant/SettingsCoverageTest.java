@@ -499,6 +499,14 @@ public class SettingsCoverageTest {
     }
 
     @Test
+    public void heyBuddySensitivityTakesLowMediumHigh() { // 034
+        assertTrue(SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals("hey_buddy_sensitivity")));
+        assertEquals("high", named("hey_buddy_sensitivity").check("HIGH"));
+        refused(named("hey_buddy_sensitivity"), "max");
+        assertEquals("medium", Prefs.WAKE_SENSITIVITY_DEFAULT);
+    }
+
+    @Test
     public void heyBuddyTakesOnAndOffAndIsRefusedWhereItIsNotOffered() { // 032 T7
         assertTrue(SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals("hey_buddy")));
         assertEquals("off", named("hey_buddy").check("OFF"));
