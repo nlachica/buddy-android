@@ -104,7 +104,7 @@ final class LiveWatch {
         private final Out out;
         private final Gate gate = new Gate();
         private final ArrayList<byte[]> held = new ArrayList<>();
-        private boolean on, watch, fed, heldEnded;
+        private boolean on, watch, fed, heldEnded, off;
         private int gen, count, retries;
         private String saved, node;
         private Object turn;
@@ -122,6 +122,7 @@ final class LiveWatch {
             clear();
             retries = 0;
             on = true;
+            off = false;
             final int g = ++gen;
             saved = out.saved();
             decide();
@@ -153,8 +154,9 @@ final class LiveWatch {
             String s = out.saved();
             if (!s.equals(saved)) { // a change of the setting decides again
                 out.log("setting " + show(saved) + " -> " + show(s));
-                final boolean there = turn != null && WatchVoice.KEY.equals(saved);
+                final boolean there = turn != null && node != null && WatchVoice.KEY.equals(saved); // a find still running isn't on the watch yet
                 saved = s;
+                off = false;
                 retryAt = 0; // the change is the fresh decision, not a retry
                 decide();
                 if (there && !out.worn(node)) leave(); // Watch is now Auto: it stays on the watch only while worn
@@ -163,7 +165,7 @@ final class LiveWatch {
                 decide();
             } else if (pending != null && pending == turn && quiet()) {
                 move(pending);
-            } else if (retryAt != 0 && turn == null && drain == null && out.now() >= retryAt && quiet() && out.watchWins()) {
+            } else if (retryAt != 0 && turn == null && drain == null && out.now() >= retryAt && quiet() && want()) {
                 retryAt = 0;
                 retries++;
                 out.log("retry " + retries + " (quiet " + (out.now() - loudAt) + " ms)");
@@ -177,9 +179,13 @@ final class LiveWatch {
         }
 
         private void decide() {
-            boolean want = out.watchWins();
+            boolean want = want();
             if (want && turn == null && drain == null) attempt(false);
             else if (!want && turn != null) stop();
+        }
+
+        private boolean want() {
+            return !off && out.watchWins();
         }
 
         /** The watch pushed its wrist state (main thread). */
@@ -191,6 +197,7 @@ final class LiveWatch {
         private void leave() {
             if (turn == null || WatchVoice.KEY.equals(out.saved())) return; // a picked Watch is used worn or not
             out.log("not worn");
+            off = true; // the call stays on the phone until it ends or the setting moves
             stop();
         }
 
@@ -201,6 +208,7 @@ final class LiveWatch {
 
         private void attempt(boolean retry) {
             final Object t = turn = new Object();
+            node = null;
             if (retry) retryTurn = t; // before find: the fake answers at once
             out.log("looking");
             out.find(n -> found(t, n));

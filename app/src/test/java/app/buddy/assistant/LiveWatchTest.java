@@ -865,4 +865,49 @@ public class LiveWatchTest {
         assertTrue(f.opened.isEmpty());
         assertEquals(0, c.toWatch());
     }
+
+    @Test
+    public void aSwitchToAutoWhileTheWatchIsStillBeingFoundLetsTheFindFinish() {
+        f.holdFind = true;
+        c.begin(); // saved = watch: the find is out
+        f.saved = "";
+        f.worn = false; // no earlier answer: only the find's own
+        f.advance(POLL);
+        f.answerFind(); // the find (it asked under Auto) says: a worn watch
+        assertEquals(1, f.opened.size());
+        assertFalse(f.opened.get(0).cancelled);
+    }
+
+    @Test
+    public void afterATakeOffTheDrainingReadingsAnswerDoesNotOpenAnotherOnTheWatch() {
+        f.saved = "";
+        Reading r = onWatch();
+        utterance();
+        c.worn("n1", false); // put back on, the watch could be found again
+        r.events.played();
+        f.advance(TAIL + POLL);
+        assertEquals(1, f.opened.size());
+        assertEquals(1, f.finds);
+    }
+
+    @Test
+    public void afterATakeOffAMissingAnswerDoesNotOpenAnotherOnTheWatchEither() {
+        f.saved = "";
+        onWatch();
+        utterance();
+        c.worn("n1", false);
+        f.advance(LiveWatch.ANSWER_MS + RETRY);
+        assertEquals(1, f.opened.size());
+        assertEquals(1, f.finds);
+    }
+
+    @Test
+    public void aChangeOfTheSettingAfterATakeOffDecidesAgain() {
+        f.saved = "";
+        onWatch();
+        c.worn("n1", false);
+        f.saved = "watch";
+        f.advance(POLL);
+        assertEquals(2, f.opened.size());
+    }
 }
