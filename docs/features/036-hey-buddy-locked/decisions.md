@@ -39,3 +39,27 @@
 - Choice: log lines, because `phone_shell` reads logcat (shown today) and a read within ~10 minutes of a try is
   enough for the Verifier; transcripts are never logged, only word counts.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - The cause is not diagnosed yet; a baseline test gates all code (supersedes the first entry's choice D)
+- Options: build the cue and test afterwards (round 0); make the exact locked time question on the installed build
+  the first decision point.
+- Choice: the baseline first (plan.md step 0), because the 13:47 trace was someone else's talk in a busy chat and the
+  reported attempt left no log: it shows the stages can run locked, not why his attempt failed. What follows depends on
+  where the attempt stops; a phone setting alone ends the feature there (brief). Plan review round 1, F1 and F3.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - Wake cue and spoken errors deferred (supersedes the two entries on them)
+- Options: ship beep + vibration and spoken errors now; defer until Nicholas asks.
+- Choice: defer, because the brief asks for a spoken answer, a sign would also fire on a false wake, and nothing shows
+  the silent wait was his problem. Asked as Q1 only after a passing baseline, "leave it" being the default. If spoken
+  failures ever ship: one fixed, localized sentence, never the error's own text (it can carry shell output). Round 1,
+  F2 and F4.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - Diagnostic log lines only if the baseline needs them, and without error text
+- Options: ship `BuddyWake` outcome lines before the baseline; ship them only for a result today's logs can't tell
+  apart; lines with the error message; lines with fixed reason codes.
+- Choice: only for "`wake` without `turn`" or "`turn` without a request", with literals, sequence numbers, a word count
+  and the `State` name, because the other results are readable from today's log, the chat and dumpsys, and error
+  messages can hold shell output.
+- By: Planner (claude-fable-5-2)

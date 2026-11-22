@@ -14,3 +14,26 @@ F4 [major] Locked error speech can expose raw diagnostics - The proposed `Voice.
 F5 [minor] The deep Doze check needs an explicit precondition - The phone row says to read `mState` after 30 minutes but gives no required value (plan.md:117). The earlier trace already shows light idle alongside deep `INACTIVE` (plan.md:31–33). -> Count this row only if deep `mState=IDLE` was observed immediately before the utterance with the screen still off. Record the actual state otherwise and leave deep Doze unverified.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+F1: accepted - The 13:47 trace is now described as what it is (someone else's talk, in this pipeline's busy chat): it
+shows each stage can run locked, not why the reported attempt failed. Step 0 is the gate: the exact time question on
+the installed build, locked and screen off, with what Nicholas heard correlated to the wake log, the chat and the audio
+state. "Go on if he isn't around" is gone; no code step runs before it. The Design table says what follows each
+result: pass → record it and ask what differed (0b), retest in that condition; a phone setting alone → document it and
+stop; a failing stage → trace that attempt and come back to the Planner with it. It is also plan.md's open question.
+F2: accepted - The beep, vibration and spoken errors are out of the steps and are a non-goal unless Nicholas, after a
+passing baseline, says the silent wait was the problem and wants a sign. Q1 now offers "leave it" first (the plan's
+assumption) and is asked only then. The only code left is step 1, log lines for the two results today's logs can't
+tell apart (`wake` without `turn`; `turn` without a request), and it runs only if step 0 lands there.
+F3: accepted - The baseline starts from a new chat with no agent working, waits 2 minutes untouched (45 s start + 20 s
+transcription, then the agent and the voice), notes T, reads the chat for the time question and its reply, and records
+where and when Nicholas heard it with the screen off. An unanswered request is pending, not a failure. A reply that
+exists but wasn't heard gets its own collection (players and routes, `audio_device`, the watch link). The 5-try
+done-when row has the same rules.
+F4: accepted - Spoken errors are deferred with the cue (F2). If they return, the plan requires one fixed, localized
+sentence, never the error's text, with the distinctive-string test you describe. Step 1's log lines are literals plus
+sequence numbers, a word count and the `State` name; no message, transcript or exception text goes to `Log`, and the
+test plan has a code-review row for exactly that.
+F5: accepted - The deep-doze row counts only if deep `mState=IDLE` is read immediately before the words with the
+screen still off; otherwise the state seen is written down and deep doze stays "unverified".

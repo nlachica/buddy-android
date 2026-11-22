@@ -1,5 +1,5 @@
 # Plan: 036-hey-buddy-locked
-Planner: claude-fable-5-2, 2026-11-22. Round 0.
+Planner: claude-fable-5-2, 2026-11-22. Round 1 (answers plan-review round 1).
 
 ## Goal
 Nicholas says "hey buddy" doesn't work while the phone's screen is locked. Find out why with evidence, then fix it,
@@ -7,8 +7,8 @@ inside 032's battery budget. Done when: "hey buddy, what time is it" works with 
 voice, verified on the phone.
 
 Non-goals: turning the screen on or showing anything on the lock screen; a wake lock or any other change to idle
-listening; a faster transcript or answer; a cue while the phone is unlocked (the waves show there); a log file;
-sensitivity changes; anything in feature 035's files.
+listening unless the baseline (step 0) shows that stage failing; a wake cue or spoken errors unless Nicholas asks for
+them (Q1); a faster transcript or answer; a log file; sensitivity changes; anything in feature 035's files.
 
 ## Evidence (new, from the phone, 2026-11-22 13:52-13:59)
 `phone_shell` does give `logcat -d` and global `dumpsys` (research had neither). Commands that name Buddy's package
@@ -26,7 +26,9 @@ sensitivity changes; anything in feature 035's files.
 | 13:47:22.2 | the agent's reply |
 | 13:47:23.6-13:47:36.7 | Buddy speaks it on the phone (`mic open: VOICE_COMMUNICATION, echo canceller on`, two AAudio streams) |
 
-(The wake may have been a false one; it doesn't matter: detector, turn, dictation, send and speech all ran locked.)
+(The words were someone else's talk, not a request to Buddy, and the open chat was this pipeline's, with its agent
+working. So this shows that each stage can run on a locked phone. It is not the time question, and not the attempt
+Nicholas reported.)
 
 **Still listening deeper into sleep.** At 13:53:12 and 13:56:14 (7 and 10 min after screen-off; `mWakefulness=Dozing`,
 keyguard showing, `mIsPowered=false`, light doze `IDLE`, deep doze `INACTIVE`): `dumpsys audio` lists Buddy's recording
@@ -34,112 +36,130 @@ keyguard showing, `mIsPowered=false`, light doze `IDLE`, deep doze `INACTIVE`): 
 `PARTIAL_WAKE_LOCK 'AudioIn'` for Buddy's uid since the last mic open. So the open recording does keep the CPU awake
 (032 had this as "unverified") and Android doesn't silence the microphone.
 
-**So research's three candidates are each refuted for these conditions:** A (detector deaf): no. B (turn can't run
-locked): no. C (reply not spoken): no. It is not a phone setting either.
+**What this settles and what it doesn't.** Settled for these conditions (1-10 min locked, unplugged, light doze): the
+microphone isn't silenced, the CPU stays awake, and a wake can run through dictation, send and speech. **Not settled:
+why Nicholas's attempt failed.** No request reached the open chat between 12:31 and his report at 12:44, and that
+attempt's log is gone (logcat here holds ~10 minutes; it starts at 13:42). It may not have been detected, may have
+been dropped, may have died in dictation, or may have been answered late or on another device. Not sampled: deep doze
+(30+ min still), the service not running after an update ("Tap to turn on Hey Buddy"), battery saver, a chat with no
+agent working, the watch connected. Phone facts at the time: ringer silent, battery 5%, `voice_input=claude`,
+`voice_output=chatgpt`, `audio_device=auto`.
 
-**What a locked turn is like for the user:** nothing. `Bubble.showWaves` skips the waves when the bubble is hidden
-(`Bubble.java:1799`), there is no sound or vibration on a wake (`WakeWord.onWake`, vibration only when it cuts speech),
-and every failure is a toast (`WakeWord.java:206,213,236`, `Bubble.java:1741`), which a locked phone doesn't show.
-At 13:47 the phone stayed dark and silent for 22.7 s between the wake and the first spoken word. A request that
-worked, one that was misheard and a detector that never woke are indistinguishable. No request reached the open chat
-(the Orchestrator's Claude session) between 12:31 and Nicholas's report at 12:44, so that attempt either wasn't
-detected or ended in an unseen toast.
-
-**Not captured:** the failing attempt itself (logcat on this phone holds ~10 minutes; it starts at 13:42). Not
-sampled: deep doze (30+ min still), the service not running after an update ("Tap to turn on Hey Buddy"), battery
-saver. Phone facts: ringer silent, battery 5%, `voice_input=claude`, `voice_output=chatgpt`, `audio_device=auto`.
+**What a locked turn is like for the user today** (a candidate explanation, not a diagnosis): the phone stays dark and
+silent until the answer is spoken (22.7 s at 13:47). `Bubble.showWaves` skips the waves when the bubble is hidden
+(`Bubble.java:1799`), a wake makes no sound, and every failure is a toast (`WakeWord.java:206,213,236`,
+`Bubble.java:1741`), which a locked phone doesn't show.
 
 ## Design
-The detector and the turn already work locked, so nothing changes there. The fix makes a locked turn perceivable and
-its failures audible, and makes the next "it didn't work" readable from the log:
+**Diagnose first; no code before the baseline.** The reported failure has no diagnosis, so the first decision point is
+the exact request from the brief, on the installed build (2.3.18-fork.2), locked and screen off, with Nicholas
+speaking and the attempt traced end to end (step 0). What ships depends only on where that attempt stops:
 
-1. **A cue on the wake when the phone can't show it.** In `WakeWord.onWake`, when `Triggers.locked(svc)` (keyguard
-   up or screen off, the existing helper): one short beep (`ToneGenerator`, `STREAM_MUSIC`, `TONE_PROP_BEEP`, the
-   stream the answer follows) and the 30 ms vibration that a speech-cutting wake already gives. Unlocked: unchanged.
-   It plays whatever the ringer mode is, like the spoken answer does (Nicholas's phone is on silent; see Q1).
-2. **Failures are spoken when the phone can't show a toast.** A pure rule `WakeWord.tell(hidden, error)` →
-   `TOAST` (not hidden), `SPEAK` (hidden, an error: listening couldn't start or broke, the request couldn't be sent),
-   `NONE` (hidden, nothing heard: a false wake must not make the phone say "Didn't catch that" to an empty room).
-   `SPEAK` is `Voice.speak(svc, message)`, after the turn has ended. `Bubble.talk`'s immediate `Voice.listen` error
-   goes through `WakeWord.ended` for a wake turn, so it follows the same rule.
-3. **One `BuddyWake` log line per turn outcome and per dropped wake** (today both are silent): dropped and why,
-   heard (word count only, never the text), listening again, sent / not sent and why, nothing heard, ended and why,
-   cancelled. Reading `logcat -s HeyBuddy BuddyWake` then says which stage a failed attempt died in.
+| Step 0 result | Meaning | What follows |
+|---|---|---|
+| The time is spoken, screen stayed off | It works in these conditions | Record the pass. Ask Nicholas what was different when it failed (step 0b) and retest in that condition. Nothing reproduces: no code; report the evidence and ask Q1 |
+| A phone setting alone restores the spoken answer | The brief's stop case | Write down the exact setting (GUIDE.md, and tell Nicholas). Stop |
+| No `wake` line at the attempt's time | Not detected | Collect the detector evidence (step 0, "not detected"), back to the Planner with it |
+| `wake N`, no `turn` | `WakeWord.onWake` dropped it; no log says why | Step 1 (drop reasons), release, retest |
+| `turn N`, no request in the chat after 2 min | Dictation: nothing heard or an error; no log says which | Step 1 (turn outcomes), release, retest |
+| Request in the chat, no reply | The agent run, not the wake path | Back to the Planner with the chat's state |
+| Reply in the chat, not heard on the phone | Playback or route (the watch) | Collect the playback evidence (step 0, "not heard"), back to the Planner |
 
-Why this and not more: the evidence shows no stage failing, so a wake lock, a screen wake or a restart watchdog would
-fix nothing observed and cost battery. If the device checks below show a stage that does fail (deep doze, say), the
-new log names it and the plan comes back with that evidence.
+Step 1 is the only code this plan authorises, and only for the two rows where today's logs can't tell the stage apart.
+A fix for a failing stage is planned when the stage is known, in a new Planner round with that evidence.
+
+**Deferred: the wake cue and spoken errors** (round 0's design). The brief asks for a spoken answer, not an
+acknowledgment, and a possible false wake was seen at 13:47, so a beep on a silent phone has a real cost. They come
+back only if Nicholas says, after a passing baseline, that the silent wait was the problem and he wants a sign (Q1).
+Then, through a new Planner round: the cue as in round 0, and any spoken failure is one fixed, localized sentence
+(a new string, e.g. "Sorry, that didn't work"), never the error's own text: dictation errors carry shell output
+(`ClaudeDictation.java:75`, `CodexDictation.java:514`). Its test would pass a distinctive error string through the
+callback and check that it reaches neither speech nor the log.
+
+**Log lines carry no error text.** Step 1's lines are literals at each call site plus numbers (wake and turn
+sequence, word count, the `State` name). No `message`, transcript or exception text is passed to `Log`.
 
 Alternatives, one line each:
-- Change nothing, tell Nicholas it works: leaves the dark, silent 20 s that reads as broken, and no way to tell next time.
-- `PARTIAL_WAKE_LOCK` while idle (research's A fix): the audio server already holds `AudioIn` for Buddy; redundant.
+- Build the cue now and test afterwards (round 0): fixes nothing if the wake was never detected; rejected in review.
+- Ship step 1's log lines before the baseline: a release for lines that are needed in only two of seven outcomes.
+- `PARTIAL_WAKE_LOCK` while idle: the audio server already holds `AudioIn` for Buddy; nothing shows it is needed.
 - Turn the screen on / `WakeActivity` over the lock screen: new behaviour 032 didn't accept; battery and privacy.
-- Vibration only: silent, but not noticeable from across a room, which is where hands-free is used (Q1 option b).
-- Speak "Didn't catch that" for nothing-heard too: false wakes would talk to an empty room.
-- A persistent log file: `phone_shell` logcat within ~10 min is enough for the Verifier; no second use.
-- Cue keyed on the bubble's visibility (covers "bubble off, unlocked" too): a second notion of hidden and a Bubble
-  change for a case the brief doesn't ask about.
+- A persistent log file: only worth it if a failure recurs that nobody can reproduce within logcat's ~10 minutes.
 
 ## Steps
-0. **Orchestrator with Nicholas, in parallel with plan review; not a gate.** Ask him: lock the phone, wait a minute,
-   say in one breath "hey buddy, what time is it", wait 30 s. Then `phone_shell`:
-   `logcat -d -v time -s HeyBuddy:V BuddyWake:V | tail -30`. Answered (expected): the cause is the missing feedback;
-   go on. Not answered: the log says where it stopped (no `wake` line = not detected; `wake` without `turn` = dropped;
-   `turn` and no speech = dictation, send or voice). Add `dumpsys power | grep -E "mWakefulness|AudioIn"` and
-   `dumpsys audio | sed -n '/RecordActivityMonitor/,/^$/p'`, append it to research.md and rerun the Planner. If he
-   isn't around, go on: steps 1-3 are what makes a later failure diagnosable.
-1. **The rule and its test.** `WakeWord.java`: `enum Tell { TOAST, SPEAK, NONE }`, `static Tell tell(boolean hidden,
-   boolean error)`. `WakeWordTest.java`: the four input pairs.
-2. **Failures follow the rule; outcomes are logged.** `WakeWord.java`: replace `toast(message)` with
-   `tell(message, error)` (`hidden = Triggers.locked(svc)`): `nothing()` → error false; `ended()` and `send()` → error
-   true, called after `endTurn`. Add the log lines of Design 3 (`turn <turnSeq> …`, `wake <seq> dropped: …` including
-   the early `return` at `:147`). `Bubble.java:1740-1743`: for a wake turn call `WakeWord.ended(turn, window, err)`
-   instead of `toast(err)` + `endTurn`.
-3. **The cue.** `WakeService.java`: `void cue()` (main thread): `ToneGenerator(STREAM_MUSIC, 80)`,
-   `startTone(TONE_PROP_BEEP)` (check the javadoc: the shortest general beep, 150 ms at most), `release()` after
-   300 ms on `main`; a `RuntimeException` from the constructor is caught and logged (the vibration still happens).
-   `WakeWord.onWake`: `hidden = Triggers.locked(svc)`; vibrate when `cut || hidden`; `s.cue()` when `hidden`; before
-   `openWindow()`. No new permission, string or setting.
-4. **Docs.** `docs/GUIDE.md` (Hey Buddy paragraph): locked or screen off, Buddy beeps and vibrates when it hears
-   "hey buddy", errors are spoken, the answer can take 10-20 s, the beep ignores silent mode. `032 battery.md`: one
-   dated line, "the recording holds the audio server's `AudioIn` wake lock (dumpsys power, 2026-11-22); verified".
-   This folder's `decisions.md` as decisions come up.
-5. **Orchestrator: CI, release, phone rows.** CI on the PR; release per AGENTS.md (`tools/release-check.sh` first;
-   035 may be ready for the same release); `update_buddy`; then the phone rows below.
+0. **Baseline. Orchestrator with Nicholas, installed build, no code. Gate: nothing below runs before it.**
+   - Setup, phone unlocked: the Hey Buddy notification says "Hey Buddy is listening" (not "paused", not "Tap to turn
+     on"). Nicholas opens a **new chat** so the current chat has no agent working (a busy chat queues the request as a
+     note, `ChatHub.java:343-345`; this pipeline's chat is busy). Unplugged. Record: `buddy_settings` `voice_input`,
+     `voice_output`, `audio_device`; whether the watch is connected; `settings get global low_power`; battery %.
+   - Attempt: lock, screen off, leave it one minute, say in one breath "hey buddy, what time is it". Don't touch the
+     phone for **2 minutes** (Claude input can take 45 s to start and 20 s to transcribe after the words,
+     `ClaudeDictation.java:117-119,147-155`, before the agent and the voice). Note the time T.
+   - Nicholas reports: what he heard, from the phone or the watch, about how long after speaking, and whether the
+     screen stayed off.
+   - Collect within 10 minutes of T: `logcat -d -v time -s HeyBuddy:V BuddyWake:V | tail -40`; after he unlocks,
+     `read_screen` on that chat: the request text, the reply, their times; `dumpsys power | grep -E
+     "mWakefulness|AudioIn"`.
+   - Classify with the Design table. A request with no reply yet is **pending**, not a failure: wait, then classify.
+   - Not detected: also the `HeyBuddy` near-miss lines around T (scores against the threshold), the notification's
+     text, `dumpsys audio | sed -n '/RecordActivityMonitor/,/^$/p'`, and Nicholas reads Settings → Apps → Buddy →
+     Battery and the sleeping-apps lists (`phone_shell` blocks Buddy-targeted commands).
+   - Not heard though the reply is in the chat: `dumpsys audio` (players and routes at the reply's time),
+     `audio_device`, the watch link (`Voice.java:528-532` sends speech to the watch when it is linked).
+   - Append the record (T, what he heard and where, the log lines, the chat times, the row it fell in) to
+     `research.md` under "Baseline, <date>".
+   - **0b, after a pass:** ask what was different when it failed: how long the phone had been lying locked, plugged
+     in or not, a chat's agent still working, the watch on, how long he waited, what he expected to hear. Repeat the
+     attempt in the condition he names. Long idle: the deep-doze row of the test plan. Passes there too, or he can't
+     say: stop testing, report, ask Q1.
+1. **Only for the "dropped" or "no request" rows: diagnostic log lines.** `WakeWord.java`, tag `BuddyWake`, literals
+   only: in `onWake`'s drop branch `wake <seq> dropped: turn open | state <STATE> | listening | live call | no bubble`
+   (and `no service` for the early return at `:147`); `turn <n>: heard <k> words`, `turn <n>: listening again`,
+   `turn <n>: nothing heard`, `turn <n>: listen error`, `turn <n>: sent`, `turn <n>: not sent`, `turn <n>: cancelled`.
+   `Bubble.java:1740-1743`: for a wake turn call `WakeWord.ended(turn, window, err)` in place of `toast(err)` +
+   `endTurn` (same toast, same end, plus the line). Toasts and behaviour unchanged.
+2. **Only after step 1. Orchestrator:** CI on the PR, release per AGENTS.md (`tools/release-check.sh` first; 035 may
+   be ready for the same release), `update_buddy`, repeat step 0, back to the Planner with the stage the new lines name.
+3. **Docs, whichever way step 0 goes.** `032 battery.md`: one dated line, "the open recording holds the audio
+   server's `AudioIn` wake lock (dumpsys power, 2026-11-22)", replacing "unverified". On a pass, `docs/GUIDE.md` (Hey
+   Buddy paragraph): one sentence, "With the phone locked Buddy answers by voice; the screen stays off and the answer
+   can take 20 seconds or more." This folder's `decisions.md` as decisions come up.
 
 ## Test plan
 | Done-when | Proof |
 |---|---|
-| Cause found with evidence | The Evidence section (log lines and dumpsys above); Step 0 confirms or reopens it |
-| Rule is right | `WakeWordTest` `tell` cases; CI `testGithubDebugUnitTest` |
-| Builds in both flavors, F-Droid path untouched | CI `assembleGithubRelease assembleFdroidRelease`, reproducibility step |
-| "hey buddy, what time is it" locked, screen off, unplugged, 1 min after locking: answered by voice | Phone, after release, 5 tries, ≥ 4: beep within 1 s, spoken answer; `logcat -s HeyBuddy BuddyWake` shows `wake N`, `turn N`, `turn N sent` for each |
-| Same after 30+ min locked and still (deep doze) | Phone, 1 try; `dumpsys deviceidle \| grep mState` before it. Fails: the log names the stage; back to the Planner |
-| "hey buddy" alone, locked: beep, then the request is taken | Phone, 1 try |
-| The beep doesn't garble the request | The 5 requests above read correctly in the chat |
-| A wake with nothing said, locked: beep, then silence | Phone: say "hey buddy" and nothing else; log `turn N: nothing heard`, nothing spoken |
-| Unlocked is unchanged | Phone: waves, no beep; a `Didn't catch that` toast still shows |
-| Battery budget kept | By construction: no code runs between wakes that didn't before (no wake lock, timer or receiver added) |
+| Cause found with evidence | Step 0's record in `research.md`: T, what Nicholas heard and where, the log lines, the chat's request and reply times, the Design-table row. A pass alone is not a cause: 0b's answer or a reproduced failure is |
+| "hey buddy, what time is it" locked, screen off, unplugged, 1 min after locking: answered by voice | Phone, on the build that ends this feature (the installed one if no code ships): 5 tries, ≥ 4. Each from a chat with no agent working, with T, `wake N` and `turn N` in the log, the time question and its reply in the chat, and Nicholas hearing the time with the screen off (which device is recorded). Up to 2 min per try; an unanswered request stays pending until then |
+| Same in deep doze | Phone, 1 try. Counts **only if** `dumpsys deviceidle \| grep -E "mState\|mLightState"` shows deep `mState=IDLE` immediately before the words, screen still off (light `IDLE` with deep `INACTIVE`, as at 13:53, is not it). Otherwise write the state seen and "deep doze: unverified". `dumpsys deviceidle force-idle` may save the 30-minute wait if `phone_shell` is allowed it (untested) |
+| Step 1 only: log lines name the stage, leak nothing | Code review: every new `Log.i("BuddyWake", …)` operand is a literal, a sequence number, a word count or a `State`. Phone: the retest's lines |
+| Step 1 only: builds in both flavors, F-Droid path untouched | CI `testGithubDebugUnitTest`, `assembleGithubRelease assembleFdroidRelease`, reproducibility step |
+| Unlocked is unchanged | Step 1 only: phone, one unlocked "hey buddy" request: waves, answer, a `Didn't catch that` toast still shows |
+| Battery budget kept | By construction: no code ships, or only log lines on wake and turn events; nothing runs between wakes that didn't before |
 
-The phone rows need the fork release and Nicholas speaking, so they stay `pending` in verify.md until then
-(`VERDICT: PARTIAL` before, per the playbook). Read logcat within ~10 minutes of each try.
+The phone rows need Nicholas speaking, so they stay `pending` in verify.md until then (`VERDICT: PARTIAL` before, per
+the playbook). Read logcat within ~10 minutes of each try.
 
 ## Risks
-- **The attempt that failed for Nicholas may be a condition not sampled** (deep doze, service not running after an
-  update, battery saver at low charge). Step 0 and the 30-minute row test it; the new log lines name the stage.
-- **The beep lands in the audio that is transcribed** (a fed turn keeps the recorder open). It is tens of ms; the
-  "doesn't garble" row checks it. Fallback, one line: drop the tone, keep the vibration.
-- **A false wake at night beeps at media volume though the ringer is silent.** Sensitivity (034) is the lever; Q1.
-- **Buddy's battery mode and FGS state weren't readable** (`phone_shell` blocks Buddy-targeted commands). The audio
-  and power dumps make them unlikely causes; Nicholas can read Settings → Apps → Buddy → Battery if Step 0 fails.
-- A spoken error while locked starts speech (detector goes SPEAKING with echo cancelling), the same path as a reply.
+- **The baseline passes and the failure can't be reproduced.** Then there is nothing to fix: the feature ends with
+  the evidence, the GUIDE sentence and Q1. If it happens again, Nicholas tells Buddy within ten minutes so the log can
+  be read; a second unexplained failure is the case for a log file.
+- **The gate needs Nicholas.** The pipeline waits on step 0; no stage can stand in for him speaking to a locked phone.
+- **Battery was at 5%.** Battery saver may have been part of the failing attempt; step 0 records `low_power`.
+- **Buddy's battery mode and foreground-service state aren't readable** (`phone_shell` blocks Buddy-targeted
+  commands). Nicholas reads them in Settings if the attempt isn't detected.
+- **A diagnostic release costs a round trip** (step 1 → release → retest) before any fix. Accepted: it is small, and
+  guessing the stage costs more.
 
 ## Open questions
-None blocking.
+1. Step 0's result: which row of the Design table does "hey buddy, what time is it" fall in on the locked phone, on
+   2.3.18-fork.2? Needs Nicholas and the phone, not the Researcher. No code step runs before it.
 
 ## Questions for Nicholas
-1. **What should a locked phone do the moment it hears "hey buddy"?**
-   (a) Recommended: a short beep plus a short vibration, even when the phone is on silent (as yours is today): from
-   across a room only a sound tells you it heard you, and the spoken answer ignores silent mode already.
-   (b) A short vibration only: quiet, but you won't notice it unless the phone is on you or a hard table.
-   (c) The beep every time, also when unlocked.
+Ask only after step 0 passes (and 0b reproduces nothing).
+1. **When it works, the locked phone stays dark and silent until the answer, about 20 seconds. Was that what looked
+   like "doesn't work", and do you want a sign that it heard you?**
+   (a) Recommended: no, leave it. Nothing ships beyond the diagnosis: the brief asks for a spoken answer, and a sign
+   would also fire on a false wake.
+   (b) Yes: a short vibration when a locked phone hears "hey buddy". Quiet; you notice it only if the phone is on you
+   or on a hard table.
+   (c) Yes: a short beep plus the vibration, also when the phone is on silent, so you hear it from across a room.
