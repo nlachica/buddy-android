@@ -1411,7 +1411,7 @@
     <string name="setup_voice_sample">Bonjour ! Hi, I\'m Buddy. This is how I sound.</string>
     <string name="setup_audio_device">Audio device</string>
     <string name="setup_audio_device_info">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else the phone.</string>
-    <string name="setup_audio_device_info_watch">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else your watch for read aloud and live voice (Android 12+), else the phone.</string>
+    <string name="setup_audio_device_info_watch">Where Buddy listens and speaks: voice input, read aloud and live voice. Auto uses a connected headset (the latest one), else your watch for read aloud and live voice (Android 12+) while you wear it, else the phone.</string>
     <!-- %1$s = what Auto uses right now: a headset name, Watch or Speaker. -->
     <string name="setup_audio_device_now">Auto is using %1$s now.</string>
     <!-- %1$s = the device's name. -->
