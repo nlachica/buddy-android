@@ -478,6 +478,14 @@ public class SettingsCoverageTest {
         assertEquals("#123ABC", named("accent").check("#123abc"));
     }
 
+    @Test
+    public void heyBuddyTakesOnAndOffAndIsRefusedWhereItIsNotOffered() { // 032 T7
+        assertTrue(SettingsTool.scalars(null).stream().anyMatch(x -> x.name.equals("hey_buddy")));
+        assertEquals("off", named("hey_buddy").check("OFF"));
+        refused(named("hey_buddy"), "maybe");
+        refused(named("hey_buddy"), "on"); // JVM tests run as Android 0: not offered
+    }
+
     // ---------------------------------------------------------------- chats
 
     @Test

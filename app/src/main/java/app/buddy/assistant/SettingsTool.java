@@ -336,6 +336,12 @@ final class SettingsTool {
 
     /** Settings → Voice. */
     private static void voice(BuddyService svc, List<Setting> l) {
+        // 032: the wake word (WakeWord.ensure, added with the service, starts or stops the listening)
+        l.add(onOff("hey_buddy", () -> Prefs.wakeWord(svc), on -> Prefs.setWakeWord(svc, on)).ready(v -> {
+            if (v.equals("on") && !WakeWord.available()) {
+                throw new IllegalArgumentException("hey_buddy needs Android 14 or newer and the GitHub build of Buddy");
+            }
+        }));
         l.add(new Scalar("voice_input", () -> Prefs.voiceEngine(svc), v -> Prefs.setVoiceEngine(svc, v), "",
                 "phone", "claude", "chatgpt").ready(v -> plan(svc, v.equals("claude") ? "claude" : v.equals("chatgpt") ? "codex" : null)));
         l.add(new Scalar("voice_output", () -> Prefs.speechEngine(svc), v -> Prefs.setSpeechEngine(svc, v), "",

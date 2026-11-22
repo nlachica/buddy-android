@@ -263,3 +263,10 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   transcripts until the page reports `connected` (audio is sent only once connected, so earlier words are a past
   call's). `ClaudeDictation.end` has the same shape; not changed (the ruling names ChatGPT). Not unit-tested:
   `CodexDictation` needs a WebView and a Codex server; code review plus the post-release device check.
+
+## 2026-11-22 - Step 6 details the plan left open (coder)
+- `hey_buddy` sits in `SettingsTool.voice()`; "on" is refused through `Scalar.ready` where `WakeWord.available()` is
+  false. Its setter and the Settings switch only store the value for now: step 7 adds `WakeWord.ensure` (which doesn't
+  exist yet) to both, as the plan lists. The switch shows only where `available()` holds, as §3 says; asking for the
+  microphone uses request code `REQ_MIC` and the screen's `onResume` re-renders (so the note drops "Needs the
+  microphone" after the dialog).
