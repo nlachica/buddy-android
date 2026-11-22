@@ -49,6 +49,9 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
     private volatile boolean running;
     /** What the capture thread should have: 0 the microphone closed, 1 idle, 2 while Buddy speaks. */
     private volatile int want;
+    /** The capture thread has, or is about to open, the microphone; guarded with {@code want} by {@code held}'s lock. */
+    private final Object held = new Object();
+    private volatile boolean heldOpen;
     /** The detector's own audio session (0 while its recorder is closed or opening). */
     private volatile int session;
     private long lastCause, speechEndedAt; // elapsedRealtime ms; 0: never
@@ -73,11 +76,19 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         return loop;
     }
 
-    /** Main thread: the detector's microphone closes now (the loop forgets what it heard); the next tick may reopen it. */
+    /**
+     * Main thread: the detector's microphone closes now (the loop forgets what it heard); the next tick may reopen it.
+     * Returns once the capture thread has released the recorder (one 40 ms read at most; 300 ms cap), so the caller's
+     * own recorder never opens against it.
+     */
     void closeNow() {
-        want = 0;
+        synchronized (held) {
+            want = 0;
+        }
         WakeLoop l = loop;
         if (l != null) l.drop();
+        long end = SystemClock.elapsedRealtime() + 300;
+        while (heldOpen && SystemClock.elapsedRealtime() < end) SystemClock.sleep(5);
     }
 
     // ---- the service
@@ -156,13 +167,19 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         short[] buf = new short[640]; // 40 ms
         int have = 0;
         while (running) {
-            int w = want;
+            int w;
+            synchronized (held) { // closeNow either sees the microphone held, or this sees want = 0
+                w = want;
+                if (w != 0) heldOpen = true;
+            }
             if (w != have) {
                 session = 0;
                 mic.close();
+                boolean switching = have != 0; // idle <-> speaking keeps what was heard: "hey" may come before the switch
                 have = 0;
-                if (w != 0) {
-                    l.drop(); // nothing heard before the microphone closed can trigger
+                if (w == 0) heldOpen = false;
+                else {
+                    if (!switching) l.drop(); // after a real pause or stop, nothing heard before can trigger
                     if (!mic.open(w == 2)) {
                         fail("the microphone didn't open");
                         break;
@@ -185,6 +202,7 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         }
         session = 0;
         mic.close();
+        heldOpen = false;
         loop = null;
         try {
             ((AutoCloseable) engine).close();

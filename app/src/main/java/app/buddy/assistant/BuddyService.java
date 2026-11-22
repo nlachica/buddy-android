@@ -110,6 +110,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         ChatHub.get(this).addListener(workNotice);
         workNotice.update(); // (clears one left by a process that was killed mid-run)
         bubble.show();
+        WakeWord.ensure(this); // after a reboot or an update nothing else resumes: starts it, or posts the tap to start
         McpServer.load(this); // the tokens of runs that outlived an earlier process of Buddy's
         server = new McpServer(Prefs.token(this), this);
         server.start();
