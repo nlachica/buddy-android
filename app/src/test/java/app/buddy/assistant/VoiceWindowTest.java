@@ -74,4 +74,30 @@ public class VoiceWindowTest {
         wrapped.onEnd("boom");
         assertEquals(List.of("end:boom"), l.got);
     }
+
+    @Test
+    public void phoneFeedStopsAfterTwoEarlyFailuresInARow() { // P6 run-time fallback
+        Voice.PhoneFeed f = new Voice.PhoneFeed();
+        f.started(1000);
+        assertEquals(false, f.failed(2000)); // 1 s after starting: one failure
+        assertTrue(f.on);
+        f.started(10_000);
+        assertTrue(f.failed(11_000)); // the second in a row turns it off
+        assertEquals(false, f.on);
+
+        f = new Voice.PhoneFeed();
+        f.started(1000);
+        f.failed(2000);
+        f.started(10_000);
+        f.ok(); // a window that went fine in between
+        f.started(20_000);
+        f.failed(21_000);
+        assertTrue("not in a row", f.on);
+
+        f.started(30_000);
+        f.failed(34_000); // 4 s after starting: not an early failure
+        f.started(40_000);
+        f.failed(44_000);
+        assertTrue(f.on);
+    }
 }

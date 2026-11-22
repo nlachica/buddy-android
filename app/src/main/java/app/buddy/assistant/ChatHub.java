@@ -1379,6 +1379,7 @@ final class ChatHub {
         if ((ses.awake || ses.scheduledRun || away) && !quiet && ses.parent.isEmpty() && !ses.watch)
             KeepAwake.notifyEnded(app, ses);
         ses.scheduledRun = false;
+        ses.spokenRun = false;
         ses.quietRun = false;
         ses.quietSaid = false;
     }
@@ -1396,7 +1397,7 @@ final class ChatHub {
         if (kind == Bubble.Kind.BUDDY && !viewing.contains(ses) && ses.parent.isEmpty()) ses.unread = true;
         // not during a live voice call: the voice tells the user itself (nor a helper's report, which is for its parent,
         // nor a run from the watch, which speaks on the watch)
-        if (kind == Bubble.Kind.BUDDY && !text.isEmpty() && Prefs.speakReplies(app) && !CodexLive.on() && ses.parent.isEmpty()
+        if (kind == Bubble.Kind.BUDDY && !text.isEmpty() && (Prefs.speakReplies(app) || ses.spokenRun) && !CodexLive.on() && ses.parent.isEmpty()
                 && !ses.watch)
             Voice.speak(app, text);
         Sessions.Msg m = ses.messages.get(ses.messages.size() - 1);

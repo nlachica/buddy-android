@@ -288,3 +288,24 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - Notification ids 13 (listening) and 14 (tap to turn on); request codes 20-22. CI-only: the new `build.yml` step
   ("Check the wake word is in the GitHub APK only"); a dependency that adds `FOREGROUND_SERVICE` to the F-Droid
   manifest would fail it, which is what it is for.
+
+## 2026-11-22 - Step 8 details the plan left open (coder)
+- The window listener stays in `Bubble.talk(turn, window)` (Talk's code, now one method with a nullable turn); its three
+  ends call `WakeWord.heard / nothing / ended`, which check the turn and window number first. `WakeWord` does the rest:
+  `onWake` (barge-in, new `Turn`, one `BuddyWake` "turn N" log line each), `openWindow` (adopt + `feedTo`, else drop),
+  `act` (SEND / AGAIN / END), `send` (Talk's chat, `spokenRun`), `endTurn`, `cancelTurn`. A `Voice.listen` error makes
+  `Bubble.talk` call `WakeWord.endTurn`. A wake while a turn is on, Buddy is listening, a Live call is on or the state
+  isn't IDLE/SPEAKING only drops the loop.
+- `Voice.PhoneFeed` (a small class so the run-time fallback is unit-tested with an injected clock; the instance is
+  `Voice.phoneFeed`) replaces the compile-time `PHONE_FEED`: two fed Phone windows in a row that fail within 3 s of
+  starting turn feeding off for the process. A failure is a recognizer error other than no-match / speech-timeout /
+  `ERROR_CLIENT`, or a foreign recording that cancels the turn (`WakeService` calls `Voice.fedCancelled()` first). Any
+  normal end (a result or no-match) resets the count. A pipe that can't be created makes that window unfed
+  (`WakeWord.unfed()`; the pre-roll is lost).
+- The fed phone window gets Buddy's own end of speech through `MicServer.levels` + `Voice.EndOfSpeech` (as Claude and
+  ChatGPT); `finishListening()` and the recognizer's `onEndOfSpeech` both mark the end of input
+  (`MicServer.stopCapture()`), which is when the pump drains and closes the pipe. `Window.closeFeed()` (in `finish()`)
+  clears `levels`, releases the capture and closes both pipe ends, which ends the pump.
+- The service's clock for detections, speech end and pause causes is `elapsedRealtime` throughout.
+- Not run anywhere: the fed Phone path (needs a recognizer), `Bubble.talk` and `WakeWord.onWake/openWindow` (need the
+  bubble and a phone). They are covered by the post-release device checks in `verify.md`, not by a unit test.

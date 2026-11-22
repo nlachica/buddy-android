@@ -253,7 +253,10 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         wasSpeaking = speaking;
         WakeWord.Inputs in = inputs(now);
         WakeWord.State st = WakeWord.state(in);
-        if ((st == WakeWord.State.OFF || st == WakeWord.State.PAUSED) && WakeWord.turnOn()) WakeWord.cancelTurn();
+        if ((st == WakeWord.State.OFF || st == WakeWord.State.PAUSED) && WakeWord.turnOn()) {
+            if (in.foreignRecordings > 0 && !in.call) Voice.fedCancelled(); // 2 of these in a row: Phone input is no longer fed
+            WakeWord.cancelTurn();
+        }
         switch (st) {
             case OFF:
                 Log.i(TAG, "off");
@@ -278,6 +281,11 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
                 show(R.string.wake_listening);
         }
         main.postDelayed(tick, speaking ? 100 : 500);
+    }
+
+    /** What the microphone should be right now. */
+    WakeWord.State stateNow() {
+        return WakeWord.state(inputs(SystemClock.elapsedRealtime()));
     }
 
     /** When Buddy's speech last ended (elapsedRealtime ms; 0: never spoke). */

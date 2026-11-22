@@ -265,6 +265,13 @@ final class MicServer {
         endCapture();
     }
 
+    /** The id of the current capture (for a reader of an adopted one). */
+    static int capture() {
+        synchronized (chunks) {
+            return captureId;
+        }
+    }
+
     /** The current capture is one a wake turn adopted. */
     static boolean adopted() {
         synchronized (chunks) {

@@ -1634,6 +1634,14 @@ final class Bubble implements ChatHub.Listener {
 
     /** Listen without opening the chat: waves under the bubble, the words beside it, sent when you pause. */
     private void talk() {
+        talk(null, 0);
+    }
+
+    /**
+     * Talk's listening. A "hey buddy" turn passes itself and its window number: what the window hears then goes to
+     * WakeWord (which sends the request, or listens once more), not straight to the chat.
+     */
+    void talk(final WakeWord.Turn turn, final int window) {
         if (!Voice.micAllowed(svc)) {
             toast(svc.getString(R.string.bubble_allow_mic_tap_bubble));
             svc.startActivity(new android.content.Intent(svc, MainActivity.class)
@@ -1649,6 +1657,10 @@ final class Bubble implements ChatHub.Listener {
             @Override
             public void onFinal(String text) {
                 talkDone();
+                if (turn != null) {
+                    WakeWord.heard(turn, window, text);
+                    return;
+                }
                 Sessions.Session ses = sessions.current;
                 if (ses == null) {
                     ses = hub.create(Prefs.backend(svc));
@@ -1659,9 +1671,17 @@ final class Bubble implements ChatHub.Listener {
             }
 
             @Override
+            public void onNothing(String message) {
+                talkDone();
+                if (turn != null) WakeWord.nothing(turn, window, message);
+                else if (message != null) toast(message);
+            }
+
+            @Override
             public void onEnd(String message) {
                 talkDone();
-                if (message != null) toast(message);
+                if (turn != null) WakeWord.ended(turn, window, message);
+                else if (message != null) toast(message);
             }
 
             @Override
@@ -1677,6 +1697,7 @@ final class Bubble implements ChatHub.Listener {
         });
         if (err != null) {
             toast(err);
+            if (turn != null) WakeWord.endTurn(turn);
             return;
         }
         talkListening = true;

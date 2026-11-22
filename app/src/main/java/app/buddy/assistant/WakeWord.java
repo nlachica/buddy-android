@@ -3,7 +3,10 @@ package app.buddy.assistant;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 import android.util.Log;
+import android.widget.Toast;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -89,7 +92,8 @@ final class WakeWord {
 
     private static Turn turn;
     private static boolean turnFed;
-    private static int window, capture;
+    /** The turn's current listening window (a counter: callbacks of an earlier window are ignored) and its MicServer capture (0: unfed). */
+    private static int window, capture, turnSeq;
 
     static boolean turnOn() {
         return turn != null;
@@ -99,13 +103,8 @@ final class WakeWord {
         return turnFed;
     }
 
-    /**
-     * Ends the turn without sending anything (a call, another app's recording, the switch going off, a hold that ran out):
-     * its window is cleared so a late transcript is ignored, the recognizer is cancelled, the adopted audio dropped and
-     * the loop forgets what it holds.
-     */
-    static void cancelTurn() {
-        if (turn == null) return;
+    /** Forgets the turn and its window, drops the adopted audio and what the loop holds; the microphone may reopen. */
+    private static void clear() {
         int c = capture;
         turn = null;
         turnFed = false;
@@ -114,14 +113,142 @@ final class WakeWord {
         if (c != 0) MicServer.release(c);
         WakeService s = WakeService.get();
         if (s != null && s.loop() != null) s.loop().drop();
+        WakeService.poke();
+    }
+
+    /**
+     * Ends the turn without sending anything (a call, another app's recording, the switch going off, a hold that ran out):
+     * its window is cleared so a late transcript is ignored, and the recognizer is cancelled.
+     */
+    static void cancelTurn() {
+        if (turn == null) return;
+        clear();
         Voice.stopListening();
     }
 
-    /** A detection (the capture thread posted it here). Nothing is sent yet: it is logged and the loop detects again. */
-    static void onWake(int seq, long detectedAt) {
-        Log.i("BuddyWake", "wake " + seq);
+    /** The turn is over (sent, nothing heard, an error, a tap): only if it is still the current one. */
+    static void endTurn(Turn t) {
+        if (t == turn) clear();
+    }
+
+    /** A fed window turned out not to be (its pipe couldn't be made): the recognizer records by itself, so the turn is unfed. */
+    static void unfed() {
+        if (turn == null) return;
+        turnFed = false;
+        capture = 0;
         WakeService s = WakeService.get();
         if (s != null && s.loop() != null) s.loop().drop();
+    }
+
+    /** A detection (the capture thread posted it here). */
+    static void onWake(int seq, long detectedAt) {
+        BuddyService svc = BuddyService.get();
+        WakeService s = WakeService.get();
+        if (svc == null || s == null || s.loop() == null) return;
+        State st = s.stateNow();
+        if (turn != null || (st != State.IDLE && st != State.SPEAKING) || Voice.listening() || CodexLive.on() || svc.bubble() == null) {
+            s.loop().drop(); // something else has the microphone or the turn already
+            return;
+        }
+        // playback overlapped the phrase: the wake word itself cuts the speech (the barge-in), and "stop" is then not a request
+        boolean cut = overlapped(Voice.isSpeaking(), s.speechEndedAt(), detectedAt);
+        if (cut) {
+            Voice.stopSpeaking();
+            try {
+                svc.getSystemService(Vibrator.class).vibrate(VibrationEffect.createOneShot(30, VibrationEffect.DEFAULT_AMPLITUDE));
+            } catch (Exception ignored) {
+            }
+        }
+        turn = new Turn(cut);
+        Log.i("BuddyWake", "turn " + ++turnSeq + " (wake " + seq + (cut ? ", speech cut" : "") + ")");
+        openWindow();
+    }
+
+    /** One listening window of the turn: fed with the detector's audio where the input takes it, else the recognizer records itself. */
+    private static void openWindow() {
+        BuddyService svc = BuddyService.get();
+        WakeService s = WakeService.get();
+        Bubble bubble = svc == null ? null : svc.bubble();
+        if (bubble == null || s == null || s.loop() == null) {
+            cancelTurn();
+            return;
+        }
+        Turn t = turn;
+        int w = ++window;
+        capture = 0;
+        turnFed = false;
+        if (Voice.takesFeed(svc)) {
+            int c = MicServer.adopt();
+            if (c != 0 && s.loop().feedTo(c)) {
+                capture = c;
+                turnFed = true;
+            } else if (c != 0) {
+                MicServer.release(c);
+            }
+        }
+        if (!turnFed) s.loop().drop(); // Voice.listen's hook then closes the microphone
+        bubble.talk(t, w);
+    }
+
+    private static boolean stale(Turn t, int w) {
+        return t != turn || w != window;
+    }
+
+    /** A window ended with this transcript. */
+    static void heard(Turn t, int w, String text) {
+        if (!stale(t, w)) act(t, t.heard(text));
+    }
+
+    /** A window ended with nothing heard (message: what Talk would show). */
+    static void nothing(Turn t, int w, String message) {
+        if (stale(t, w)) return;
+        Turn.Step step = t.nothing();
+        if (step.act == Turn.Act.END && message != null) toast(message);
+        act(t, step);
+    }
+
+    /** A window ended without a result: an error (message) or a cancel. No second window. */
+    static void ended(Turn t, int w, String message) {
+        if (stale(t, w)) return;
+        if (message != null) toast(message);
+        endTurn(t);
+    }
+
+    private static void act(Turn t, Turn.Step step) {
+        switch (step.act) {
+            case AGAIN:
+                openWindow();
+                break;
+            case SEND:
+                endTurn(t);
+                send(step.request);
+                break;
+            default:
+                endTurn(t);
+        }
+    }
+
+    /** To the chat Talk uses (a new one with the default agent if there is none); its reply is spoken. */
+    private static void send(String request) {
+        BuddyService svc = BuddyService.get();
+        if (svc == null) return;
+        ChatHub hub = ChatHub.get(svc);
+        Sessions.Session ses = hub.sessions.current;
+        if (ses == null) {
+            ses = hub.create(Prefs.backend(svc));
+            hub.select(ses);
+        }
+        ses.spokenRun = true;
+        String e = hub.send(ses, request);
+        if (e != null) {
+            ses.spokenRun = false;
+            toast(e);
+        }
+    }
+
+    private static void toast(String message) {
+        BuddyService svc = BuddyService.get();
+        if (svc != null) Toast.makeText(svc, message, Toast.LENGTH_SHORT).show();
     }
 
     // ---- the transcript
