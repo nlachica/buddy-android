@@ -1,10 +1,11 @@
 package app.buddy.assistant;
 
 import java.util.ArrayList;
+import java.util.Locale;
 
 /**
  * What the detector's capture thread does with each block of audio, with no android.* in it so it is unit-tested.
- * DETECT: blocks go to {@link WakeFeatures}; nothing leaves the loop. On a detection: HOLD, and the host hears
+ * DETECT: blocks go to {@link WakeFeatures}; nothing leaves the loop. On a detection (N consecutive hops at or above the {@link Rule}'s threshold): HOLD, and the host hears
  * {@link Host#onWake} (the main thread takes it from there). HOLD: the loop keeps everything heard, pre-roll (the wake
  * phrase included) first, however long the main thread or a transcript takes, up to {@link #HOLD_LIMIT}. FEED: what is
  * held, then every new block, goes to the sink; when the sink refuses (the end of input was marked) it is HOLD again,
@@ -19,7 +20,37 @@ final class WakeLoop {
         boolean feed(int capture, byte[] pcm);
     }
 
+    /** What counts as a wake: {@code hops} consecutive scored hops (120 ms each) at or above {@code threshold}. */
+    static final class Rule {
+        static final Rule LOW = new Rule("low", 0.7f, 3), MEDIUM = new Rule("medium", 0.5f, 3), HIGH = new Rule("high", 0.3f, 2);
+        final String name;
+        final float threshold;
+        final int hops;
+
+        Rule(String name, float threshold, int hops) {
+            this.name = name;
+            this.threshold = threshold;
+            this.hops = hops;
+        }
+
+        /** low or high; anything else (null too) is medium. */
+        static Rule of(String s) {
+            return "low".equals(s) ? LOW : "high".equals(s) ? HIGH : MEDIUM;
+        }
+
+        @Override
+        public String toString() {
+            return name + String.format(Locale.ROOT, " (%.2f x %d)", threshold, hops);
+        }
+    }
+
     interface Host {
+        /** The rule for the next hop (capture thread, every hop): the sensitivity setting, read as it is now. */
+        Rule rule();
+
+        /** One line for the log: a wake or a near miss, with its scores. */
+        void log(String line);
+
         /** A detection (capture thread): {@code detectedAt} is the clock the blocks were stamped with. */
         void onWake(int seq, long detectedAt);
 
@@ -43,6 +74,10 @@ final class WakeLoop {
     private final ArrayList<byte[]> held = new ArrayList<>();
     private int heldBytes, fedBytes, capture, seq;
     private boolean failed;
+    private Rule rule;
+    private int run;
+    private float peak;
+    private final StringBuilder hops = new StringBuilder();
 
     WakeLoop(WakeFeatures features, Sink sink, Host host) {
         this.features = features;
@@ -67,11 +102,30 @@ final class WakeLoop {
                     host.onFailed(e);
                     break;
                 }
-                if (score >= WakeFeatures.THRESHOLD) {
-                    mode = Mode.HOLD;
-                    short[] pre = features.preRoll();
-                    for (int i = 0; i < pre.length; i += CHUNK) hold(bytes(pre, i, Math.min(CHUNK, pre.length - i)));
-                    host.onWake(++seq, now);
+                if (score < 0) break; // no hop completed in this block (a block is 40 ms, a hop 120 ms)
+                Rule r = host.rule();
+                if (r != rule) { // the sensitivity changed: start over
+                    rule = r;
+                    run = 0;
+                }
+                if (score >= r.threshold) {
+                    if (run++ == 0) {
+                        peak = 0;
+                        hops.setLength(0);
+                    }
+                    peak = Math.max(peak, score);
+                    hops.append(' ').append(fmt(score));
+                    if (run >= r.hops) {
+                        run = 0;
+                        mode = Mode.HOLD;
+                        short[] pre = features.preRoll();
+                        for (int i = 0; i < pre.length; i += CHUNK) hold(bytes(pre, i, Math.min(CHUNK, pre.length - i)));
+                        host.log("wake " + (seq + 1) + ": " + r + " peak " + fmt(peak) + " hops" + hops);
+                        host.onWake(++seq, now);
+                    }
+                } else if (run > 0) {
+                    run = 0;
+                    host.log("near miss: " + r + " peak " + fmt(peak) + " hops" + hops + " then " + fmt(score));
                 }
                 break;
             case HOLD:
@@ -114,7 +168,7 @@ final class WakeLoop {
     synchronized void drop() {
         mode = Mode.DETECT;
         held.clear();
-        heldBytes = fedBytes = 0;
+        heldBytes = fedBytes = run = 0;
         features.reset();
     }
 
@@ -126,6 +180,10 @@ final class WakeLoop {
     private void expire() {
         drop();
         host.onHoldExpired(seq);
+    }
+
+    private static String fmt(float score) {
+        return String.format(Locale.ROOT, "%.3f", score);
     }
 
     private static byte[] bytes(short[] pcm, int from, int n) {
