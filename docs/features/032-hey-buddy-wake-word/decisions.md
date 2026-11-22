@@ -389,3 +389,11 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - F3: one class lock covers `CodexDictation`'s page check + `callThread` publish and cancel's `web`/`callThread` swap.
 - F4: phone Live (not a watch call) waits for `WakeWord.release()` and fails with `dictation_mic_failed` if it doesn't.
 - All CI-only: no JVM runs here.
+
+## 2026-11-22 - Revert the round 3 F3 fix; F3 stays an accepted race
+- Options: a private lock for page + call id (another coder/review round); revert 774e630.
+- Choice: revert, because the fix took `CodexDictation.class` on the main thread while `ensureServer` can hold it for
+  up to 60 s (scoped review round 4 F1: UI freeze), which is worse than the race it closed (a ChatGPT dictation
+  cancelled mid-startup and replaced in the same instant can end the replacement). Per the earlier ruling, F3 is
+  accepted; a private-lock fix can be a follow-up. Round 3 F1, F2, F4 stay fixed (CI green on a3e161a, run 45004142469).
+- By: orchestrator (claude-opus-5-5)
