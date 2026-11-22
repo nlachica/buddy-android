@@ -84,3 +84,23 @@ F7 [nit] The recorder exposes an unused state check - `app/src/main/java/app/bud
 All 68 tests in the six local wake logic, capture, voice-window and settings suites passed against the reviewed Java changes using Android stubs. All three model checksums matched. The real-model scores are from CI. The release APK checks did not complete, and the physical-phone checks remain pending under the orchestrator's ruling.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+Details in decisions.md ("Code review round 2"). No JVM runs on this phone (Gradle: "Failed to mark memory page as
+executable"), so every test below is **CI-only, not run here**.
+
+- F1: fixed in 083d29b: `THRESHOLD` = 0.12 (between the sound-alike 0.057 and the augmented 0.172). Fixtures and
+  assertions kept; silence and noise at 0.12 are checked by the next CI run (the message prints them), unverified here.
+- F2: fixed in fe2bd31: each main-thread callback re-checks the event's thread against the current call; `CodexDictationTest`
+  queues an error for A, replaces A with B, dispatches it and checks B stays.
+- F3: fixed in f2c4a48: `closeNow()`/`WakeWord.release()` report whether the recorder is released; `Voice.listen` fails the
+  window (`dictation_mic_failed`) if not, and the pipe-failure path closes the detector's recorder the same way before
+  the unfed recognizer starts. No unit test: needs a Service, an AudioRecord and a recognizer; post-release device check.
+- F4: fixed in 0231a9b: speech is set when the agent takes the note or a turn starts with that text; a live send consumes
+  the request only after delivery. `SpokenAskTest`: queued note leaves the running turn silent, taking the note speaks,
+  a failed delivery retried as a new run speaks, another turn clears the wait.
+- F5: fixed in a7837fc: `WakeLoop` catches a scoring failure, goes dead and calls `Host.onFailed`; the service marks the
+  detector broken and shuts down (microphone and engine released by the capture thread's end). `WakeLoopTest` has a
+  throwing engine.
+- F6: fixed in a7837fc: the engine owns and closes its `SessionOptions`, also when the constructor fails.
+- F7: fixed in a7837fc: `WakeMic.isOpen()` removed.

@@ -342,3 +342,28 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   A note added to a run that is going speaks that run's reply. Not unit-tested (`ChatHub` needs a service).
 - F13: `Prefs.WAKE_WORD_DEFAULT` and `SettingsTool.heyBuddyReady(value, available)` are the seams the test uses (the
   JVM can't make the SDK check true or read a `SharedPreferences`).
+
+## 2026-11-22 - Code review round 2 details (coder)
+- Plan rulings from the orchestrator stand: this entry overrides plan.md (probe step 4 dropped; P1/P2/P6 are post-release
+  checks; no `probe.md` is required).
+- F1: `THRESHOLD` 0.5 -> 0.12, from CI run 45002190404: clean 0.991, augmented 0.172, sound-alike 0.057; 0.12 is between
+  the last two, as the reviewer proposed. Fixtures and assertions are unchanged. **Silence and the noise control at 0.12
+  are unverified here (no JVM on this phone runs ONNX Runtime or Gradle): the next CI run is the check**, and its
+  failure message prints them. A lower margin to the sound-alike (0.063) than to the augmented clip (0.052) is what the
+  data gives; false accepts in daily use are a post-release device check (P-checks).
+- F2: `CodexDictation` main-thread callbacks (sdp, transcript, error) each re-check the event's thread against
+  `callThread`; `callError(thread, message)` is the tested seam (`listener` and `callThread` are package-private for it).
+- F3: `WakeService.closeNow()` returns whether the recorder was released; `WakeWord.release()` passes it on. `Voice.listen`
+  fails with `dictation_mic_failed` (existing string, no new translation) if it isn't, before any engine starts; a pipe
+  that can't be made closes the detector's recorder the same way and fails the window if that doesn't work. Not unit-tested
+  (a Service, an AudioRecord and a recognizer); post-release device check.
+- F4: the speech flag is no longer set when a note is queued. `ChatHub.notesTaken` (agent took the note in a tool result)
+  or `turnStarts` (a turn starts with that text) sets it; a live send calls `turnStarts` only once the helper confirmed
+  delivery, so a failed one keeps `spokenAsk` for the retry (notes, new run or live again).
+- F5: `WakeLoop.block` catches a `RuntimeException` from scoring, goes dead (ignores further blocks) and calls
+  `Host.onFailed`; `WakeService` sets `broken` (no restart in this process) and shuts down, and the capture thread's
+  normal end releases the microphone and the engine.
+- F6: `OnnxWakeEngine` keeps its `SessionOptions` and closes it in `close()`; a failed constructor closes the sessions made
+  so far and the options. F7: `WakeMic.isOpen()` removed.
+- Not run: nothing. No JVM works on this phone ("Failed to mark memory page as executable"), so the new and changed tests
+  (`WakeLoopTest`, `CodexDictationTest`, `SpokenAskTest`) and the ONNX tests are CI-only.
