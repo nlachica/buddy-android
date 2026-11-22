@@ -310,6 +310,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
     @Override
     public boolean onUnbind(android.content.Intent intent) {
         A11yWatch.lost(this, "unbind");
+        WakeWord.stop(this);
         return super.onUnbind(intent);
     }
 
@@ -334,6 +335,7 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         if (bubble != null) bubble.remove();
         if (control != null) control.end();
         instance = null;
+        WakeWord.stop(this);
         A11yWatch.lost(this, "destroy");
         super.onDestroy();
     }

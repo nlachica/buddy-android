@@ -141,7 +141,7 @@ final class AutoPause {
 
     private long liveUntil;
 
-    private boolean callNow() {
+    boolean callNow() {
         // Buddy's own communication mode (live voice, its tail while the page lets go, or AudioRoute's) isn't a call
         long now = SystemClock.elapsedRealtime();
         if (CodexLive.on()) liveUntil = now + 3000;

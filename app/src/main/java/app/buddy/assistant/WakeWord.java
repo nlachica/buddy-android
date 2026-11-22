@@ -1,6 +1,9 @@
 package app.buddy.assistant;
 
+import android.content.Context;
+import android.content.Intent;
 import android.os.Build;
+import android.util.Log;
 
 import java.util.Arrays;
 import java.util.HashSet;
@@ -34,6 +37,91 @@ final class WakeWord {
         } catch (ClassNotFoundException | LinkageError e) {
             return false;
         }
+    }
+
+    // ---- the service's entry points (main thread)
+
+    /** What the settings and the phone allow: the switch is on, the microphone is granted, Buddy's service is connected. */
+    static boolean wanted(Context c) {
+        return available() && Prefs.wakeWord(c) && Voice.micAllowed(c) && BuddyService.get() != null;
+    }
+
+    /**
+     * The one way the service starts or stops; idempotent and cheap, called wherever something it depends on changes
+     * (Buddy's service connecting or going, the switch, the permission, every Buddy screen resuming). Android may
+     * refuse a microphone service started from the background: then one quiet notification offers a tap to start it.
+     */
+    static void ensure(Context c) {
+        if (!available()) return;
+        c = c.getApplicationContext();
+        if (!wanted(c)) {
+            stop(c);
+            return;
+        }
+        if (WakeService.running() || WakeService.broken) return;
+        try {
+            c.startForegroundService(new Intent(c, WakeService.class));
+            Log.i("BuddyWake", "start requested");
+        } catch (IllegalStateException | SecurityException e) { // ForegroundServiceStartNotAllowedException, or the permission is gone
+            Log.i("BuddyWake", "start refused: " + e);
+            WakeService.tapToStart(c);
+        }
+    }
+
+    /** No service, no notification, no tap prompt. */
+    static void stop(Context c) {
+        if (!available()) return;
+        if (WakeService.running()) c.stopService(new Intent(c, WakeService.class));
+        WakeService.cancelTap(c);
+    }
+
+    /**
+     * Buddy's own voice path is starting (Voice.listen): the detector's microphone closes at once, unless a wake
+     * window has just adopted MicServer for it. Android's recognizer runs in another app and must not start against an
+     * open microphone.
+     */
+    static void release() {
+        WakeService s = WakeService.get();
+        if (s != null && !MicServer.adopted()) s.closeNow();
+    }
+
+    // ---- the turn on now (main thread)
+
+    private static Turn turn;
+    private static boolean turnFed;
+    private static int window, capture;
+
+    static boolean turnOn() {
+        return turn != null;
+    }
+
+    static boolean turnFed() {
+        return turnFed;
+    }
+
+    /**
+     * Ends the turn without sending anything (a call, another app's recording, the switch going off, a hold that ran out):
+     * its window is cleared so a late transcript is ignored, the recognizer is cancelled, the adopted audio dropped and
+     * the loop forgets what it holds.
+     */
+    static void cancelTurn() {
+        if (turn == null) return;
+        int c = capture;
+        turn = null;
+        turnFed = false;
+        capture = 0;
+        window++;
+        if (c != 0) MicServer.release(c);
+        WakeService s = WakeService.get();
+        if (s != null && s.loop() != null) s.loop().drop();
+        Voice.stopListening();
+    }
+
+    /** A detection (the capture thread posted it here). Nothing is sent yet: it is logged and the loop detects again. */
+    static void onWake(int seq, long detectedAt) {
+        Log.i("BuddyWake", "wake " + seq);
+        WakeService s = WakeService.get();
+        if (s != null && s.loop() != null) s.loop().drop();
     }
 
     // ---- the transcript

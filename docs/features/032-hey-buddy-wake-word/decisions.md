@@ -270,3 +270,21 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   exist yet) to both, as the plan lists. The switch shows only where `available()` holds, as §3 says; asking for the
   microphone uses request code `REQ_MIC` and the screen's `onResume` re-renders (so the note drops "Needs the
   microphone" after the dialog).
+
+## 2026-11-22 - Step 7 details the plan left open (coder)
+- `MicServer` gains `mine(session)` and `serving()`: it keeps the audio session ids of the AudioRecords it runs (the
+  capture thread's and the socket's), so `WakeService` can leave them out of the foreign-recording count (§5 row 3).
+  `AutoPause.callNow()` is simply made package-visible (no `inCall()` alias; the name was taken by a field).
+- `WakeWord.wanted(ctx)` (setting on, microphone granted, `available()`, `BuddyService` connected) is the one test for
+  "should it run", used by `ensure` and, as `Inputs.enabled`, by the service's tick. `BuddyService` unbinding or
+  being destroyed calls `WakeWord.stop` (not `ensure`: `BuddyService.get()` is still set in `onUnbind`).
+- The capture thread opens, reads and closes the microphone; the main thread only sets `want` (0 closed, 1 idle,
+  2 speaking). A tick waits (100 ms) while the models load or the recorder is opening, because the detector's own
+  session isn't known yet and its recording would be counted as foreign (a pause-reopen flap).
+- The models load on the capture thread. If they don't load (`WakeService.broken`), the service stops without the tap
+  notification and `ensure` doesn't try again in this process: a broken build is not a "tap to retry" case.
+- Until step 8, `WakeWord.onWake` only logs ("wake <n>") and drops the loop; `onHoldExpired` cancels the turn.
+  `WakeWord.release()` exists but `Voice.listen` doesn't call it yet (step 8, as the plan lists).
+- Notification ids 13 (listening) and 14 (tap to turn on); request codes 20-22. CI-only: the new `build.yml` step
+  ("Check the wake word is in the GitHub APK only"); a dependency that adds `FOREGROUND_SERVICE` to the F-Droid
+  manifest would fail it, which is what it is for.

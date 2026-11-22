@@ -336,8 +336,11 @@ final class SettingsTool {
 
     /** Settings → Voice. */
     private static void voice(BuddyService svc, List<Setting> l) {
-        // 032: the wake word (WakeWord.ensure, added with the service, starts or stops the listening)
-        l.add(onOff("hey_buddy", () -> Prefs.wakeWord(svc), on -> Prefs.setWakeWord(svc, on)).ready(v -> {
+        // 032: the wake word (WakeWord.ensure starts or stops the listening)
+        l.add(onOff("hey_buddy", () -> Prefs.wakeWord(svc), on -> {
+            Prefs.setWakeWord(svc, on);
+            WakeWord.ensure(svc);
+        }).ready(v -> {
             if (v.equals("on") && !WakeWord.available()) {
                 throw new IllegalArgumentException("hey_buddy needs Android 14 or newer and the GitHub build of Buddy");
             }

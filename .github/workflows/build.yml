@@ -73,6 +73,7 @@ jobs:
           # named so nobody picks it by mistake: it doesn't update itself (F-Droid's Binaries line must match this name)
           cp "$fd" "dist/fdroid-check-only-${GITHUB_REF_NAME//\//-}.apk"
           echo "FDROID_APK=$PWD/dist/fdroid-check-only-${GITHUB_REF_NAME//\//-}.apk" >> "$GITHUB_ENV"
+          echo "GH_APK=$PWD/dist/buddy-${GITHUB_REF_NAME//\//-}.apk" >> "$GITHUB_ENV"
           # the Galaxy Watch app: the same package and signing key as buddy.apk, which the Wear Data Layer requires
           wear=$(find wear/build/outputs/apk/release -name '*.apk' | head -1)
           cp "$wear" "dist/buddy-watch-${GITHUB_REF_NAME//\//-}.apk"
@@ -83,6 +84,24 @@ jobs:
       - name: Check the F-Droid APK has no Google code
         run: '! unzip -p "$FDROID_APK" "classes*.dex" | grep -a "Lcom/google/android/gms/" >/dev/null'
         # no -q: grep stopping at the first hit can break unzip's pipe, and with pipefail that would hide the hit
+
+      # "Hey buddy" (032) is in the GitHub build only: the F-Droid APK has no ONNX Runtime, models, microphone service or
+      # foreground-service permission (so its reproducibility check sees plain Java only); the GitHub APK has all of them
+      - name: Check the wake word is in the GitHub APK only
+        run: |
+          export PATH="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1):$PATH" # aapt2
+          fd_files=$(unzip -l "$FDROID_APK"); gh_files=$(unzip -l "$GH_APK")
+          fd_perms=$(aapt2 dump permissions "$FDROID_APK"); gh_perms=$(aapt2 dump permissions "$GH_APK")
+          fd_manifest=$(aapt2 dump xmltree --file AndroidManifest.xml "$FDROID_APK")
+          gh_manifest=$(aapt2 dump xmltree --file AndroidManifest.xml "$GH_APK")
+          [ -z "$(grep -E 'libonnxruntime|assets/wakeword/' <<<"$fd_files")" ]
+          [ -z "$(grep FOREGROUND_SERVICE <<<"$fd_perms")" ]
+          [ -z "$(grep WakeService <<<"$fd_manifest")" ]
+          [ "$(grep -c 'assets/wakeword/.*\.onnx' <<<"$gh_files")" = 3 ]
+          [ "$(grep -c 'libonnxruntime\.so' <<<"$gh_files")" = 1 ] # arm64 only
+          grep -q 'lib/arm64-v8a/libonnxruntime\.so' <<<"$gh_files"
+          grep -q 'android.permission.FOREGROUND_SERVICE_MICROPHONE' <<<"$gh_perms"
+          grep -q WakeService <<<"$gh_manifest"
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:

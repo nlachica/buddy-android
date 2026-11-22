@@ -679,6 +679,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
             vc.addView(switchRow(this, getString(R.string.setup_wake), getString(needsMic ? R.string.setup_wake_needs_mic
                     : R.string.setup_wake_info), Prefs.wakeWord(this), on -> {
                 Prefs.setWakeWord(this, on);
+                WakeWord.ensure(this);
                 if (on && !Voice.micAllowed(this)) Voice.askMic(this, REQ_MIC);
                 render();
             }));

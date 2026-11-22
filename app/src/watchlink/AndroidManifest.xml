@@ -1,9 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The link to the user's Galaxy Watch (the wear/ module). Only the github build includes this folder, because it
-     needs Google Play services; see app/build.gradle.kts. -->
+<!-- What only the github build has: the link to the user's Galaxy Watch (the wear/ module), which needs Google Play
+     services, and the "hey buddy" listening service with its models; see app/build.gradle.kts. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
     <application>
+        <!-- "Hey buddy": listens on the microphone while it is on (WakeService); started by WakeWord.ensure -->
+        <service
+            android:name=".WakeService"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
         <!-- Play services starts this when the watch app (same package, same signing key) sends a message -->
         <service
             android:name=".WatchLink"

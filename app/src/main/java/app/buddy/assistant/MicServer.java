@@ -60,6 +60,8 @@ final class MicServer {
     private static Host host;
     private static String token;
     private static volatile int active;
+    /** Audio sessions of the AudioRecords MicServer runs, so WakeWord can tell them from other apps' recordings. */
+    private static final java.util.Set<Integer> sessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private MicServer() {
     }
@@ -134,6 +136,8 @@ final class MicServer {
         } catch (Exception e) {
             return false;
         }
+        final int session = r.getAudioSessionId();
+        sessions.add(session);
         synchronized (chunks) {
             chunks.clear();
             pullChunk = pullOff = 0;
@@ -162,6 +166,7 @@ final class MicServer {
             } catch (Exception ignored) {
             }
             r.release();
+            sessions.remove(session);
             synchronized (chunks) {
                 chunks.notifyAll();
             }
@@ -192,6 +197,16 @@ final class MicServer {
 
     static boolean recording() {
         return recording;
+    }
+
+    /** This audio session is one of the recordings MicServer runs (the Terminal's, a dictation's), not another app's. */
+    static boolean mine(int session) {
+        return sessions.contains(session);
+    }
+
+    /** A program in Buddy's Linux is recording through the socket now. */
+    static boolean serving() {
+        return active > 0;
     }
 
     /** The user finished talking: stop the microphone; recorders still get what was captured. */
@@ -327,6 +342,7 @@ final class MicServer {
                     AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate)); // ~0.5 s of buffer
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) return;
             rec.startRecording();
+            sessions.add(rec.getAudioSessionId());
             listening(+1);
             OutputStream out = s.getOutputStream();
             byte[] buf = new byte[Math.max(min, 3200)];
@@ -346,6 +362,7 @@ final class MicServer {
                     rec.stop();
                 } catch (Exception ignored) {
                 }
+                sessions.remove(rec.getAudioSessionId());
                 rec.release();
                 listening(-1);
             }
