@@ -261,7 +261,8 @@ final class ChatHub {
     /**
      * What the bubble's Talk and "hey buddy" send: to the current chat (a new one with the default agent if there is
      * none). spoken: this request's reply is read aloud even with read aloud off; it is tied to this text, so it
-     * reaches the turn that carries it (now, as a note of the run going, or queued until that run ends), not a later one.
+     * reaches the turn that carries it (when the agent takes it as a note, or a turn starts with it, also after a
+     * failed delivery), not the answer of a run that was going, nor a later turn.
      */
     String sendTalk(String text, boolean spoken) {
         Sessions.Session ses = sessions.current;
@@ -272,14 +273,21 @@ final class ChatHub {
         if (spoken) ses.spokenAsk = text.trim();
         String e = send(ses, text);
         if (e != null) ses.spokenAsk = null;
-        else if (ses.spokenAsk != null && ses.running) ses.spokenRun = true; // a note of the run going: that run's answer
         return e;
     }
 
     /** A turn starts with this text: its reply is spoken if it is the "hey buddy" request that waited (either way the wait ends). */
-    private static void turnStarts(Sessions.Session ses, String text) {
+    static void turnStarts(Sessions.Session ses, String text) {
         ses.spokenRun = ses.spokenAsk != null && text.contains(ses.spokenAsk); // contains: notes left at a run's end are joined
         ses.spokenAsk = null;
+    }
+
+    /** The agent took these notes with a tool result: the "hey buddy" request among them is being answered now. */
+    static void notesTaken(Sessions.Session ses, String notes) {
+        if (ses.spokenAsk != null && notes.contains(ses.spokenAsk)) {
+            ses.spokenRun = true;
+            ses.spokenAsk = null;
+        }
     }
 
     /** A notification rule's run (see Triggers): the chat shows a short line, the agent gets the whole prompt. */
@@ -1177,12 +1185,15 @@ final class ChatHub {
     private void sendLive(Sessions.Session ses, String text, boolean note) {
         if (!note) add(ses, Bubble.Kind.USER, text);
         ses.turnOver = false; // a turn is starting: later messages are updates to it
-        turnStarts(ses, text);
         final int run = ses.runId; // a failed send must not be retried into this same run's closed input
         String forAgent = note ? "(Added while you were working; if it asks something, answer it:) " + text : text;
         try {
             Helper.run(app, code -> {
-                if (code != 0) main.post(() -> leftover(ses, text, run));
+                // delivered: only now does the turn carry a "hey buddy" request (a failed one keeps it for the retry)
+                main.post(() -> {
+                    if (code != 0) leftover(ses, text, run);
+                    else turnStarts(ses, text);
+                });
             }, "say", ses.id, forAgent);
         } catch (Exception e) {
             leftover(ses, text, run);
@@ -1297,6 +1308,7 @@ final class ChatHub {
                 if (s.notes.isEmpty()) continue;
                 joined = android.text.TextUtils.join("\n", s.notes);
                 s.notes.clear();
+                notesTaken(s, joined);
             }
             main.post(() -> {
                 add(s, Bubble.Kind.STEP, app.getString(R.string.hub_note_passed));
