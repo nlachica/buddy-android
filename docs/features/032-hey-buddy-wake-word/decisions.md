@@ -224,3 +224,15 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - **Execution:** the coder runs the remaining steps in chunks (1-3, 5-6, 7-8, 9-10) so each fits the 1 h run limit,
   then `code-loop --ci` reviews the whole branch.
 - By: orchestrator (claude-opus-5-5)
+
+## 2026-11-22 - Step 1 details the plan left open (coder)
+- `WakeFeatures.feed` returns the **highest** score of the hops completed in that call (not the newest), so a block
+  spanning two hops can't hide a detection; with 40 ms blocks it is the same. Before four groups are in, a hop scores 0.
+- One 24000-sample ring serves both the 1.08 s mel window and the 1.5 s pre-roll. `WakeFeatures.THRESHOLD` (0.5) and
+  `WakeFeatures.SCALE` (1 = int16 range, as in training) are the two constants a CI failure of `OnnxWakeEngineTest`
+  would flip (SCALE to 1/32768f). **Not run locally**: ONNX Runtime's glibc native library does not initialise on the
+  phone's Alpine (gcompat tried: the library loads, `OrtEnvironment` creation then throws). So the clip test is CI-only
+  and the scale is unverified until CI runs.
+- Gradle: the unit-test runtime classpath of the github flavor excludes `onnxruntime-android` (the JVM
+  `onnxruntime` jar, same classes, is what loads natively on the CI runner). CI-only, unverified here.
+- `OnnxWakeEngine` is public with a public constructor `(classifier, mel, embedding)` so `src/main` can reach it by name.

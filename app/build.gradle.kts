@@ -23,6 +23,8 @@ android {
         targetSdk = 36
         versionCode = appVersionCode
         versionName = appVersionName
+        // ONNX Runtime (github flavor, the wake word) brings four ABIs; phones that run Buddy are arm64
+        ndk.abiFilters += "arm64-v8a"
     }
 
     // Release signing comes from environment variables (set as GitHub Actions secrets).
@@ -54,6 +56,13 @@ android {
         java.srcDir("src/watchlink/java")
         res.srcDir("src/watchlink/res")
         manifest.srcFile("src/watchlink/AndroidManifest.xml")
+    }
+
+    // The "hey buddy" detector (ONNX Runtime and its models) is github-only too: the F-Droid APK and build.sh (javac, no
+    // Maven) stay without a native library and without models. src/main loads the engine by name.
+    sourceSets.getByName("github") {
+        java.srcDir("src/wakeword/java")
+        assets.srcDir("src/wakeword/assets")
     }
 
     // No Google-only dependency blob and no git details in the APK: F-Droid requires the first, and both keep the
@@ -94,4 +103,12 @@ dependencies {
 
 dependencies {
     "githubImplementation"("com.google.android.gms:play-services-wearable:20.0.1")
+    "githubImplementation"("com.microsoft.onnxruntime:onnxruntime-android:1.22.0")
+    // the JVM build of the same version runs the real models in unit tests
+    "testGithubImplementation"("com.microsoft.onnxruntime:onnxruntime:1.22.0")
+}
+
+// Both ONNX Runtime builds hold the same classes: unit tests run the JVM one, so the Android one stays off their classpath.
+configurations.matching { it.name.startsWith("github") && it.name.endsWith("UnitTestRuntimeClasspath") }.configureEach {
+    exclude(group = "com.microsoft.onnxruntime", module = "onnxruntime-android")
 }
