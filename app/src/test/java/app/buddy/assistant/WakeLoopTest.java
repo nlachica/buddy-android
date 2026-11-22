@@ -252,7 +252,7 @@ public class WakeLoopTest {
         r.hops(1, 0);
         assertEquals(0, r.wakes);
         assertEquals(WakeLoop.Mode.DETECT, r.loop.mode());
-        assertEquals(List.of("near miss: medium (0.50 x 3) peak 0.900 hops 0.900 0.900 then 0.000"), r.lines);
+        assertEquals(java.util.Collections.singletonList("near miss: medium (0.50 x 3) peak 0.900 hops 0.900 0.900 then 0.000"), r.lines);
         r.hops(2, 0.9f);
         assertEquals(0, r.wakes);
     }
@@ -262,7 +262,7 @@ public class WakeLoopTest {
         Rig r = new Rig();
         r.wake(0);
         assertEquals(1, r.wakes);
-        assertEquals(List.of("wake 1: medium (0.50 x 3) peak 0.900 hops 0.900 0.900 0.900"), r.lines);
+        assertEquals(java.util.Collections.singletonList("wake 1: medium (0.50 x 3) peak 0.900 hops 0.900 0.900 0.900"), r.lines);
     }
 
     @Test
