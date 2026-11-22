@@ -53,3 +53,31 @@ F5 [minor] Forced Doze has no cleanup step - The optional `force-idle` in plan.m
 F6 [minor] The unlocked regression check asks one turn to both succeed and hear nothing - Plan.md:136 expects an answer and a “Didn't catch that” toast from one request. Sending and ending after empty listening windows are separate outcomes (WakeWord.java:203–207,358–369). -> Check waves and a spoken reply on one unlocked request. Exercise silence in a separate turn if verifying the toast.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+F1: accepted - Step 0 now starts with a record made before Nicholas opens a Buddy screen or taps anything: the
+notification's text (`dumpsys notification --noredact | grep "android.title=.*Hey Buddy"`; run today it reads "Hey
+Buddy is listening"; the `notifications` tool doesn't list Buddy's own) and the `BuddyWake` service lines. Paused, "Tap
+to turn on" or missing: one locked attempt in that state, then only that one thing is changed and the attempt repeated
+(new first row of the Design table). The idle-chat baseline is for the listening case only; there, opening a chat
+changes nothing (`ensure` returns at `WakeWord.java:65` when the service runs). One limit, written into the plan: the
+orchestrator reaches Nicholas through a Buddy chat, so a Buddy screen has usually resumed minutes before, and has since
+his 12:44 report. So 0b also asks whether Buddy had just been updated or the phone restarted and what the notification
+said, and retests that by a restart with Buddy left unopened (he reads the shade himself, tries, then reports).
+F2: accepted - Two new Design-table rows: a request in the chat that doesn't mean the time question (transcription
+evidence), and the time question with a reply that isn't the time, or a reply that differs from what he heard (agent or
+reading evidence). Both go back to the Planner with the texts, no diagnostic release. Step 0's classify line compares
+request to question by meaning and reply to what he heard; in the 5-try row either mismatch is a failed try.
+F3: accepted - The no-reproduction branch no longer ends at 0b: the spoken-answer rows (5 tries, ≥ 4; deep doze) run
+in every branch, and the GUIDE sentence waits for them. Diagnosis is its own test-plan row and counts only with a
+failing attempt traced to a stage, or one condition whose change alone restores the answer; a pass or his guess about
+what differed doesn't. Otherwise verify.md says "diagnosis: could not reproduce, unresolved", and the feature closes
+only if Nicholas accepts that (new Q2, "close" recommended).
+F4: accepted - Step 0 records a connected headset, whether the watch is connected and worn, and the device he
+actually heard. The "not heard" collection no longer infers the watch from the link: the destination is decided when
+the reading starts (selected device; in Auto a headset first, then a worn, reachable watch), so it takes evidence
+from the playback interval or is written "destination unknown".
+F5: accepted - The deep-doze row uses natural idle. Forcing is only a fallback Nicholas agrees to, followed by
+`dumpsys deviceidle unforce` on completion or interruption and a check that `mState` reads `ACTIVE` with the screen on.
+F6: accepted - Two unlocked turns: a request (waves, spoken reply), and separately "hey buddy" then silence (the
+nothing-heard toast).

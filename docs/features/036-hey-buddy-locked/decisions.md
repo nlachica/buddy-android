@@ -63,3 +63,21 @@
   and the `State` name, because the other results are readable from today's log, the chat and dumpsys, and error
   messages can hold shell output.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - The baseline records the listener's state before anything changes it
+- Options: require "Hey Buddy is listening" and a new chat as setup; record the notification and `BuddyWake` lines
+  first and test a non-listening state as it is.
+- Choice: record first, because a Buddy screen resuming calls `WakeWord.ensure`, which restarts a missing service, so
+  the old setup could hide a stopped listener. Not listening: one locked attempt as is, then change only that and
+  repeat. Listening: the idle-chat baseline. A stopped listener after an update or restart is retested by a restart
+  with Buddy left unopened (0b). Plan review round 2, F1.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - Diagnosis and the spoken-answer check are recorded separately; closing with the cause unknown is Nicholas's call
+- Options: end at "nothing reproduces" with the GUIDE sentence; run the 5-try and deep-doze rows in every branch and
+  report the diagnosis on its own line.
+- Choice: the second, because a pass or a guess at what differed is not a cause, and the done-when needs the trials
+  either way. No reproduced failure: "could not reproduce, unresolved", closed only if Nicholas accepts (Q2). A wrong
+  transcript or wrong spoken answer is a failed try and goes back to the Planner without a diagnostic release. Deep
+  doze is reached naturally; forcing needs his agreement and `unforce` afterwards. Round 2, F2, F3 and F5.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
