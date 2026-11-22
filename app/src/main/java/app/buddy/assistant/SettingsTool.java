@@ -368,7 +368,7 @@ final class SettingsTool {
                 return super.allowed() + "; watch (github build) reads aloud on the Galaxy Watch, and on the phone when no watch can"
                         + "; on Android 12+ it also plays a phone live voice call's voice on the watch (a headset or the phone speaker"
                         + " when it can't, never the earpiece)"
-                        + "; auto uses a connected headset (the latest; while dictating, a Bluetooth headset's microphone), else the watch for read aloud and live voice, else the phone speaker"
+                        + "; auto uses a connected headset (the latest; while dictating, a Bluetooth headset's microphone), else the watch for read aloud and live voice while it is worn, else the phone speaker"
                         + "; on Android 12+ a phone live voice call doesn't use the earpiece: when the phone plays the voice, the picked device"
                         + " while it is connected (not the earpiece), else a headset, else the phone speaker";
             }
@@ -419,7 +419,7 @@ final class SettingsTool {
     static String audioNow(String saved, String target, String[][] devices, String android) {
         int i = saved.isEmpty() ? -1 : AudioRoute.indexOf(devices, saved);
         String now = i >= 0 && target.equals(saved) ? devices[i][1]
-                : target.equals(WatchVoice.KEY) ? "auto \u2192 watch, or " + android + " when no watch answers"
+                : target.equals(WatchVoice.KEY) ? "auto \u2192 watch while you wear it, or " + android + " when it isn't worn or no watch answers"
                 : "auto \u2192 " + android;
         return now + (!saved.isEmpty() && i < 0 ? " (" + saved.substring(saved.indexOf(':') + 1) + " isn't connected)" : "");
     }

@@ -35,7 +35,7 @@ public class LiveWatchTest {
 
     private static final class Fake implements LiveWatch.Out {
         String saved = "watch", node = "n1", applied;
-        boolean wins = true, holdFind;
+        boolean wins = true, holdFind, worn = true;
         long now;
         int finds, savedReads;
         final List<Reading> opened = new ArrayList<>();
@@ -47,6 +47,7 @@ public class LiveWatchTest {
         @Override public String saved() { savedReads++; return saved; }
         @Override public boolean watchWins() { return wins; }
         @Override public boolean pickApplied(String s) { return s.equals(applied); }
+        @Override public boolean worn(String n) { return worn; }
 
         @Override
         public void find(Consumer<String> n) {
@@ -774,5 +775,94 @@ public class LiveWatchTest {
         f.wins = false;
         f.advance(POLL);
         assertEquals(1, c.toWatch());
+    }
+
+    // 033: Auto uses the watch only while it is worn
+
+    @Test
+    public void takenOffInAPauseTheReadingOpenedAheadIsCancelledAndNothingMoreIsOpened() {
+        f.saved = "";
+        Reading r = onWatch();
+        c.worn("n1", false);
+        assertTrue(r.cancelled);
+        assertEquals(0, c.toWatch());
+        c.pcm(LOUD);
+        quiet(11);
+        c.pcm(LOUD);
+        assertEquals(0, c.toWatch());
+        f.advance(10_000);
+        assertEquals(1, f.opened.size()); // no retry
+        assertTrue(r.got.isEmpty());
+    }
+
+    @Test
+    public void takenOffWithAWholeReplyQueuedItPlaysOnThePhoneAfterTheReadingDrains() {
+        f.saved = "";
+        Reading r = onWatch();
+        utterance(); // the first reading is closed and draining
+        c.pcm(LOUD); // the second utterance is held, and it ended
+        quiet(11);
+        assertEquals(2, c.toWatch() & 2);
+        c.worn("n1", false);
+        assertEquals(2, c.toWatch());
+        f.node = null; // Auto's find gives no node off the wrist
+        r.events.played();
+        f.advance(TAIL);
+        assertEquals(1, f.opened.size()); // the held audio went nowhere
+        assertEquals(0, c.toWatch()); // the mic opens after the tail
+    }
+
+    @Test
+    public void takenOffMidUtteranceTheReadingIsClosedAndTheMicWaitsForItsAnswer() {
+        f.saved = "";
+        Reading r = onWatch();
+        c.pcm(LOUD);
+        c.worn("n1", false);
+        assertTrue(r.closed);
+        assertFalse(r.cancelled);
+        assertEquals(2, c.toWatch());
+    }
+
+    @Test
+    public void aPickedWatchIgnoresAnOffWristPushAndAutoLeavesWhenItIsSwitchedOffTheWrist() {
+        Reading r = onWatch(); // saved = watch
+        c.worn("n1", false);
+        assertEquals(1, c.toWatch());
+        assertFalse(r.cancelled);
+        f.saved = "";
+        f.worn = false; // no fresh worn answer
+        f.advance(POLL);
+        assertTrue(r.cancelled);
+        assertEquals(0, c.toWatch());
+    }
+
+    @Test
+    public void aWatchSwitchedToAutoWhileWornStays() {
+        Reading r = onWatch();
+        f.saved = "";
+        f.worn = true;
+        f.advance(POLL);
+        assertFalse(r.cancelled);
+        assertEquals(1, c.toWatch());
+    }
+
+    @Test
+    public void anotherNodesPushIsIgnored() {
+        f.saved = "";
+        Reading r = onWatch();
+        c.worn("n2", false);
+        assertFalse(r.cancelled);
+        assertEquals(1, c.toWatch());
+    }
+
+    @Test
+    public void aHeadsetThatCameWhileTheWatchWasFoundKeepsTheVoiceOnThePhone() {
+        f.saved = "";
+        f.holdFind = true;
+        c.begin();
+        f.wins = false;
+        f.answerFind();
+        assertTrue(f.opened.isEmpty());
+        assertEquals(0, c.toWatch());
     }
 }

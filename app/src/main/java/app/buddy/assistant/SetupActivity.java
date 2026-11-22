@@ -122,18 +122,22 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
     // 016: the Auto note says what Auto uses now; the watch isn't an Android device, so ask again every 5 s while it shows
     private TextView autoNote;
     private String autoBase;
-    private int autoSeq;
+    private boolean autoAsking; // an answer can take up to 11 s (033): a tick starts no new ask while one is out
     private final Runnable autoTick = this::autoAsk;
 
     private void autoAsk() {
         final TextView n = autoNote;
         if (n == null || !n.isAttachedToWindow()) return;
-        final int seq = ++autoSeq;
-        AudioRoute.autoNow(this, now -> { // only the newest ask counts, and only while the note is still on screen
-            if (seq == autoSeq && n.isAttachedToWindow()) {
-                n.setText(autoBase + " " + getString(R.string.setup_audio_device_now, now));
-            }
-        });
+        if (!autoAsking) {
+            autoAsking = true;
+            AudioRoute.autoNow(this, now -> { // the answer goes to the note on screen now, if any
+                autoAsking = false;
+                TextView cur = autoNote;
+                if (cur != null && cur.isAttachedToWindow()) {
+                    cur.setText(autoBase + " " + getString(R.string.setup_audio_device_now, now));
+                }
+            });
+        }
         n.postDelayed(autoTick, 5000);
     }
 
@@ -232,7 +236,6 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
         // one refresh chain: cancel the old note's tick while it is still attached (removeCallbacks needs that)
         if (autoNote != null) autoNote.removeCallbacks(autoTick);
         autoNote = null;
-        autoSeq++;
         list.removeAllViews();
         if (page == null) {
             menu();

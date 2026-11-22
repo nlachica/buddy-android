@@ -14,7 +14,8 @@ import java.util.function.Consumer;
  * on the watch, and a phone call never falls to the earpiece, whatever the audio device (AudioRoute.live, 030). The voice
  * goes to the watch as one 012 reading per utterance (the silence gate cuts them), and the phone's mic stays closed from
  * the first audible block until the watch says that reading is quiet. Google-free (the watch link is WatchVoice's), so
- * it is unit-tested through {@link Call}. Calls started from the watch have a Remote (007) and never come here.
+ * it is unit-tested through {@link Call}. 033: Auto uses the watch only while it is worn (WatchVoice.find asks; the watch
+ * pushes its state while a reading plays, and a call that is Auto leaves the watch when it is taken off). Calls started from the watch have a Remote (007) and never come here.
  */
 final class LiveWatch {
     static final long POLL_MS = 500, TAIL_MS = 300, FAIL_TAIL_MS = 1500, ANSWER_MS = 30_000, QUIET_MS = 1000, RETRY_MS = 5000;
@@ -36,8 +37,13 @@ final class LiveWatch {
         /** AudioRoute has applied this saved device key for the call (it is connected and chosen, 030). */
         boolean pickApplied(String saved);
 
-        /** A reachable watch's node, or null. */
+        /** A reachable watch's node, or null (Auto: only a worn one, 033). */
         void find(Consumer<String> node);
+
+        /** The node said "worn" a moment ago (WatchVoice.worn); the tests' fake says yes. */
+        default boolean worn(String node) {
+            return true;
+        }
 
         /** One 012 reading; attached runs when its channel is open. */
         ReadQueue.Stream open(String node, ReadQueue.Events e, Runnable attached);
@@ -65,6 +71,12 @@ final class LiveWatch {
     static boolean noEarpiece() {
         Call k = call;
         return k != null && k.noEarpiece();
+    }
+
+    /** The watch pushed its wrist state (main thread, 033): off the wrist, an Auto call goes to the phone. */
+    static void worn(String node, boolean worn) {
+        Call k = call;
+        if (k != null) k.worn(node, worn);
     }
 
     /** The voice (16-bit mono, 16 kHz), from the call's page (any thread). */
@@ -141,9 +153,11 @@ final class LiveWatch {
             String s = out.saved();
             if (!s.equals(saved)) { // a change of the setting decides again
                 out.log("setting " + show(saved) + " -> " + show(s));
+                final boolean there = turn != null && WatchVoice.KEY.equals(saved);
                 saved = s;
                 retryAt = 0; // the change is the fresh decision, not a retry
                 decide();
+                if (there && !out.worn(node)) leave(); // Watch is now Auto: it stays on the watch only while worn
             } else if (watch && out.pickApplied(saved)) { // an explicit pick that is back takes the voice from the watch
                 out.log(saved + " is here: phone");
                 decide();
@@ -168,6 +182,18 @@ final class LiveWatch {
             else if (!want && turn != null) stop();
         }
 
+        /** The watch pushed its wrist state (main thread). */
+        synchronized void worn(String n, boolean w) {
+            if (on && !w && n.equals(node)) leave();
+        }
+
+        /** The watch is off the wrist: an Auto call goes to the phone and stays there until it ends or the setting moves. */
+        private void leave() {
+            if (turn == null || WatchVoice.KEY.equals(out.saved())) return; // a picked Watch is used worn or not
+            out.log("not worn");
+            stop();
+        }
+
         /** Retries run again after a fallback: RETRIES per call, RETRY_MS apart, in a pause of the voice (026). */
         private void arm() {
             retryAt = retries < RETRIES ? out.now() + RETRY_MS : 0;
@@ -182,6 +208,7 @@ final class LiveWatch {
 
         private synchronized void found(Object t, String n) {
             if (turn != t) return;
+            if (n != null && !out.watchWins()) n = null; // a headset came while the watch was asked: the voice stays on the phone
             if (n == null) {
                 turn = null;
                 out.log("none found: phone");
@@ -415,7 +442,12 @@ final class LiveWatch {
 
         @Override
         public void find(Consumer<String> node) {
-            WatchVoice.link().find(app, node);
+            WatchVoice.find(app, node);
+        }
+
+        @Override
+        public boolean worn(String node) {
+            return WatchVoice.worn(node);
         }
 
         @Override

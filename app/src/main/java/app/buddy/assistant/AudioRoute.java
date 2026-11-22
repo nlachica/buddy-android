@@ -20,7 +20,7 @@ import java.util.function.IntPredicate;
 /**
  * Which audio device Buddy's voice uses: Auto or one of the devices Android offers for calls (speaker, earpiece, a
  * Bluetooth watch or headset). Auto is the order phones use: a connected media headset (Android's own routing, the
- * latest one), then the Galaxy Watch for read aloud, then the phone speaker (docs/features/016-audio-auto-priority).
+ * latest one), then the Galaxy Watch for read aloud, but only while it is worn (033), then the phone speaker (docs/features/016-audio-auto-priority).
  * 031: while you dictate, Auto uses a connected Bluetooth headset's call link, so its microphone is the input. While Buddy's voice is on and a device is chosen, Buddy runs as a
  * call: that device becomes Android's communication device and the phone is in communication mode, which also moves
  * media (read aloud) and the recognizers' input along. A voice session is that time plus a quiet tail; a poll ends it
@@ -159,7 +159,7 @@ final class AudioRoute {
             label.accept(androidNow(c));
             return;
         }
-        link.find(c, node -> label.accept(node != null ? c.getString(R.string.audio_watch) : androidNow(c)));
+        WatchVoice.find(c, node -> label.accept(node != null ? c.getString(R.string.audio_watch) : androidNow(c)));
     }
 
     /** Index of the key in choices(), or -1 when that device isn't there. */
