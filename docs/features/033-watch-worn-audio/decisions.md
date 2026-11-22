@@ -174,3 +174,16 @@ Brief is the tie-breaker. The plan as written is approved with these rulings:
 - F1: the push carries `age` (ms, event to send) so the phone stamps `now - age`; a push with no `age` is stale. No new ask on entry to Auto.
 - F2: a removal push settles the node's pending ask as "removed" (not worn); only a pending ask is touched.
 - F3: a sample before the ask's receipt is "old sample", no slack (same watch clock). Supersedes round 1's "1 s of clock slack"; risk: a sensor that stamps its first event with the last change time reports "old sample" (phone log shows it).
+
+## 2026-11-21 - Orchestrator: code review ended without APPROVE (3 rounds, the run's limit); rulings
+CI green at 128a861 (phone + wear unit tests, github/fdroid/wear release builds):
+https://github.com/nlachica/buddy-android/actions/runs/44994726364. Round-3 findings are both mid-call races of
+the Watch -> Auto setting switch; the run allowed at most 3 review rounds, so they are recorded, not built:
+- **F1 (a positive push delayed > 3 s in transit still counts as fresh)**: known limitation. Needs a hand-picked
+  Watch switched to Auto mid-call AND a push delayed over 3 s on the BT link. Effect: that call may stay on the
+  worn-at-send-time watch. Follow-up if seen: authorize the switch only on a fresh ask answer.
+- **F2 (a removal between selecting Auto and the next 500 ms poll is undone by the poll)**: known limitation.
+  Needs the watch taken off within ~0.5 s of switching to Auto mid-call, then put back on. Effect: a later reading
+  of that call may play on the watch again. Follow-up if seen: remember the setting under which `off` was set and
+  clear it only on a later change.
+Neither affects read-aloud, a call started in Auto, or a hand-picked Watch.
