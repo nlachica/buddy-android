@@ -140,3 +140,9 @@
 - F3: a failed final commit sets `unsaved`; `follow()` retries only the disk write. Not unit-tested (static Prefs); phone-only.
 - F2 (baseline phone check) stays open for the orchestrator and Nicholas.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 Orchestrator: code loop ended without APPROVE (exit 3)
+- Round 3 F1 (exception on the confirmation read loses the saved level): must fix. One more coder run scoped to F1
+  only, then one reviewer run.
+- Round 3 F2 (baseline Step 1 on the unmodified build with Nicholas): waived. The driver log already shows the speaker
+  path and Media 6/15; the on-phone check moves to verify on the release build (keys change loudness, Media restored).
