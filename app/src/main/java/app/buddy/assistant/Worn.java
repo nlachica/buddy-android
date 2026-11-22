@@ -47,11 +47,15 @@ final class Worn {
         seq = firstId;
     }
 
-    /** The watch pushed its state (a reading is playing): a removal voids older "worn" evidence, a "worn" is a fresh sample. */
-    void push(String n, boolean w) {
+    /**
+     * The watch pushed its state (a reading is playing) with the sample's age on the watch: a removal voids older "worn"
+     * evidence and settles that node's pending ask as not worn (its older positive reply is then dropped).
+     */
+    void push(String n, boolean w, long ageMs) {
         node = n;
         worn = w;
-        at = port.now();
+        at = port.now() - ageMs;
+        if (!w && n.equals(askNode)) answer(false, 0, "removed");
     }
 
     /** True only when this node said "worn" and the sample is at most FRESH_MS old. */

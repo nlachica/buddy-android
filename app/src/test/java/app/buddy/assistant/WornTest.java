@@ -247,12 +247,33 @@ public class WornTest {
         check();
         w.reply("n1", f.last(), true, 0, null);
         assertTrue(w.on("n1"));
-        w.push("n1", false);
+        w.push("n1", false, 0);
         assertFalse(w.on("n1"));
-        w.push("n1", true);
+        w.push("n1", true, 0);
         assertTrue(w.on("n1"));
         f.advance(Worn.FRESH_MS + 1);
         assertFalse(w.on("n1"));
+    }
+
+    @Test
+    public void aPositivePushIsAsOldAsItsSampleNotAsItsArrival() {
+        w.push("n1", true, 4000); // the event was 4 s old when the watch sent it
+        assertFalse(w.on("n1"));
+        w.push("n1", true, 2000);
+        assertTrue(w.on("n1"));
+        f.advance(1001);
+        assertFalse(w.on("n1"));
+    }
+
+    @Test
+    public void aRemovalSettlesThePendingAskAndItsOlderPositiveReplyIsDropped() {
+        check();
+        w.push("n1", false, 0); // removal reaches the phone first
+        assertFalse(got);
+        w.reply("n1", f.last(), true, 0, null); // the positive sampled before it
+        assertFalse(w.on("n1"));
+        assertEquals("removed", f.log.get(0));
+        assertEquals(1, f.log.size());
     }
 
     @Test

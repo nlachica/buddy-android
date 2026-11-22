@@ -29,9 +29,9 @@ final class Worn implements SensorEventListener {
         return v >= 0.5f;
     }
 
-    /** Ms from the ask's receipt to the sample, or -1 for one taken before the ask (an old one: not trusted). 1 s of clock slack. */
+    /** Ms from the ask's receipt to the sample, or -1 for one taken before the ask (an old one: not trusted). */
     static long offset(long eventMs, long askedMs) {
-        return eventMs < askedMs - 1000 ? -1 : Math.max(0, eventMs - askedMs);
+        return eventMs < askedMs ? -1 : eventMs - askedMs;
     }
 
     /** Why there is no answer: "no sensor", "refused" (registration failed), or null. */

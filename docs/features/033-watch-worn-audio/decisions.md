@@ -169,3 +169,8 @@ Brief is the tie-breaker. The plan as written is approved with these rulings:
 - F2: a sample whose event time is more than 1 s before the ask is "old sample" (can't tell); 1 s is clock slack.
 - F5: ask ids start at the wall clock. F6: the label rechecks the headset. 
 
+
+## 2026-11-21 - Coder: round 2 of code review
+- F1: the push carries `age` (ms, event to send) so the phone stamps `now - age`; a push with no `age` is stale. No new ask on entry to Auto.
+- F2: a removal push settles the node's pending ask as "removed" (not worn); only a pending ask is touched.
+- F3: a sample before the ask's receipt is "old sample", no slack (same watch clock). Supersedes round 1's "1 s of clock slack"; risk: a sensor that stamps its first event with the last change time reports "old sample" (phone log shows it).

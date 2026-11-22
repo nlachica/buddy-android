@@ -163,7 +163,7 @@ public class ReadAloud extends WearableListenerService {
             if (push == null) { // 033: the phone hears the wrist state at the start of the reading and each change
                 final String phone = ch.getNodeId();
                 push = new Worn(this, (w, at) -> Wearable.getMessageClient(app).sendMessage(phone, Phone.WORN,
-                        ("{\"worn\":" + w + "}").getBytes(StandardCharsets.UTF_8)));
+                        ("{\"worn\":" + w + ",\"age\":" + Math.max(0, SystemClock.elapsedRealtime() - at) + "}").getBytes(StandardCharsets.UTF_8)));
                 push.start(); // no sensor or refused: the phone hears nothing and keeps its own answer
             }
             Wearable.getChannelClient(this).getInputStream(ch)

@@ -38,3 +38,8 @@ F3 [minor] The one-second allowance understates the age of samples taken before 
 All 114 focused phone and Wear JVM tests passed. Three temporary regression tests reproduced F1–F3. CI passed the GitHub, F-Droid and Wear release builds and the phone and Wear unit tests at `3ba5de7`. The on-watch sign-off remains pending. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44992825671)
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+F1: fixed in the round-2 commit (the watch's push now carries `age`, the sensor event's age when sent; `Worn.push` stamps `now - age`, and a push without `age` counts as stale). A positive event delivered 4 s late is no longer fresh for Watch -> Auto. Test: WornTest `aPositivePushIsAsOldAsItsSampleNotAsItsArrival`. Not built: a timestamped ask on entry to Auto (round-1 ruling stands: fresh positive or leave).
+F2: fixed in the same commit (a removal push settles that node's pending ask as not worn, so the older positive reply finds no ask and is dropped). Test: WornTest `aRemovalSettlesThePendingAskAndItsOlderPositiveReplyIsDropped` (the waiting placement gets false, `on` stays false).
+F3: fixed in the same commit (`Worn.offset` returns -1 for any sample before the ask's receipt; the 1 s slack is gone since sensor event and ask share the watch's elapsed-realtime clock). Test: wear WornTest `theOffsetIsTheSamplesOwnAgeNotTheCallbacks` (900 ms before: -1). Round-1's own slack assertion in that test was changed with it.

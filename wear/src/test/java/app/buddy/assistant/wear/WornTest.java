@@ -26,7 +26,8 @@ public class WornTest {
     @Test
     public void theOffsetIsTheSamplesOwnAgeNotTheCallbacks() {
         assertEquals(100, Worn.offset(10_100, 10_000)); // delivered 4 s late, still 100 ms after the ask
-        assertEquals(0, Worn.offset(9_500, 10_000)); // clock slack
+        assertEquals(-1, Worn.offset(9_100, 10_000)); // 900 ms before the ask is not "0 ms"
+        assertEquals(0, Worn.offset(10_000, 10_000));
         assertEquals(-1, Worn.offset(5_000, 10_000)); // taken long before the ask
     }
 }

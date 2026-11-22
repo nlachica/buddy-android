@@ -72,8 +72,8 @@ final class WatchVoice {
     }
 
     /** The watch's push of its wrist state (main thread): kept for the next Auto decision, then given to a live call. */
-    static void wornPush(Context c, String node, boolean w) {
-        worn(c).push(node, w);
+    static void wornPush(Context c, String node, boolean w, long ageMs) {
+        worn(c).push(node, w, ageMs);
         LiveWatch.worn(node, w);
     }
 
