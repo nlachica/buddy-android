@@ -69,6 +69,11 @@ public final class HiddenNotice extends BroadcastReceiver {
             AutoPause.cancelCallEnded(c); // also when it had ended already
             return;
         }
+        if (WakeService.ACTION_OFF.equals(intent.getAction())) { // the listening notification's Turn off
+            Prefs.setWakeWord(c, false);
+            WakeWord.ensure(c);
+            return;
+        }
         if (!ACTION_SHOW.equals(intent.getAction())) return;
         Prefs.setBubbleEnabled(c, true);
         cancel(c);

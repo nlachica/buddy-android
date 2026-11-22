@@ -342,6 +342,17 @@ final class Prefs {
         sp(c).edit().putString("face", face).apply();
     }
 
+    /** 032: "hey buddy" is listened for (on by default; where it isn't offered the value is not used). */
+    static final boolean WAKE_WORD_DEFAULT = true;
+
+    static boolean wakeWord(Context c) {
+        return sp(c).getBoolean("wake_word", WAKE_WORD_DEFAULT);
+    }
+
+    static void setWakeWord(Context c, boolean on) {
+        sp(c).edit().putBoolean("wake_word", on).apply();
+    }
+
     /** Read replies aloud with text-to-speech. */
     static boolean speakReplies(Context c) {
         return sp(c).getBoolean("speak", false);

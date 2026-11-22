@@ -1105,6 +1105,7 @@ final class Bubble implements ChatHub.Listener {
         boolean show = !locked && (Prefs.bubbleEnabled(svc) || expanded || pendingConfirm != null || controlling || svc.paused());
         boolean wasHidden = root.getVisibility() != View.VISIBLE;
         root.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) showWaves(false); // the waves are a window of their own: they go with a hidden bubble
         if (show && wasHidden && !expanded) popIn();
         if (!show) showDismissTarget(false);
         updateThumb();
@@ -1530,6 +1531,20 @@ final class Bubble implements ChatHub.Listener {
         // the spoken conversation (CodexLive) next to Talk's one request; ended from here too
         if (CodexLive.on()) acts.add(new RadialMenu.Action(R.drawable.ms_graphic_eq, svc.getString(R.string.menu_end_live), true, () -> CodexLive.end(null)));
         else if (hub.runningCount() == 0 && liveReady()) acts.add(new RadialMenu.Action(R.drawable.ms_graphic_eq, svc.getString(R.string.live_option), false, this::goLive));
+        // 032: the quick switch for "hey buddy" (same setting as Settings → Voice)
+        if (WakeWord.available()) {
+            boolean on = Prefs.wakeWord(svc);
+            acts.add(new RadialMenu.Action(on ? R.drawable.ms_mic_off : R.drawable.ms_mic,
+                    svc.getString(on ? R.string.menu_wake_off : R.string.menu_wake_on), false, () -> {
+                Prefs.setWakeWord(svc, !on);
+                WakeWord.ensure(svc);
+                if (!on && !Voice.micAllowed(svc)) { // the grant starts it (WakeWord.ensure on resume)
+                    toast(svc.getString(R.string.setup_wake_needs_mic));
+                    svc.startActivity(new android.content.Intent(svc, MainActivity.class)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("askMic", true));
+                }
+            }));
+        }
         acts.add(new RadialMenu.Action(R.drawable.ms_forum, svc.getString(R.string.menu_open_chat), false, this::expand));
         acts.add(new RadialMenu.Action(R.drawable.ms_close, svc.getString(R.string.menu_hide), false, this::dismissToNotification));
         int[] loc = new int[2];
@@ -1634,6 +1649,14 @@ final class Bubble implements ChatHub.Listener {
 
     /** Listen without opening the chat: waves under the bubble, the words beside it, sent when you pause. */
     private void talk() {
+        talk(null, 0);
+    }
+
+    /**
+     * Talk's listening. A "hey buddy" turn passes itself and its window number: what the window hears then goes to
+     * WakeWord (which sends the request, or listens once more), not straight to the chat.
+     */
+    void talk(final WakeWord.Turn turn, final int window) {
         if (!Voice.micAllowed(svc)) {
             toast(svc.getString(R.string.bubble_allow_mic_tap_bubble));
             svc.startActivity(new android.content.Intent(svc, MainActivity.class)
@@ -1649,19 +1672,26 @@ final class Bubble implements ChatHub.Listener {
             @Override
             public void onFinal(String text) {
                 talkDone();
-                Sessions.Session ses = sessions.current;
-                if (ses == null) {
-                    ses = hub.create(Prefs.backend(svc));
-                    hub.select(ses);
+                if (turn != null) {
+                    WakeWord.heard(turn, window, text);
+                    return;
                 }
-                String e = hub.send(ses, text);
+                String e = hub.sendTalk(text, false);
                 if (e != null) toast(e);
+            }
+
+            @Override
+            public void onNothing(String message) {
+                talkDone();
+                if (turn != null) WakeWord.nothing(turn, window, message);
+                else if (message != null) toast(message);
             }
 
             @Override
             public void onEnd(String message) {
                 talkDone();
-                if (message != null) toast(message);
+                if (turn != null) WakeWord.ended(turn, window, message);
+                else if (message != null) toast(message);
             }
 
             @Override
@@ -1677,6 +1707,7 @@ final class Bubble implements ChatHub.Listener {
         });
         if (err != null) {
             toast(err);
+            if (turn != null) WakeWord.endTurn(turn);
             return;
         }
         talkListening = true;
@@ -1705,6 +1736,7 @@ final class Bubble implements ChatHub.Listener {
             return;
         }
         showWaves(false);
+        if (root.getVisibility() != View.VISIBLE) return; // a hidden (locked or off) bubble listens without showing waves
         waves = new VoiceWaves(svc);
         waves.setLive(true);
         int w = dp(150), h = dp(44);

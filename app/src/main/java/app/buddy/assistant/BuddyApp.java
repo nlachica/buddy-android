@@ -1,7 +1,9 @@
 package app.buddy.assistant;
 
+import android.app.Activity;
 import android.app.Application;
 import android.content.Context;
+import android.os.Bundle;
 
 /** The app's context, for code with no Context at hand (static helpers) that needs a string in the user's language. */
 public class BuddyApp extends Application {
@@ -12,6 +14,16 @@ public class BuddyApp extends Application {
         super.onCreate();
         ctx = this;
         A11yWatch.processStarted(this);
+        // "hey buddy" starts when any Buddy screen resumes: a microphone grant given from a chat or Settings ends here
+        registerActivityLifecycleCallbacks(new ActivityLifecycleCallbacks() {
+            @Override public void onActivityResumed(Activity a) { WakeWord.ensure(a); }
+            @Override public void onActivityCreated(Activity a, Bundle b) {}
+            @Override public void onActivityStarted(Activity a) {}
+            @Override public void onActivityPaused(Activity a) {}
+            @Override public void onActivityStopped(Activity a) {}
+            @Override public void onActivitySaveInstanceState(Activity a, Bundle b) {}
+            @Override public void onActivityDestroyed(Activity a) {}
+        });
     }
 
     static Context context() {

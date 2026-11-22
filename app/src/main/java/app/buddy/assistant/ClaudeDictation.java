@@ -151,7 +151,7 @@ final class ClaudeDictation {
                     stopMic();
                     listener = null;
                     finishing = false;
-                    if (t.isEmpty()) l.onEnd(BuddyApp.str(R.string.dictation_no_speech));
+                    if (t.isEmpty()) l.onNothing(BuddyApp.str(R.string.dictation_no_speech));
                     else l.onFinal(t);
                     return;
                 }

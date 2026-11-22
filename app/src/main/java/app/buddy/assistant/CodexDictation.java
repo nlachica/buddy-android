@@ -34,10 +34,12 @@ final class CodexDictation {
     private static Process server;
     private static OutputStream toServer;
     private static String threadId;
+    /** The conversation of the call now on: each call has its own, so a cancelled call's late events are told apart. */
+    static volatile String callThread;
     private static int nextId;
     private static final Map<Integer, JSONObject[]> replies = new HashMap<>();
 
-    private static Voice.Listener listener;
+    static Voice.Listener listener;
     private static WebView web;
     private static boolean finishing, drained, connected;
     private static final StringBuilder done = new StringBuilder();
@@ -123,7 +125,7 @@ final class CodexDictation {
                     String text = (done + " " + partial).replaceAll("\\s+", " ").trim();
                     stopSession();
                     listener = null;
-                    if (text.isEmpty()) l.onEnd(BuddyApp.str(R.string.dictation_no_speech));
+                    if (text.isEmpty()) l.onNothing(BuddyApp.str(R.string.dictation_no_speech));
                     else l.onFinal(text);
                     return;
                 }
@@ -140,7 +142,8 @@ final class CodexDictation {
     }
 
     private static void end(Voice.Listener l, String message) {
-        if (listener == l) listener = null;
+        if (listener != l) return; // a late failure of a listening that is over must not tear down the current one
+        listener = null;
         stopSession();
         l.onEnd(message);
     }
@@ -153,7 +156,8 @@ final class CodexDictation {
             web.destroy();
             web = null;
         }
-        final String t = threadId;
+        final String t = callThread;
+        callThread = null;
         if (t != null && server != null) {
             new Thread(() -> {
                 try {
@@ -227,8 +231,11 @@ final class CodexDictation {
             for (int i = 0; i < 600 && threadId == null; i++) Thread.sleep(100); // the server is still starting
             if (threadId == null) throw new Exception(BuddyApp.str(R.string.dictation_codex_no_start));
             stage = R.string.dictation_stage_call;
+            String call = newThread();
+            if (web != page) return; // cancelled meanwhile
+            callThread = call;
             JSONObject r = request("thread/realtime/start", new JSONObject()
-                    .put("threadId", threadId)
+                    .put("threadId", call)
                     .put("transport", new JSONObject().put("type", "webrtc").put("sdp", sdp))
                     .put("version", "v3") // ChatGPT's voice (AVAS) over WebRTC only accepts v1 headers as v3
                     .put("outputModality", "audio")
@@ -377,6 +384,7 @@ final class CodexDictation {
         if (server == p) {
             server = null;
             threadId = null;
+            callThread = null;
         }
     }
 
@@ -401,6 +409,8 @@ final class CodexDictation {
             CodexSpeech.notification(method, p);
             return;
         }
+        final String th = p.optString("threadId");
+        boolean mine = th.equals(callThread); // else a call that was cancelled; the main-thread callbacks below ask again
         switch (method) {
             case "turn/started": { // the voice handed something to Codex: stop it, dictation never runs tasks (and live
                 // voice hands it to the chat instead, see CodexLive)
@@ -410,35 +420,46 @@ final class CodexDictation {
                 break;
             }
             case "thread/realtime/sdp": {
+                if (!mine) break;
                 stage = R.string.dictation_stage_connecting;
                 final String sdp = p.optString("sdp");
-                main.post(() -> js("answer(" + JSONObject.quote(sdp) + ")"));
+                main.post(() -> {
+                    if (th.equals(callThread)) js("answer(" + JSONObject.quote(sdp) + ")");
+                });
                 break;
             }
             case "thread/realtime/transcript/delta":
-                if (!"assistant".equals(p.optString("role"))) {
+                if (mine && !"assistant".equals(p.optString("role"))) {
                     final String d = p.optString("delta");
-                    main.post(() -> heard(d, false));
+                    main.post(() -> {
+                        if (th.equals(callThread)) heard(d, false);
+                    });
                 }
                 break;
             case "thread/realtime/transcript/done":
-                if (!"assistant".equals(p.optString("role"))) {
+                if (mine && !"assistant".equals(p.optString("role"))) {
                     final String t = p.optString("text");
-                    main.post(() -> heard(t, true));
+                    main.post(() -> {
+                        if (th.equals(callThread)) heard(t, true);
+                    });
                 }
                 break;
             case "thread/realtime/error": {
-                final String msg = p.optString("message");
-                main.post(() -> {
-                    if (listener != null) end(listener, BuddyApp.str(R.string.dictation_chatgpt_error, msg));
-                });
+                if (!mine) break;
+                final String msg = BuddyApp.str(R.string.dictation_chatgpt_error, p.optString("message"));
+                main.post(() -> callError(th, msg));
                 break;
             }
         }
     }
 
+    /** Main thread: a call's error ends the listening only if that call is still the current one (it may have been replaced while this was queued). */
+    static void callError(String thread, String message) {
+        if (thread.equals(callThread) && listener != null) end(listener, message);
+    }
+
     private static void heard(String text, boolean final_) {
-        if (listener == null) return;
+        if (listener == null || !connected) return; // ChatGPT hears audio only once connected: earlier words are a past call's
         lastHeard = System.currentTimeMillis();
         if (final_) {
             if (done.length() > 0) done.append(' ');

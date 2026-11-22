@@ -7,7 +7,7 @@ import android.os.Bundle;
 /**
  * Buddy picked as the phone's digital assistant (Settings → Apps → Default apps): long-pressing the power button or
  * the corner swipe lands here, and Buddy starts listening beside the bubble, as a tap does when set to talk. Nothing
- * listens before that: there's no wake word. No screen of its own; with Buddy's service off it opens the app.
+ * listens before that, apart from the optional "hey buddy" (WakeService). No screen of its own; with Buddy's service off it opens the app.
  */
 public final class AssistActivity extends Activity {
     @Override

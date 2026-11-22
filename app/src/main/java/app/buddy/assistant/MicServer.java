@@ -46,10 +46,22 @@ final class MicServer {
     private static volatile boolean captureOn, recording;
     /** A recorder has received everything captured, after the capture stopped. */
     static volatile boolean drained;
+    /**
+     * Every capture has an id (a counter that adopt, startCapture and endCapture advance): a reader or writer holding an
+     * older id is refused, so a late callback of a finished listening window can't touch the next one's audio.
+     * adopted: the current capture's audio comes from the wake-word detector (feed), not from an AudioRecord of ours.
+     * Both guarded by chunks.
+     */
+    private static int captureId;
+    private static boolean adopted;
+    /** stop() was called: socket readers of the captured buffer end. */
+    private static volatile boolean stopped;
     private static ServerSocket server;
     private static Host host;
     private static String token;
     private static volatile int active;
+    /** Audio sessions of the AudioRecords MicServer runs, so WakeWord can tell them from other apps' recordings. */
+    private static final java.util.Set<Integer> sessions = java.util.concurrent.ConcurrentHashMap.newKeySet();
 
     private MicServer() {
     }
@@ -57,6 +69,7 @@ final class MicServer {
     /** Start accepting (Terminal visible). Writes a fresh token where the stand-in recorder reads it. */
     static synchronized void start(Context c, Host h) {
         host = h;
+        stopped = false;
         if (server != null) return;
         try {
             byte[] b = new byte[16];
@@ -93,6 +106,7 @@ final class MicServer {
     /** Stop accepting and end any recording (Terminal left the screen). */
     static synchronized void stop() {
         host = null;
+        stopped = true;
         if (server != null) {
             try {
                 server.close();
@@ -104,6 +118,9 @@ final class MicServer {
 
     /** Start recording now (the user tapped the mic). False if the microphone isn't available. */
     static boolean startCapture(Context c) {
+        synchronized (chunks) {
+            if (adopted && captureOn) return true; // a wake turn's audio is already coming in, pre-roll first: keep it
+        }
         endCapture();
         if (c.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) return false;
         int rate = 16000, ch = AudioFormat.CHANNEL_IN_MONO;
@@ -119,9 +136,12 @@ final class MicServer {
         } catch (Exception e) {
             return false;
         }
+        final int session = r.getAudioSessionId();
+        sessions.add(session);
         synchronized (chunks) {
             chunks.clear();
             pullChunk = pullOff = 0;
+            captureId++;
         }
         drained = false;
         captureOn = true;
@@ -146,6 +166,7 @@ final class MicServer {
             } catch (Exception ignored) {
             }
             r.release();
+            sessions.remove(session);
             synchronized (chunks) {
                 chunks.notifyAll();
             }
@@ -178,6 +199,16 @@ final class MicServer {
         return recording;
     }
 
+    /** This audio session is one of the recordings MicServer runs (the Terminal's, a dictation's), not another app's. */
+    static boolean mine(int session) {
+        return sessions.contains(session);
+    }
+
+    /** A program in Buddy's Linux is recording through the socket now. */
+    static boolean serving() {
+        return active > 0;
+    }
+
     /** The user finished talking: stop the microphone; recorders still get what was captured. */
     static void stopCapture() {
         recording = false;
@@ -190,29 +221,97 @@ final class MicServer {
         synchronized (chunks) {
             chunks.clear();
             pullChunk = pullOff = 0;
+            captureId++;
+            adopted = false;
             chunks.notifyAll();
         }
     }
 
+    /**
+     * A wake turn takes the capture: the detector's recorder stays open and feeds this buffer (pre-roll first) instead
+     * of a recorder of ours. Returns the new capture id, or 0 when another capture is recording on its own.
+     */
+    static int adopt() {
+        synchronized (chunks) {
+            if (recording && !adopted) return 0;
+            chunks.clear();
+            pullChunk = pullOff = 0;
+            drained = false;
+            adopted = true;
+            captureOn = true;
+            recording = true;
+            chunks.notifyAll();
+            return ++captureId;
+        }
+    }
+
+    /** Audio for an adopted capture. False (nothing kept) once the capture isn't the current one or its input has ended. */
+    static boolean feed(int capture, byte[] chunk) {
+        synchronized (chunks) {
+            if (capture != captureId || !adopted || !recording) return false;
+            chunks.add(chunk);
+            chunks.notifyAll();
+        }
+        Levels lv = levels;
+        if (lv != null) lv.onLevel(loudness(chunk, chunk.length));
+        return true;
+    }
+
+    /** The turn is over: end the capture, but only if it is still this one. */
+    static void release(int capture) {
+        synchronized (chunks) {
+            if (capture != captureId) return;
+        }
+        endCapture();
+    }
+
+    /** The id of the current capture (for a reader of an adopted one). */
+    static int capture() {
+        synchronized (chunks) {
+            return captureId;
+        }
+    }
+
+    /** The current capture is one a wake turn adopted. */
+    static boolean adopted() {
+        synchronized (chunks) {
+            return adopted && captureOn;
+        }
+    }
+
+    /** {@link #pull(int)} for capture; null, and the cursor untouched, when it isn't the current one. */
+    static byte[] pull(int capture, int max) {
+        synchronized (chunks) {
+            if (capture != captureId) return null;
+            return pull(max);
+        }
+    }
+
+    /** Whether the Terminal's recorder may be given the captured buffer: Claude's dictation is the engine listening. */
+    static boolean shares(boolean captureOn, boolean claudeListening, int rate, int channels) {
+        return captureOn && claudeListening && rate == 16000 && channels == 1;
+    }
+
     /** Captured audio from the start, then live; silence once it's all sent (the recorder decides when to stop). */
-    private static void streamCapture(OutputStream out) throws IOException, InterruptedException {
+    static void streamCapture(OutputStream out, int capture) throws IOException, InterruptedException {
         int i = 0;
         byte[] silence = new byte[1280];
-        while (server != null && captureOn) {
+        while (!stopped && captureOn) {
             byte[] next = null;
             boolean live;
             synchronized (chunks) {
+                if (capture != captureId) return; // the capture this reader was admitted for is over: read none of the next
                 if (i < chunks.size()) next = chunks.get(i++);
                 live = recording;
                 if (next == null && live) {
                     chunks.wait(200);
                     continue;
                 }
+                if (next == null) drained = true; // under the lock, so a capture that ended meanwhile isn't marked
             }
             if (next != null) {
                 out.write(next);
             } else {
-                drained = true;
                 out.write(silence);
                 Thread.sleep(40);
             }
@@ -221,6 +320,7 @@ final class MicServer {
 
     private static void serve(Context c, Socket sock) {
         AudioRecord rec = null;
+        boolean counted = false; // listening(+1) was done: only then is there a -1 to pair with it
         try (Socket s = sock) {
             s.setTcpNoDelay(true);
             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
@@ -234,8 +334,14 @@ final class MicServer {
                 if (h != null) h.needMicPermission();
                 return;
             }
-            if (captureOn && rate == 16000 && channels == 1) {
-                streamCapture(s.getOutputStream());
+            int capture;
+            boolean share;
+            synchronized (chunks) {
+                capture = captureId;
+                share = shares(captureOn, ClaudeDictation.active(), rate, channels);
+            }
+            if (share) {
+                streamCapture(s.getOutputStream(), capture);
                 return;
             }
             int chMask = channels == 2 ? AudioFormat.CHANNEL_IN_STEREO : AudioFormat.CHANNEL_IN_MONO;
@@ -244,7 +350,9 @@ final class MicServer {
                     AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate)); // ~0.5 s of buffer
             if (rec.getState() != AudioRecord.STATE_INITIALIZED) return;
             rec.startRecording();
+            sessions.add(rec.getAudioSessionId());
             listening(+1);
+            counted = true;
             OutputStream out = s.getOutputStream();
             byte[] buf = new byte[Math.max(min, 3200)];
             while (server != null) {
@@ -263,9 +371,10 @@ final class MicServer {
                     rec.stop();
                 } catch (Exception ignored) {
                 }
+                sessions.remove(rec.getAudioSessionId());
                 rec.release();
-                listening(-1);
             }
+            if (counted) listening(-1);
         }
     }
 
@@ -282,7 +391,7 @@ final class MicServer {
         return (float) Math.max(0, Math.min(1, (db + 50) / 40));
     }
 
-    private static void listening(int d) {
+    private static synchronized void listening(int d) { // several clients can come and go at once
         boolean was = active > 0;
         active += d;
         boolean now = active > 0;

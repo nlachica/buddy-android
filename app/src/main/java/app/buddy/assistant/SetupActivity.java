@@ -173,7 +173,7 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
     }
 
     /** Appearance changed on this screen: restyle everything in place, keeping the scroll position. */
-    private static final int REQ_FACE = 1;
+    private static final int REQ_FACE = 1, REQ_MIC = 2;
 
     private void pickFace() {
         try {
@@ -677,7 +677,17 @@ public class SetupActivity extends Screen implements Account.Listener, RemoteSes
     private void voiceSection() {
         LinearLayout vc = card();
         vc.setPaddingRelative(dp(this, 16), dp(this, 14), dp(this, 16), dp(this, 16));
-        vc.addView(fieldLabel(getString(R.string.setup_voice_input), null));
+        if (WakeWord.available()) { // 032: Android 14+ and the GitHub build
+            boolean needsMic = Prefs.wakeWord(this) && !Voice.micAllowed(this);
+            vc.addView(switchRow(this, getString(R.string.setup_wake), getString(needsMic ? R.string.setup_wake_needs_mic
+                    : R.string.setup_wake_info), Prefs.wakeWord(this), on -> {
+                Prefs.setWakeWord(this, on);
+                WakeWord.ensure(this);
+                if (on && !Voice.micAllowed(this)) Voice.askMic(this, REQ_MIC);
+                render();
+            }));
+        }
+        vc.addView(fieldLabel(getString(R.string.setup_voice_input), null), topGap(WakeWord.available() ? 16 : 0));
         String engine = Prefs.voiceEngine(this);
         // Claude's dictation needs Claude Code signed in, ChatGPT's voice needs Codex: otherwise greyed out
         java.util.Set<String> noVoice = new java.util.HashSet<>();

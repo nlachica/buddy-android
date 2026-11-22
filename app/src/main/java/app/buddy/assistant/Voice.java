@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.media.AudioAttributes;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
 import android.speech.RecognitionListener;
 import android.speech.RecognizerIntent;
 import android.speech.SpeechRecognizer;
@@ -24,6 +25,11 @@ final class Voice {
 
         /** Stopped without a result (silence, error, cancelled). message may be null. */
         void onEnd(String message);
+
+        /** Stopped because nothing was heard (an error is onEnd): a listener that tells the two apart overrides this. */
+        default void onNothing(String message) {
+            onEnd(message);
+        }
 
         /** Microphone loudness, 0..1, many times a second while recording. */
         default void onLevel(float level) {
@@ -112,11 +118,73 @@ final class Voice {
         else if ("chatgpt".equals(engine)) CodexDictation.prepare(c);
     }
 
+    /**
+     * Whether Phone turns of "hey buddy" are fed to Android's recognizer (EXTRA_AUDIO_SOURCE): on until two fed windows
+     * in a row fail within 3 s of starting (an error other than "no match", or a foreign recording that cancels the
+     * turn). Then Phone turns are unfed ("hey buddy", a pause, the request) for the rest of the process: a recognizer
+     * that ignores supplied audio and opens the microphone itself. One unrelated recorder can't do it alone.
+     */
+    static final class PhoneFeed {
+        static final long EARLY_MS = 3000;
+        boolean on = true;
+        private int fails;
+        private long since;
+
+        /** A fed window started listening. */
+        void started(long now) {
+            if (since != 0) fails = 0; // the window before it ended (cancelled) without failing early: not in a row
+            since = now;
+        }
+
+        /** The fed window failed. True when this turned feeding off. */
+        boolean failed(long now) {
+            if (since == 0) return false;
+            boolean late = now - since > EARLY_MS;
+            since = 0;
+            if (late) {
+                fails = 0;
+                return false;
+            }
+            if (++fails < 2 || !on) return false;
+            on = false;
+            return true;
+        }
+
+        /** The fed window ended normally. */
+        void ok() {
+            fails = 0;
+            since = 0;
+        }
+    }
+
+    static final PhoneFeed phoneFeed = new PhoneFeed();
+
+    /** A "hey buddy" turn can hand the detector's audio to the input in use (Claude, ChatGPT, or Phone while it works). */
+    static boolean takesFeed(Context c) {
+        String engine = Prefs.voiceEngine(c);
+        if ("claude".equals(engine) && ClaudeDictation.supports(Prefs.voiceLang(c))) return true;
+        return "chatgpt".equals(engine) || (phoneFeed.on && android.os.Build.VERSION.SDK_INT >= 33);
+    }
+
+    /** A fed phone window failed (an error, or a foreign recording cancelled its turn). */
+    private static void fedFailed() {
+        if (phoneFeed.failed(android.os.SystemClock.elapsedRealtime())) {
+            android.util.Log.i("BuddyWake", "Phone input is not fed any more: the recognizer failed twice in a row");
+        }
+    }
+
+    /** A foreign recording cancelled a wake turn: if its window was a fed phone one, that is a failure of feeding. */
+    static void fedCancelled() {
+        if (phone != null && phone.capture != 0) fedFailed();
+    }
+
     /** Start listening. Returns an error message, or null when started. */
     static String listen(Context c, Listener given) {
         if (!micAllowed(c)) return c.getString(R.string.voice_mic_needed);
         if (CodexLive.on()) return c.getString(R.string.live_mic_busy); // the call has the microphone
         stopListening();
+        // the detector's microphone closes before the recognizer (another app) starts, unless a wake window just took MicServer
+        if (!WakeWord.release()) return c.getString(R.string.dictation_mic_failed);
         stopSpeaking();
         AudioRoute.use(c);
         final Listener l = endpoint(c, given);
@@ -128,54 +196,10 @@ final class Voice {
         }
         if ("chatgpt".equals(Prefs.voiceEngine(c))) return unwatchOnError(l, CodexDictation.listen(c, l));
         if (!SpeechRecognizer.isRecognitionAvailable(c)) return unwatchOnError(l, c.getString(R.string.voice_no_recognizer));
-        current = l;
-        inputDone = false;
+        Window window = openWindow(c, l);
         l.onStatus(c.getString(R.string.voice_starting));
         recognizer = SpeechRecognizer.createSpeechRecognizer(c.getApplicationContext());
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override
-            public void onPartialResults(Bundle b) {
-                String t = best(b);
-                if (t != null && current == l) l.onPartial(t);
-            }
-
-            @Override
-            public void onResults(Bundle b) {
-                String t = best(b);
-                finish();
-                if (t != null && !t.trim().isEmpty()) l.onFinal(t.trim());
-                else l.onEnd(c.getString(R.string.voice_didnt_catch));
-            }
-
-            @Override
-            public void onError(int error) {
-                finish();
-                l.onEnd(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                        ? c.getString(R.string.voice_didnt_catch) : error == SpeechRecognizer.ERROR_CLIENT ? null
-                        : c.getString(R.string.voice_error, error));
-            }
-
-            @Override
-            public void onReadyForSpeech(Bundle b) {
-                if (current == l) l.onStatus(null);
-            }
-
-            @Override
-            public void onRmsChanged(float rms) { // about -2 (quiet) to 10 dB (loud)
-                if (current == l) l.onLevel(Math.max(0f, Math.min(1f, (rms + 2f) / 12f)));
-            }
-
-            @Override public void onBeginningOfSpeech() {}
-            @Override public void onBufferReceived(byte[] buf) {}
-            @Override
-            public void onEndOfSpeech() {
-                if (current == l) {
-                    inputDone = true;
-                    l.onStatus(c.getString(R.string.voice_finishing));
-                }
-            }
-            @Override public void onEvent(int type, Bundle b) {}
-        });
+        recognizer.setRecognitionListener(window);
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -193,8 +217,164 @@ final class Voice {
             i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, langs);
         }
+        if (android.os.Build.VERSION.SDK_INT >= 33 && phoneFeed.on && MicServer.adopted() && !feed(window, i)) {
+            finish();
+            return unwatchOnError(l, c.getString(R.string.dictation_mic_failed));
+        }
         recognizer.startListening(i);
         return null;
+    }
+
+    /**
+     * A wake turn's audio (what the detector heard, pre-roll first) goes to the recognizer through a pipe: the
+     * documented EXTRA_AUDIO_SOURCE, so the recognizer opens no microphone of its own. A pipe that can't be made makes
+     * this one window unfed: the detector's microphone is closed first, and false (the window fails) if it won't close.
+     */
+    private static boolean feed(final Window window, Intent i) {
+        final int capture = MicServer.capture();
+        final ParcelFileDescriptor[] pipe;
+        try {
+            pipe = ParcelFileDescriptor.createPipe();
+        } catch (java.io.IOException e) {
+            MicServer.release(capture);
+            WakeWord.unfed();
+            return WakeWord.release();
+        }
+        window.feed(capture, pipe);
+        i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_SAMPLING_RATE, 16000)
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_CHANNEL_COUNT, 1)
+                .putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE_ENCODING, android.media.AudioFormat.ENCODING_PCM_16BIT);
+        phoneFeed.started(android.os.SystemClock.elapsedRealtime());
+        final EndOfSpeech eos = new EndOfSpeech(); // Buddy's own end of speech, as for Claude and ChatGPT
+        MicServer.levels = v -> ends.post(() -> {
+            if (phone == window && !inputDone && eos.feed(v)) finishListening();
+        });
+        new Thread(() -> { // the capture thread never blocks on the pipe: this one does
+            try (java.io.OutputStream out = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
+                while (true) {
+                    byte[] b = MicServer.pull(capture, 3200);
+                    if (b == null) break; // that capture is over
+                    if (b.length > 0) out.write(b);
+                    else if (!MicServer.recording()) break; // the end of input was marked and all of it is written
+                    else Thread.sleep(20);
+                }
+            } catch (java.io.IOException | InterruptedException ignored) { // the recognizer closed its end, or finish() closed ours
+            }
+            // all of the audio is in and the pipe is closed: only now may the recognizer be told to stop (finishListening waits for this)
+            ends.post(() -> {
+                if (phone == window && inputDone && recognizer != null) recognizer.stopListening();
+            });
+        }, "wake-pipe").start();
+        return true;
+    }
+
+    /** The phone recognizer's open window. */
+    private static Window phone;
+
+    /** Starts a phone-recognizer window for l: it is the only one whose callbacks count until finish(). */
+    static Window openWindow(Context c, Listener l) {
+        current = l;
+        inputDone = false;
+        phone = new Window(c, l);
+        return phone;
+    }
+
+    /**
+     * What the phone recognizer says to one listening window. A callback that is already on its way from a cancelled
+     * recognizer finds another window (or none) open and changes nothing: it can neither end a newer recognizer nor
+     * deliver to an old listener.
+     */
+    static final class Window implements RecognitionListener {
+        private final Context c;
+        private final Listener l;
+        /** A wake turn's window: the adopted MicServer capture it reads (0: none) and the pipe it is fed through. */
+        private int capture;
+        private ParcelFileDescriptor[] pipe;
+
+        Window(Context c, Listener l) {
+            this.c = c;
+            this.l = l;
+        }
+
+        void feed(int capture, ParcelFileDescriptor[] pipe) {
+            this.capture = capture;
+            this.pipe = pipe;
+        }
+
+        /** The end of input is marked: the pump drains and closes the pipe, and the detector's loop holds what comes next. */
+        void endInput() {
+            if (capture != 0) MicServer.stopCapture();
+        }
+
+        /** The window is over: its capture is released and its pipe closed (which ends the pump). */
+        private void closeFeed() {
+            if (capture == 0) return;
+            MicServer.levels = null;
+            MicServer.release(capture);
+            for (ParcelFileDescriptor p : pipe) {
+                try {
+                    p.close();
+                } catch (java.io.IOException ignored) {
+                }
+            }
+        }
+
+        @Override
+        public void onPartialResults(Bundle b) {
+            String t = best(b);
+            if (t != null && phone == this && current == l) l.onPartial(t);
+        }
+
+        @Override
+        public void onResults(Bundle b) {
+            if (phone != this) return;
+            String t = best(b);
+            if (capture != 0) phoneFeed.ok();
+            finish();
+            if (t != null && !t.trim().isEmpty()) l.onFinal(t.trim());
+            else l.onNothing(c.getString(R.string.voice_didnt_catch));
+        }
+
+        @Override
+        public void onError(int error) {
+            if (phone != this) return;
+            boolean nothing = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
+            if (capture != 0) {
+                if (nothing) phoneFeed.ok();
+                else fedFailed(); // also ERROR_CLIENT: a cancelled window's late one never gets here (phone != this)
+            }
+            finish();
+            if (nothing) {
+                l.onNothing(c.getString(R.string.voice_didnt_catch));
+            } else {
+                l.onEnd(error == SpeechRecognizer.ERROR_CLIENT ? null : c.getString(R.string.voice_error, error));
+            }
+        }
+
+        @Override
+        public void onReadyForSpeech(Bundle b) {
+            if (phone == this && current == l) l.onStatus(null);
+        }
+
+        @Override
+        public void onRmsChanged(float rms) { // about -2 (quiet) to 10 dB (loud)
+            if (phone == this && current == l) l.onLevel(Math.max(0f, Math.min(1f, (rms + 2f) / 12f)));
+        }
+
+        @Override public void onBeginningOfSpeech() {}
+        @Override public void onBufferReceived(byte[] buf) {}
+
+        @Override
+        public void onEndOfSpeech() {
+            if (phone == this && current == l) {
+                inputDone = true;
+                endInput();
+                l.onStatus(c.getString(R.string.voice_finishing));
+            }
+        }
+
+        @Override public void onEvent(int type, Bundle b) {}
     }
 
     /** The listening that endpoint() watches now: an earlier one's timer must not end a later one. */
@@ -207,7 +387,10 @@ final class Voice {
      * a car) keeps the engine listening, as it waits for quiet; it doesn't make new words, so this pause still ends.
      */
     private static Listener endpoint(Context c, final Listener l) {
-        final long pause = Prefs.voicePauseMs(c), max = Prefs.voiceMaxMs(c);
+        return endpoint(Prefs.voicePauseMs(c), Prefs.voiceMaxMs(c), l);
+    }
+
+    static Listener endpoint(final long pause, final long max, final Listener l) {
         if (pause <= 0 && max <= 0) return l; // Auto: the engine decides, as before
         final long started = android.os.SystemClock.elapsedRealtime();
         final Listener[] me = new Listener[1];
@@ -251,6 +434,12 @@ final class Voice {
             }
 
             @Override
+            public void onNothing(String message) {
+                if (watched == me[0]) watched = null;
+                l.onNothing(message);
+            }
+
+            @Override
             public void onLevel(float level) {
                 l.onLevel(level);
             }
@@ -283,7 +472,8 @@ final class Voice {
         }
         if (recognizer != null) {
             inputDone = true;
-            recognizer.stopListening();
+            if (phone != null) phone.endInput();
+            if (phone == null || phone.capture == 0) recognizer.stopListening(); // a fed window's pump does it once its audio is written
         }
     }
 
@@ -303,11 +493,14 @@ final class Voice {
     }
 
     private static void finish() {
+        Window w = phone;
         current = null;
+        phone = null;
         if (recognizer != null) {
             recognizer.destroy();
             recognizer = null;
         }
+        if (w != null) w.closeFeed();
     }
 
     private static String best(Bundle b) {

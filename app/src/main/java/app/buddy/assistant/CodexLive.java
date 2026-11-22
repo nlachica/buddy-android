@@ -219,6 +219,8 @@ final class CodexLive {
         if (r == null && !Voice.micAllowed(c)) return c.getString(R.string.voice_mic_needed);
         if (ses != null) end(null);
         Voice.stopListening();
+        // the always-on detector's microphone is closed (confirmed) before the page asks for one; a watch call uses the watch's
+        if (r == null && !WakeWord.release()) return c.getString(R.string.dictation_mic_failed);
         Voice.stopSpeaking();
         app = c.getApplicationContext();
         if (r == null) AudioRoute.use(app); // before the call exists: reads the phone's mode as it was, so another call is seen

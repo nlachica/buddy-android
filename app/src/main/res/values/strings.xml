@@ -327,6 +327,8 @@
     <!-- Verb: starts voice input to the agent. A hold-menu label (keep under ~12 characters) and the chat panel's
          mic button (read by TalkBack). -->
     <string name="bubble_talk">Talk</string>
+    <string name="menu_wake_off">Hey Buddy off</string>
+    <string name="menu_wake_on">Hey Buddy on</string>
     <string name="menu_open_chat">Open chat</string>
     <!-- Hides the bubble; a notification brings it back. -->
     <string name="menu_hide">Hide</string>
@@ -734,6 +736,15 @@
     <string name="chat_edited">edited</string>
     <string name="setup_voice_pause">Stop listening after a pause of</string>
     <string name="setup_voice_auto">Auto</string>
+    <string name="setup_wake">Hey Buddy</string>
+    <string name="setup_wake_info">Always listening on this phone for \"hey buddy\"; nothing leaves it before that. Uses more battery. Paused in calls and while another app records.</string>
+    <string name="wake_channel">Hey Buddy</string>
+    <string name="wake_listening">Hey Buddy is listening</string>
+    <string name="wake_paused_call">Hey Buddy is paused: in a call</string>
+    <string name="wake_paused_mic">Hey Buddy is paused: the microphone is in use</string>
+    <string name="wake_turn_off">Turn off</string>
+    <string name="wake_tap">Tap to turn on Hey Buddy</string>
+    <string name="setup_wake_needs_mic">Needs the microphone. Allow it to start listening for \"hey buddy\".</string>
     <string name="setup_voice_pause_info">Buddy stops and sends when the words it heard haven\'t changed for that long, even with music or traffic around. Auto: the voice engine decides, and it waits for quiet.</string>
     <string name="setup_voice_max">Longest recording</string>
     <string name="setup_voice_no_limit">No limit</string>
