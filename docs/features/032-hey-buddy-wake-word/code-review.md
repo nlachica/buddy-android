@@ -34,3 +34,33 @@ F14 [minor] Wake and Talk have separate implementations of the same chat selecti
 On the reviewed head, 67 tests passed across the wake logic, capture, voice-window and settings suites in the local Android-stub JVM harness. All three shipped model checksums matched. The real-model result above is from the supplied CI run. Device checks remain deferred under the orchestrator's ruling.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+Commits are named under "Commits" below; details are in decisions.md ("Code review round 1").
+
+- F1: **not fixed, open: needs one CI run.** The phone can't run ONNX Runtime and the failed run's log has no score
+  (only "AssertionError at line 87"), so a threshold or scale change would be a guess. `SCALE` = 1 is what hey-buddy's
+  Python does (`audio × 32767`), the clean clip passes with it, and the augmented clip is full-scale clipped. Changed so
+  the next CI run gives the numbers: the test's failure message carries clean, augmented and sound-alike peaks, and
+  `app/build.gradle.kts` prints failed assertions in full (CI-only, not verified here). Then set `THRESHOLD` from them.
+- F2: fixed in the commit "wake: start at connect, mic hand-off, history across switch" (`BuddyService` calls
+  `WakeWord.ensure(this)` after the bubble is up; it stops itself when the switch is off).
+- F3: fixed in "ChatGPT dictation: one conversation per call" (each call has its own Codex thread; events of any other
+  thread are ignored). Not unit-tested: needs a WebView and a Codex server.
+- F4: fixed in the wake commit: `WakeService.closeNow()` waits for the capture thread to release the recorder (300 ms
+  cap) before `Voice.listen` goes on. No unit test: needs a Service and an AudioRecord.
+- F5: fixed in "Phone feed: stop after the audio is written, streak reset" (the pump calls `stopListening()` after
+  the pipe is closed). No unit test: needs a recognizer.
+- F6: fixed in the wake commit (the capture thread drops history only when the microphone was closed, not on idle <->
+  speaking). No unit test: the capture thread isn't testable without an AudioRecord.
+- F7: fixed in "One send for Talk and hey buddy, reply speech tied to the request" (`spokenAsk` carries the request to
+  the turn that starts with it, `result` clears it). No unit test: `ChatHub` needs a service.
+- F8: fixed in the Phone feed commit; `VoiceWindowTest.aLateOrCancelledWindowBreaksTheStreak` has early-late-early.
+- F9: fixed in "Bubble waves, mic open, Terminal count, docs, settings test" (waves only while the bubble is visible, removed when it hides).
+- F10: fixed in the same commit (a `finally` releases the recorder and echo canceller unless the open succeeded).
+- F11: fixed in the same commit (`listening(-1)` only after a counted `+1`; the count is synchronized).
+- F12: fixed in the same commit (GUIDE: Phone compatibility is "not yet checked on a phone"; the 1.2%/h and 25%/h
+  figures are the developer write-up's, Home Assistant's is its unstated-window rise).
+- F13: fixed in the same commit (`Prefs.WAKE_WORD_DEFAULT` and `SettingsTool.heyBuddyReady` are the seams;
+  `SettingsCoverageTest` checks default-on, "on" accepted where offered, refused where not).
+- F14: fixed with F7: `ChatHub.sendTalk` is the one destination and send of Talk and wake.

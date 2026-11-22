@@ -317,3 +317,28 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   `mic_off` source was at hand), so it is not a verbatim Material icon.
 - Battery in the guide and `battery.md`: research's sourced range, marked as an estimate. The service logs no time per
   hop, so P5 needs a temporary timing log; `battery.md` says so.
+
+## 2026-11-22 - Code review round 1 details (coder)
+- F1: not fixed, **needs a CI run to read the scores**. ONNX Runtime does not run on this phone's Alpine, and the failed
+  CI run's log carries only "AssertionError at line 87", not the augmented clip's score. `SCALE` = 1 matches hey-buddy's
+  Python (`embeddings.py`: audio × 32767, int16 range) and the clean clip passes with it; the augmented clip is
+  full-scale clipped (peak 32768) and 3× louder in RMS. No threshold or scale change without a number. The test now
+  puts all three peaks in one failure message and `app/build.gradle.kts` prints failed assertions in full, so the next
+  CI run gives the figures to calibrate with (CI-only, unverified here). If the augmented clip is simply below 0.5 while
+  the others separate, the call is: lower `THRESHOLD` to what the clean/augmented/sound-alike scores justify.
+- F4: `WakeService.closeNow()` waits (at most 300 ms, one 40 ms read normally) until the capture thread has released the
+  recorder; a small lock keeps "closeNow sets want 0" and "capture thread takes the microphone" in order. Every caller
+  of `Voice.listen` (so Claude's and ChatGPT's `startCapture` and the phone recognizer) goes through `WakeWord.release`.
+  No unit test: it needs a `Service` and an `AudioRecord`.
+- F3: each ChatGPT dictation call starts its own Codex thread (`CodexDictation.callThread`, one more `thread/start`
+  per call, as `CodexLive` does); transcript, SDP and error events of any other thread are ignored. Not unit-tested
+  (WebView and a Codex server); post-release device check.
+- F5: a fed Phone window's `stopListening()` is called by its pump after the audio is written and the pipe closed.
+- F6: the capture thread only drops what it heard when the microphone was closed (a pause or stop), not when it
+  switches idle <-> speaking.
+- F7/F14: `ChatHub.sendTalk(text, spoken)` is the one send of Talk and "hey buddy". A spoken request is remembered on
+  the chat (`spokenAsk`) and tied to its text: the turn that starts with that text (now, a live message, or a note
+  delivered after the run ended) speaks its reply; `result` ends it, and any other turn that starts clears the wait.
+  A note added to a run that is going speaks that run's reply. Not unit-tested (`ChatHub` needs a service).
+- F13: `Prefs.WAKE_WORD_DEFAULT` and `SettingsTool.heyBuddyReady(value, available)` are the seams the test uses (the
+  JVM can't make the SDK check true or read a `SharedPreferences`).

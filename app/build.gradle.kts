@@ -92,6 +92,8 @@ android {
     // JVM tests only: android.* calls return defaults (JSON comes from the real org.json below)
     testOptions {
         unitTests.isReturnDefaultValues = true
+        // a failed assertion's message (OnnxWakeEngineTest puts the model's scores in it) reaches the CI log
+        unitTests.all { it.testLogging { exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL; events("failed") } }
     }
 }
 

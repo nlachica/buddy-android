@@ -81,10 +81,10 @@ public class OnnxWakeEngineTest {
 
     @Test
     public void positiveClipsDetect() throws Exception {
-        float a = peak(clip("hey_buddy.wav")), b = peak(clip("hey_buddy_augmented.wav"));
-        System.out.println("hey_buddy peak " + a + ", augmented " + b);
-        assertTrue("hey_buddy " + a, a >= WakeFeatures.THRESHOLD);
-        assertTrue("hey_buddy_augmented " + b, b >= WakeFeatures.THRESHOLD);
+        float a = peak(clip("hey_buddy.wav")), b = peak(clip("hey_buddy_augmented.wav")), adv = peak(clip("hey_buddy_adv.wav"));
+        String scores = "peaks: hey_buddy " + a + ", augmented " + b + ", sound-alike " + adv + ", threshold " + WakeFeatures.THRESHOLD;
+        System.out.println(scores);
+        assertTrue(scores, a >= WakeFeatures.THRESHOLD && b >= WakeFeatures.THRESHOLD);
     }
 
     @Test
