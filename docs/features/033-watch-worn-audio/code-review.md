@@ -27,3 +27,14 @@ F4: fixed in 9cf32d9 (`off` flag: a take-off sets it, so decide() and the retry 
 F5: fixed in 04dd23a (ask ids start at `currentTimeMillis()`, as WatchVoiceLink's). Test: aReplyFromThePreviousPhoneProcessCannotSettleTheNewAsk.
 F6: fixed in 9d95282 (AudioRoute.autoNow rechecks `headsetNow` when the answer arrives). No unit test: it is Context-bound like the rest of autoNow, which has none.
 
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A delayed positive push can keep an off-wrist call on the watch - `app/src/main/java/app/buddy/assistant/Worn.java:54` timestamps the push when the phone handles it. The watch discards the sensor timestamp at `wear/src/main/java/app/buddy/assistant/wear/ReadAloud.java:165`. A positive event delayed four seconds therefore passes the three-second freshness check when the user switches Watch to Auto. -> Use only a positive with a known age to authorize this switch. An uncorrelated positive push can trigger a timestamped ask if fresh evidence is needed. Add a delayed-push transition test.
+
+F2 [major] An older positive reply can undo a removal the phone already received - `app/src/main/java/app/buddy/assistant/Worn.java:85` accepts the pending ID even after a removal from that node. In a JVM check, the watch sampled worn at 100 ms, the phone received removal at 500 ms, and the positive reply arrived at 600 ms. The waiting Auto placement selected the watch. Risk 5 covers a lost removal. This sequence delivers both messages. -> On removal, settle that node's pending ask as off-wrist and ignore its later reply. Test the placement callback and cached state with those messages in that order.
+
+F3 [minor] The one-second allowance understates the age of samples taken before an ask - `wear/src/main/java/app/buddy/assistant/wear/Worn.java:34` rounds a sample taken 900 ms before receipt of the ask to a zero offset. With immediate outbound delivery and a reply arriving 2,500 ms later, the phone accepts a 3,400 ms old positive. -> Reject pre-ask samples or preserve their signed offset in the phone's age calculation. Cover this boundary in the freshness test.
+
+All 114 focused phone and Wear JVM tests passed. Three temporary regression tests reproduced F1–F3. CI passed the GitHub, F-Droid and Wear release builds and the phone and Wear unit tests at `3ba5de7`. The on-watch sign-off remains pending. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44992825671)
+
+VERDICT: REVISE
