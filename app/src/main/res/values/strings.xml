@@ -744,6 +744,8 @@
     <string name="wake_paused_mic">Hey Buddy is paused: the microphone is in use</string>
     <string name="wake_turn_off">Turn off</string>
     <string name="wake_tap">Tap to turn on Hey Buddy</string>
+    <string name="setup_wake_sensitivity">Sensitivity</string>
+    <string name="setup_wake_sensitivity_info">Low wakes least by mistake. High hears a quiet or far \"hey buddy\" but wakes by mistake more often.</string>
     <string name="setup_wake_needs_mic">Needs the microphone. Allow it to start listening for \"hey buddy\".</string>
     <string name="setup_voice_pause_info">Buddy stops and sends when the words it heard haven\'t changed for that long, even with music or traffic around. Auto: the voice engine decides, and it waits for quiet.</string>
     <string name="setup_voice_max">Longest recording</string>

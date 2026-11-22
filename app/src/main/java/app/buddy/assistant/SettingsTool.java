@@ -362,6 +362,8 @@ final class SettingsTool {
             Prefs.setWakeWord(svc, on);
             WakeWord.ensure(svc);
         }).ready(v -> heyBuddyReady(v, WakeWord.available())));
+        l.add(new Scalar("hey_buddy_sensitivity", () -> Prefs.wakeSensitivity(svc), v -> Prefs.setWakeSensitivity(svc, v),
+                " Used from the next sound on; low wakes least by mistake.", "low", "medium", "high"));
         l.add(new Scalar("voice_input", () -> Prefs.voiceEngine(svc), v -> Prefs.setVoiceEngine(svc, v), "",
                 "phone", "claude", "chatgpt").ready(v -> plan(svc, v.equals("claude") ? "claude" : v.equals("chatgpt") ? "codex" : null)));
         l.add(new Scalar("voice_output", () -> Prefs.speechEngine(svc), v -> Prefs.setSpeechEngine(svc, v), "",
