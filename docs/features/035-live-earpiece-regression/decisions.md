@@ -99,3 +99,12 @@
   call is silent while muted, as today. Unmute-and-remute needs the mute state saved and restored too: a follow-up
   only if Nicholas asks.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-22 Orchestrator: plan loop ended without APPROVE (exit 3)
+- Round 3's only finding (F1: re-check speaker-only route, mute and Media index after a successful commit and right
+  before setStreamVolume; skip the write and keep the old record on any failure) is accepted as written; the coder
+  applies it and adds the failed-commit / route-change-during-commit tests. No further plan round.
+- Diagnosis accepted: the 12:23 call was on the speakers at media volume 6/15 (-29.5 dB), not the earpiece.
+- Waiting on Nicholas for "Questions for Nicholas" #1 (a/b/c) before the code loop.
+- 2026-11-22 Nicholas answered Q1: (a), the recommended option (volume keys set loudness, Media mirrored during the
+  speaker call and restored afterwards). Proceed to the code loop.
