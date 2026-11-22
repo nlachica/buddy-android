@@ -127,3 +127,9 @@
   and no capture in the folder. The code follows the plan as approved; Step 5's phone checks cover the same ground
   (Risk 1: if the keys already move Media, or the voice stays quiet, back to the Planner).
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - Code review round 1 (Coder)
+- Options: keep `follow()` untested at the write order; extract the order into `AudioRoute.change()` with a three-method `Vol` interface.
+- Choice: the second (reviewer F4; the plan requires the failed-commit and route-change tests). Supersedes "Round 3 F1 and what the tests can reach".
+- Also: the recovery record lives in its own prefs file `live_media`, not in `buddy`, so Backup neither exports nor overwrites it (F3). A write Android ignored is not accepted: the record stays, the next tick retries (F2). A record change without a write (the user moved Media) is rechecked like a write (F1).
+- By: Coder (claude-sonnet-5-5)

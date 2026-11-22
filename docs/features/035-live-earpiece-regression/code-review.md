@@ -16,3 +16,13 @@ F5 [major] The baseline phone check that decides whether to mirror volume is mis
 Verification at `00065a6` — all 76 tests in `AudioRouteTest` and `LiveWatchTest` passed using JDK 17 and the cached Android/JUnit harness. The full Gradle build and installed-build listening check remain unverified in this review.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in c190224. `follow()` now asks `change()` for every record change, not only a write: the speaker-only route, mute and Media index are read again, and on failure the old record stays and nothing is written. Test `aHandoffAtHangUpKeepsTheSpeakersRecord`.
+F2: fixed in c190224. After the write `change()` reads again (speaker alone, unmuted, index == w); if Android ignored the write it returns false, the record stays and the next tick tries again. Test `anIgnoredRestoreKeepsTheRecord` (setter returns normally, index stays 15; then applies on the next try).
+F3: fixed in c190224. `Prefs.liveMedia/setLiveMedia` use their own file `live_media`, outside `Backup.PREFS` (the feature is unreleased: no migration of the old key in `buddy`). A backup neither carries nor erases the record.
+F4: fixed in c190224. Round 3 F1's write order moved out of `follow()` into `AudioRoute.change(...)` over a small `Vol` interface (save, at, put); `follow()` passes the real AudioManager and Prefs, the tests a fake. New tests: failed commit (0 writes), headset during the commit (0 writes, old record saved back), mute during the commit (0 writes), plus the F1 and F2 cases. This supersedes the "no fake layer" choice in decisions.md: the plan required these tests.
+F5: not fixed here, left open - it is a listening check on the unmodified installed build with Nicholas (record Media and Call indices, loudness at the bottom speaker, restore both), which a Coder can't do from this chat. Plan Step 1 stays the orchestrator's; Step 5's phone checks cover the same ground on the fixed build, but not the baseline question the reviewer raises. If either observation contradicts the diagnosis, the plan's stop rule applies.
+
+Tests: `AudioRouteTest` + `LiveWatchTest`, 82 tests, all pass (JDK 17 -Xint, stub android.jar, fdroid flavor). Gradle build and phone behaviour: CI-only / phone-only.
