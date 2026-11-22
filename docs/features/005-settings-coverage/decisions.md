@@ -223,3 +223,6 @@
 - By: sync (claude-opus-5-5)
 - Not patched (Codex nit): `buddy_settings` has no Tools switch and Lite's "advanced" group text lists only Tools-screen
   tools; it is still offered as before. A switch would need a row and strings in upstream's Tools screen.
+- Second Codex pass on the patch: `chat/<id>/tool/<tool>`'s snapshot holds both the chat's choice and Settings'
+  ("off (Settings: on)"), so a Settings change while the card is open makes the write stale; `face_anim` rechecks the
+  animated picture when it writes. Every chat tool request cards (no "Already" shortcut), which is harmless.

@@ -290,6 +290,9 @@ final class SettingsTool {
         }));
         // upstream 2.3.17 (#68): how an animated picture plays; the screen offers it only for the user's own animated one
         l.add(new Scalar("face_anim", () -> Prefs.faceAnim(svc), v -> {
+            if (Face.picture(svc) == null || !Face.animated(svc)) { // changed while the card was open
+                throw new IllegalStateException("the bubble no longer shows an animated picture");
+            }
             Prefs.setFaceAnim(svc, v);
             svc.applyFace();
         }, "", "loop", "once", "off").ready(v -> {
@@ -1716,7 +1719,7 @@ final class SettingsTool {
             String id = p[1], tool = p[3];
             return toolSwitch(name, tool, () -> {
                 Sessions.Session c = chat(svc, id);
-                return c == null ? null : chatTool(c.tools.get(tool), ToolSwitch.on(svc, tool, c));
+                return c == null ? null : chatTool(c.tools.get(tool), ToolSwitch.on(svc, tool));
             }, v -> {
                 Sessions.Session c = chat(svc, id);
                 if (c == null) throw new IllegalStateException("that chat is gone");
@@ -1794,9 +1797,13 @@ final class SettingsTool {
         return false;
     }
 
-    /** A chat's tool as the tool names it: "on"/"off" (its own choice) or "settings (on)" (it follows Settings). */
-    static String chatTool(Boolean own, boolean now) {
-        return own != null ? (own ? "on" : "off") : "settings (" + (now ? "on" : "off") + ")";
+    /**
+     * A chat's tool as the tool names it: its own choice with Settings' ("off (Settings: on)") or "settings (on)" (it
+     * follows Settings). Both are in the snapshot, so a Settings change while the card is open makes the write stale.
+     */
+    static String chatTool(Boolean own, boolean settings) {
+        String g = settings ? "on" : "off";
+        return own != null ? (own ? "on" : "off") + " (Settings: " + g + ")" : "settings (" + g + ")";
     }
 
     /**

@@ -410,7 +410,7 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   on a locked phone, and `collapse()` stops any listening. 032 listens for its request through the same talk mode and
   must answer while locked (Nicholas, 2026-11-22), so a lock (or any `applyEnabled` while locked) cut the request off.
 - Choice: `talkTurn` remembers the turn talk mode listens for; on lock only talk without a turn stops, and `collapse()`
-  leaves a turn's listening alone. The waves still go with the hidden bubble (upstream's fix for #71 stays).
+  and `restyle()` (a theme change applied on collapse) leave a turn's listening alone. The waves still go with the hidden bubble (upstream's fix for #71 stays).
 - Not patched (Codex, upstream's own design): an `sms_codes` already on lets sms_list return codes with no card, in
   Bypass too; the switch itself now always cards (005).
 - By: sync (claude-opus-5-5)

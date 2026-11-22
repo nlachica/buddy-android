@@ -334,7 +334,7 @@ public class SettingsCoverageTest {
         assertEquals("settings", SettingsTool.toolSwitch("chat/c1/tool/tap", "tap", now::get, now::set, "on", "off", "settings")
                 .check("Settings"));
         assertEquals("settings (off)", SettingsTool.chatTool(null, false));
-        assertEquals("on", SettingsTool.chatTool(true, false));
+        assertEquals("on (Settings: off)", SettingsTool.chatTool(true, false)); // both in the snapshot: stale if Settings moves
         for (String n : new String[]{"tool/sms_list", "chat/c1/tool/call_log", "sms_codes"}) assertTrue(n, SettingsTool.keepsCard(n, false));
         assertEquals("on", named("sms_codes").check("On"));
         refused(named("face_anim"), "always");

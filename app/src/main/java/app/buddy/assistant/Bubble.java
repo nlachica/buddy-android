@@ -1098,7 +1098,7 @@ final class Bubble implements ChatHub.Listener {
 
     private void restyle() {
         themeDirty = false;
-        if (Voice.listening()) Voice.stopListening();
+        if (Voice.listening() && talkTurn == null) Voice.stopListening(); // (not a "hey buddy" turn's: 032)
         CharSequence draft = input.getText();
         buildPanel();
         input.setText(draft);
