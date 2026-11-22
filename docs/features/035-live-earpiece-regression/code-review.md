@@ -46,3 +46,13 @@ F2: not fixed here, left open (same as round 1 F5). It is a listening check on t
 F3: fixed in the round 2 commit. `follow()` remembers a failed final `setLiveMedia` (`unsaved`) and retries only the disk write on the next call, before any early return, with no second volume write. No unit test: the retry lives in `follow()` over static `Prefs`/`AudioManager`, which the repo can't fake without the abstraction F4 already rejected for this path (YAGNI); phone-only.
 
 Tests: `AudioRouteTest` + `LiveWatchTest`, 84 tests (JDK 17 -Xint, stub android.jar, fdroid flavor). Gradle build and phone behaviour: CI-only / phone-only.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A failed confirmation read can leave the speaker at full volume - `app/src/main/java/app/buddy/assistant/AudioRoute.java:593`. I ran the production `follow()` with an audio test double that applied the change from 6 to 15 and threw once on the next Media read. The exception skipped the pending-record assignment at line 551. On the next tick Buddy overwrote the saved 6 with 15, then logged `volume: media back to 15` at hang-up. -> Handle an exception from the setter or its confirmation as an unconfirmed write. Keep the committed recovery record in memory so the next speaker read can resolve it. Add a regression test that throws on confirmation and ends at 6.
+
+F2 [major] The baseline phone check remains open (round 2 F2) - `docs/features/035-live-earpiece-regression/decisions.md:141`. The capture shows the speaker route and Media at 6. It lacks a volume-key observation and a listening result with Media raised. Once mirroring is active, a key press can change both indices and obscure the original behavior. -> Run plan Step 1 on the unmodified build with Nicholas. Record the Call and Media indices before and after one volume-down press, whether raising Media makes the bottom speaker loud, and both restored starting levels. Return to the Planner if either observation contradicts the diagnosis.
+
+Verification at `70abc2d` — recompiled the changed classes and ran all 84 tests in `AudioRouteTest` and `LiveWatchTest` with JDK 17 and the cached F-Droid JVM harness. All passed, including the round 2 headset handoff. The exception probe above ran separately. The full Gradle build and on-phone listening checks remain unverified in this review.
+
+VERDICT: REVISE
