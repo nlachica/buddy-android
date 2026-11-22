@@ -46,3 +46,6 @@
 - Choice: reuse the translated strings; no gate, because the value is simply unused where Hey Buddy isn't offered
   and a refusal would be one more rule to test.
 - By: Planner (Claude Fable 5.2)
+
+## 2026-11-22 - Coder: tests avoid Java 9+ APIs
+- Choice: `Collections.singletonList` instead of `List.of` in WakeLoopTest (sourceCompatibility is 1.8), by Coder (Claude Sonnet 5.5). No other deviation from the plan.
