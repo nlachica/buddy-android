@@ -127,3 +127,23 @@
 - Choice: (b), because the ask names the earpiece as the last resort while 030/031 end the call, and the Verifier
   needs one expected outcome (F4). The plan carries both: no code (recommended), or step 4b.
 - By: Planner
+
+## 2026-11-21 - Orchestrator: plan review ended without APPROVE (3 rounds); rulings
+Brief is the tie-breaker. The plan as written is approved with these rulings:
+- **Readings of the brief** (plan's gate): (a) done-when 1 is met by on-demand asks plus pushes while a reading plays;
+  the phone never uses a sample older than 3 s. (b) Earpiece: Q2 takes the planner's recommended answer for now (no
+  code change: Auto never picks the earpiece while a speaker exists; a Live call with no speaker at all ends, as
+  030/031 pin). Nicholas's "last resort the ear speaker" is moot on his phone (it always has a speaker); Q2 is
+  relayed in the report without blocking. Step 4b is not built.
+- **Q1 (BODY_SENSORS)**: no permission flow now. Registration failure reports "can't tell" (= not worn) and logs
+  `refused`; relayed to Nicholas; the Verifier's on-watch probe decides if a follow-up is needed.
+- **F1 (Watch -> Auto mid-call) accepted, simply**: when the setting changes to Auto during a call on the watch, the
+  call leaves the watch (existing `stop()`) unless `Worn.on(node)` holds (a fresh positive answer). Test both cases
+  (fresh worn: stays; no fresh answer / silent companion: next block plays on the phone).
+- **F2 (lost removal push) rejected as a blocker, recorded as risk 5**: messages to a connected node are best-effort
+  but the next reading's first event repeats the state; adding a revalidation timer to a live call is more state than
+  the brief asks for. Worst case: one reply on an off-wrist watch.
+- **F3 accepted**: `/buddy/worn` does NOT go through `WatchLink.holdWake` / the shared 15-min wake lock; hand it to
+  the main thread directly (no lock, or a short independent one released after dispatch).
+- **F4 rejected (out of scope)**: Android reporting a media route over a connected A2DP device is 016/031's existing
+  preference, unchanged by this feature (before 033 the watch was also next in that case). Not touched here.
