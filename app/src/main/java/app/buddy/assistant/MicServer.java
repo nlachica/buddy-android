@@ -320,6 +320,7 @@ final class MicServer {
 
     private static void serve(Context c, Socket sock) {
         AudioRecord rec = null;
+        boolean counted = false; // listening(+1) was done: only then is there a -1 to pair with it
         try (Socket s = sock) {
             s.setTcpNoDelay(true);
             BufferedReader in = new BufferedReader(new InputStreamReader(s.getInputStream(), StandardCharsets.UTF_8));
@@ -351,6 +352,7 @@ final class MicServer {
             rec.startRecording();
             sessions.add(rec.getAudioSessionId());
             listening(+1);
+            counted = true;
             OutputStream out = s.getOutputStream();
             byte[] buf = new byte[Math.max(min, 3200)];
             while (server != null) {
@@ -371,8 +373,8 @@ final class MicServer {
                 }
                 sessions.remove(rec.getAudioSessionId());
                 rec.release();
-                listening(-1);
             }
+            if (counted) listening(-1);
         }
     }
 
@@ -389,7 +391,7 @@ final class MicServer {
         return (float) Math.max(0, Math.min(1, (db + 50) / 40));
     }
 
-    private static void listening(int d) {
+    private static synchronized void listening(int d) { // several clients can come and go at once
         boolean was = active > 0;
         active += d;
         boolean now = active > 0;

@@ -343,8 +343,10 @@ final class Prefs {
     }
 
     /** 032: "hey buddy" is listened for (on by default; where it isn't offered the value is not used). */
+    static final boolean WAKE_WORD_DEFAULT = true;
+
     static boolean wakeWord(Context c) {
-        return sp(c).getBoolean("wake_word", true);
+        return sp(c).getBoolean("wake_word", WAKE_WORD_DEFAULT);
     }
 
     static void setWakeWord(Context c, boolean on) {

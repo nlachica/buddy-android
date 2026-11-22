@@ -25,9 +25,12 @@ final class WakeMic {
     }
 
     private boolean open(int source, boolean echoCancel) {
+        AudioRecord r = null;
+        AcousticEchoCanceler e = null;
+        boolean ok = false;
         try {
             int min = AudioRecord.getMinBufferSize(RATE, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT);
-            AudioRecord r = new AudioRecord.Builder()
+            r = new AudioRecord.Builder()
                     .setAudioSource(source)
                     .setAudioFormat(new AudioFormat.Builder().setSampleRate(RATE).setChannelMask(AudioFormat.CHANNEL_IN_MONO)
                             .setEncoding(AudioFormat.ENCODING_PCM_16BIT).build())
@@ -35,30 +38,32 @@ final class WakeMic {
                     .setPrivacySensitive(false)
                     .build();
             if (r.getState() != AudioRecord.STATE_INITIALIZED) {
-                r.release();
                 Log.i("BuddyWake", "mic source " + source + " did not initialise");
                 return false;
             }
-            AcousticEchoCanceler e = null;
             if (echoCancel && AcousticEchoCanceler.isAvailable()) {
                 e = AcousticEchoCanceler.create(r.getAudioSessionId());
                 if (e != null) e.setEnabled(true);
             }
             r.startRecording();
             if (r.getRecordingState() != AudioRecord.RECORDSTATE_RECORDING) {
-                if (e != null) e.release();
-                r.release();
                 Log.i("BuddyWake", "mic source " + source + " did not start recording");
                 return false;
             }
             rec = r;
             aec = e;
+            ok = true;
             Log.i("BuddyWake", "mic open: source " + (source == MediaRecorder.AudioSource.VOICE_COMMUNICATION ? "VOICE_COMMUNICATION" : "VOICE_RECOGNITION")
                     + ", echo canceller " + (e != null && e.getEnabled() ? "on" : echoCancel ? "unavailable" : "off"));
             return true;
-        } catch (Exception e) { // SecurityException (permission gone), IllegalArgumentException, UnsupportedOperationException
-            Log.i("BuddyWake", "mic source " + source + " failed: " + e);
+        } catch (Exception x) { // SecurityException (permission gone), IllegalArgumentException, UnsupportedOperationException
+            Log.i("BuddyWake", "mic source " + source + " failed: " + x);
             return false;
+        } finally {
+            if (!ok) { // ownership moves to rec/aec only on success
+                if (e != null) e.release();
+                if (r != null) r.release();
+            }
         }
     }
 

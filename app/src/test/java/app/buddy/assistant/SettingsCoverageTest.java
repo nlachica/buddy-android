@@ -484,6 +484,14 @@ public class SettingsCoverageTest {
         assertEquals("off", named("hey_buddy").check("OFF"));
         refused(named("hey_buddy"), "maybe");
         refused(named("hey_buddy"), "on"); // JVM tests run as Android 0: not offered
+        assertTrue("a fresh install listens", Prefs.WAKE_WORD_DEFAULT);
+        SettingsTool.heyBuddyReady("on", true); // offered (Android 14+, GitHub build): "on" is accepted
+        SettingsTool.heyBuddyReady("off", false);
+        try {
+            SettingsTool.heyBuddyReady("on", false);
+            throw new AssertionError("on must be refused where it isn't offered");
+        } catch (IllegalArgumentException expected) {
+        }
     }
 
     // ---------------------------------------------------------------- chats

@@ -1105,6 +1105,7 @@ final class Bubble implements ChatHub.Listener {
         boolean show = !locked && (Prefs.bubbleEnabled(svc) || expanded || pendingConfirm != null || controlling || svc.paused());
         boolean wasHidden = root.getVisibility() != View.VISIBLE;
         root.setVisibility(show ? View.VISIBLE : View.GONE);
+        if (!show) showWaves(false); // the waves are a window of their own: they go with a hidden bubble
         if (show && wasHidden && !expanded) popIn();
         if (!show) showDismissTarget(false);
         updateThumb();
@@ -1675,12 +1676,7 @@ final class Bubble implements ChatHub.Listener {
                     WakeWord.heard(turn, window, text);
                     return;
                 }
-                Sessions.Session ses = sessions.current;
-                if (ses == null) {
-                    ses = hub.create(Prefs.backend(svc));
-                    hub.select(ses);
-                }
-                String e = hub.send(ses, text);
+                String e = hub.sendTalk(text, false);
                 if (e != null) toast(e);
             }
 
@@ -1740,6 +1736,7 @@ final class Bubble implements ChatHub.Listener {
             return;
         }
         showWaves(false);
+        if (root.getVisibility() != View.VISIBLE) return; // a hidden (locked or off) bubble listens without showing waves
         waves = new VoiceWaves(svc);
         waves.setLive(true);
         int w = dp(150), h = dp(44);
