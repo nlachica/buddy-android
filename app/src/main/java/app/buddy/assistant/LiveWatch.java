@@ -73,6 +73,12 @@ final class LiveWatch {
         return k != null && k.noEarpiece();
     }
 
+    /** 035: the call's voice plays on the watch now (not on the phone). */
+    static boolean onWatch() {
+        Call k = call;
+        return k != null && k.onWatch();
+    }
+
     /** The watch pushed its wrist state (main thread, 033): off the wrist, an Auto call goes to the phone. */
     static void worn(String node, boolean worn) {
         Call k = call;
@@ -143,6 +149,10 @@ final class LiveWatch {
             watch = fed = heldEnded = false;
             turn = retryTurn = pending = null;
             openAt = retryAt = 0;
+        }
+
+        synchronized boolean onWatch() {
+            return watch;
         }
 
         synchronized boolean noEarpiece() {

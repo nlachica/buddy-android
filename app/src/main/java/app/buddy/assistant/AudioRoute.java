@@ -29,6 +29,8 @@ import java.util.function.IntPredicate;
  * A phone live call (017, 030, Android 12+) never uses the earpiece, whatever the choice: the chosen device while it is
  * connected (not the earpiece), else a headset's call device, else the speaker.
  * A picked device that is away is Auto until it is back.
+ * 035: while a phone live call plays on the speaker (Android 13+), the media volume follows the call volume, because the voice is a
+ * media stream; it is put back after (mediaStep).
  * All state lives on the main thread.
  */
 final class AudioRoute {
@@ -42,6 +44,9 @@ final class AudioRoute {
     private static long began, quietSince, appliedAt;
     /** 017: devices a phone live call couldn't use; kept until use() or until the device leaves the list (030). */
     private static final Set<String> liveRefused = new HashSet<>();
+    /** 035: see mediaStep; the volume record Prefs keeps (without seen) until it is given back. */
+    private static int[] media = noMedia();
+    private static boolean mutedSaid;
 
     private AudioRoute() {
     }
@@ -342,6 +347,10 @@ final class AudioRoute {
             if (!on) {
                 on = true;
                 other = mode != AudioManager.MODE_NORMAL;
+                if (media[SAVED] < 0) { // what a crash left: given back or dropped by the first tick
+                    int[] m = Prefs.liveMedia(a);
+                    media = new int[]{m[0], m[1], m[2], -1};
+                }
             }
             began = System.currentTimeMillis();
             heard = false;
@@ -418,6 +427,7 @@ final class AudioRoute {
             live(am);
             return;
         }
+        follow(am, false);
         String want = want(app);
         if (want.isEmpty()) {
             drop(am);
@@ -495,6 +505,52 @@ final class AudioRoute {
             CodexLive.log("route: no safe device");
             CodexLive.end(app.getString(R.string.live_ended_no_speaker));
         }
+        follow(am, i != NONE && applied != null && applied.equals(curKey)
+                && applied.startsWith(AudioDeviceInfo.TYPE_BUILTIN_SPEAKER + ":") && !LiveWatch.onWatch());
+    }
+
+    /**
+     * 035: the media volume for a phone live call on the speaker. speakerCall: live() applied the speaker, Android reports
+     * it, and the voice isn't on the watch. Only while Android plays media on the built-in speaker alone (API 33+); the
+     * record is on disk before Android's volume is touched, and the speaker, the mute and the level are checked again
+     * right after that and before the write (the commit can wait; a headset can take media meanwhile): a failed check
+     * writes nothing and keeps the old record. Main thread.
+     */
+    private static void follow(AudioManager am, boolean speakerCall) {
+        if (Build.VERSION.SDK_INT < 33 || (!speakerCall && media[SAVED] < 0)) return;
+        try {
+            if (!onSpeaker(am)) return;
+            int now = am.isStreamMute(AudioManager.STREAM_MUSIC) ? 0 : am.getStreamVolume(AudioManager.STREAM_MUSIC);
+            if (now == 0 && speakerCall && !mutedSaid) {
+                mutedSaid = true;
+                CodexLive.log("volume: media muted, left alone");
+            }
+            int call = am.getStreamVolume(AudioManager.STREAM_VOICE_CALL), callMax = am.getStreamMaxVolume(AudioManager.STREAM_VOICE_CALL);
+            int[] n = media.clone();
+            int w = mediaStep(speakerCall, now, call, mediaFor(call, callMax, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC)), n);
+            if (java.util.Arrays.equals(n, media)) return;
+            if (w >= 0) {
+                if (speakerCall && !Prefs.setLiveMedia(app, n[SAVED], n[SET], now)) return;
+                if (!onSpeaker(am) || am.isStreamMute(AudioManager.STREAM_MUSIC) || am.getStreamVolume(AudioManager.STREAM_MUSIC) != now) {
+                    if (speakerCall) Prefs.setLiveMedia(app, media[SAVED], media[SET], media[FROM]);
+                    return;
+                }
+                am.setStreamVolume(AudioManager.STREAM_MUSIC, w, 0);
+                CodexLive.log(speakerCall ? "volume: media " + now + " -> " + w + " (call " + call + "/" + callMax + ")"
+                        : "volume: media back to " + w);
+            } else if (!speakerCall) {
+                CodexLive.log("volume: media left at " + now + " (changed since)");
+            }
+            media = n;
+            Prefs.setLiveMedia(app, n[SAVED], n[SET], n[FROM]);
+        } catch (RuntimeException ignored) { // a refused write: the next tick asks again
+        }
+    }
+
+    @TargetApi(33)
+    private static boolean onSpeaker(AudioManager am) {
+        return mediaOnSpeaker(types(am.getAudioDevicesForAttributes(
+                new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).build())));
     }
 
     // The WebView's teardown (after a live call ends) clears the device, then sets MODE_NORMAL: once Buddy sees
@@ -544,6 +600,7 @@ final class AudioRoute {
                 }
                 if (sawLive) afterLive(app.getSystemService(AudioManager.class).getMode());
                 else if (applied != null && want(app).isEmpty()) drop(app.getSystemService(AudioManager.class)); // 031: Auto's dictation link
+                follow(app.getSystemService(AudioManager.class), false);
             }
             main.postDelayed(this, POLL_MS);
         }
@@ -556,8 +613,11 @@ final class AudioRoute {
             AudioManager am = app.getSystemService(AudioManager.class);
             if (dirty) am.clearCommunicationDevice();
             dropMode(am);
+            follow(am, false);
         } catch (Exception ignored) {
         }
+        media[SEEN] = -1;
+        mutedSaid = false;
         on = other = ownMode = dirty = sawLive = stuck = speakerSlipped = false;
         applied = refused = null;
         liveRefused.clear();

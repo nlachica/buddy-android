@@ -910,6 +910,28 @@ final class Prefs {
         sp(c).edit().putString("audio_device", k).apply();
     }
 
+    /** 035: media volume Buddy moved for a live call on the speaker: {saved, set, from}, -1 = none (see AudioRoute.mediaStep). */
+    static int[] liveMedia(Context c) {
+        String[] p = sp(c).getString("live_media", "").split(",");
+        int[] r = {-1, -1, -1};
+        if (p.length == 3) {
+            try {
+                for (int i = 0; i < 3; i++) r[i] = Integer.parseInt(p[i]);
+            } catch (NumberFormatException e) {
+                return new int[]{-1, -1, -1};
+            }
+        }
+        return r;
+    }
+
+    /** 035: on disk before Android's volume is touched, so commit(); false when the write failed. saved < 0 clears it. */
+    static boolean setLiveMedia(Context c, int saved, int set, int from) {
+        SharedPreferences.Editor e = sp(c).edit();
+        if (saved < 0) e.remove("live_media");
+        else e.putString("live_media", saved + "," + set + "," + from);
+        return e.commit();
+    }
+
     /** The user's voice languages, comma-separated BCP-47 tags (first = default). */
     static String voiceLangs(Context c) {
         String d = java.util.Locale.getDefault().toLanguageTag();
