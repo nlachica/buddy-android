@@ -212,6 +212,8 @@ final class SettingsTool {
         // upstream 2.3.15, Models on this phone → Think before answering (off by default: slow on small models)
         l.add(new Scalar("onphone_think", () -> OnPhone.think(svc) ? "on" : "off", v -> OnPhone.setThink(svc, v.equals("on")),
                 " A model running now finishes its answer first.", "on", "off"));
+        // upstream 2.3.17 (#39), Tools → show codes in SMS: off hides one-time codes and PINs from sms_list (keeps its card)
+        l.add(onOff("sms_codes", () -> Prefs.smsCodes(svc), on -> Prefs.setSmsCodes(svc, on)));
         safety(svc, l);
         l.add(new Scalar("background_browser", () -> Prefs.browser(svc) ? "on" : "off", v -> {
             Prefs.setBrowser(svc, v.equals("on"));
@@ -284,6 +286,15 @@ final class SettingsTool {
         }, "", "buddy", "picture").ready(v -> {
             if (v.equals("picture") && !Face.saved(svc)) {
                 throw new IllegalArgumentException("no picture is saved; only the user picks one (Settings → Appearance)");
+            }
+        }));
+        // upstream 2.3.17 (#68): how an animated picture plays; the screen offers it only for the user's own animated one
+        l.add(new Scalar("face_anim", () -> Prefs.faceAnim(svc), v -> {
+            Prefs.setFaceAnim(svc, v);
+            svc.applyFace();
+        }, "", "loop", "once", "off").ready(v -> {
+            if (Face.picture(svc) == null || !Face.animated(svc)) { // (as the screen: own = Face.picture != null)
+                throw new IllegalArgumentException("face_anim is for an animated picture on the bubble; the one there isn't");
             }
         }));
     }
@@ -1550,8 +1561,9 @@ final class SettingsTool {
                         + "don't call confirm first; if they deny it, nothing changes. value \"\" deletes an item (rule, "
                         + "schedule, skill, MCP server) or takes a button off the ask/never-ask lists. Covers every Settings "
                         + "page: agents and models (default agent and models, API key services' use, name and shown models, "
-                        + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, and a "
-                        + "chat's approvals (Ask, Routine allowed, Always ask, Bypass) and allowed apps. Keys are never shown. To set one (mcp/<id>/key, service/<id>/key, or a new "
+                        + "download server), voice, safety (reviewer, button rules, per-app modes), browser, appearance, phone tools "
+                        + "on or off (tool/<tool>), and a chat's approvals (Ask, Routine allowed, Always ask, Bypass), allowed apps "
+                        + "and tools. Keys are never shown. To set one (mcp/<id>/key, service/<id>/key, or a new "
                         + "mcp/<id> with its address), put just the key in a file in Buddy's Linux, without printing it (from "
                         + "Bitwarden: the secret's value), and pass its path as key_file. An MCP server that wants its key in "
                         + "another header than Authorization: Bearer takes the line \"Header-Name: key\". On a /key name, value "
@@ -1599,11 +1611,14 @@ final class SettingsTool {
     /**
      * 020: does a change of this setting keep its card in a Bypass chat? By name only, so no value needs reading:
      * secrets (keys, key files), the approvals modes, and the settings that decide which money steps card (per-app
-     * modes, button rules, built-in risky words, a chat's allowed apps), whatever the new value.
+     * modes, button rules, built-in risky words, a chat's allowed apps), whatever the new value. Also the phone tool
+     * switches (Settings and a chat's, upstream 2.3.17: its screen is the user's, so a tool never comes back on
+     * without them seeing it) and sms_codes (one-time codes).
      */
     static boolean keepsCard(String name, boolean keyFile) {
         return keyFile || name.endsWith("/key") || name.equals("builtin_risky_words") || name.startsWith("app/")
-                || name.startsWith("button/") || name.matches("chat/[^/]+/(approvals|allowed/.+)");
+                || name.startsWith("button/") || name.matches("chat/[^/]+/(approvals|allowed/.+|tool/.+)")
+                || name.startsWith("tool/") || name.equals("sms_codes");
     }
 
     private static String unknown(String name) {
@@ -1660,6 +1675,11 @@ final class SettingsTool {
             Store store = sp.length == 1 ? q -> Providers.setOff(svc, q, q.off) : q -> Providers.save(svc, q, null);
             return service(sp[0], sp.length == 1 ? "" : sp[1], Providers::find, store);
         }
+        if (name.startsWith("tool/") && isTool(name.substring(5))) {
+            String tool = name.substring(5);
+            return toolSwitch(name, tool, () -> ToolSwitch.on(svc, tool) ? "on" : "off",
+                    v -> ToolSwitch.set(svc, tool, v.equals("on")), "on", "off");
+        }
         String[] bn = buttonName(name);
         if (bn != null) return buttonRule(svc, bn[0], bn[1]);
         String[] p = name.split("/");
@@ -1690,6 +1710,20 @@ final class SettingsTool {
                 default:
                     return null;
             }
+        }
+        if (p.length == 4 && p[0].equals("chat") && p[2].equals("tool") && isTool(p[3]) && chat(svc, p[1]) != null
+                && chat(svc, p[1]).parent.isEmpty()) {
+            String id = p[1], tool = p[3];
+            return toolSwitch(name, tool, () -> {
+                Sessions.Session c = chat(svc, id);
+                return c == null ? null : chatTool(c.tools.get(tool), ToolSwitch.on(svc, tool, c));
+            }, v -> {
+                Sessions.Session c = chat(svc, id);
+                if (c == null) throw new IllegalStateException("that chat is gone");
+                // as the screen: a choice that matches Settings again isn't kept as the chat's own
+                Boolean on = v.equals("settings") ? null : v.equals("on");
+                ChatHub.get(svc).setTool(c, tool, on != null && on == ToolSwitch.on(svc, tool) ? null : on);
+            }, "on", "off", "settings");
         }
         if (p.length == 4 && p[0].equals("chat") && p[2].equals("allowed") && p[3].matches("[A-Za-z0-9_.]+") && chat(svc, p[1]) != null
                 && chat(svc, p[1]).parent.isEmpty()) {
@@ -1754,6 +1788,33 @@ final class SettingsTool {
         });
     }
 
+    /** A tool on Settings → Tools (every phone tool Buddy has is in one of its groups). */
+    static boolean isTool(String tool) {
+        for (String[] g : ToolSwitch.GROUPS) for (int i = 1; i < g.length; i++) if (g[i].equals(tool)) return true;
+        return false;
+    }
+
+    /** A chat's tool as the tool names it: "on"/"off" (its own choice) or "settings (on)" (it follows Settings). */
+    static String chatTool(Boolean own, boolean now) {
+        return own != null ? (own ? "on" : "off") : "settings (" + (now ? "on" : "off") + ")";
+    }
+
+    /**
+     * A phone tool's switch (upstream 2.3.17, Settings → Tools and connections → Tools, or a chat's Chat options →
+     * Tools). confirm and ask are refused: always on, as on the screen.
+     */
+    static Scalar toolSwitch(String name, String tool, Supplier<String> get, Consumer<String> set, String... values) {
+        return new Scalar(name, get, set, " Agents get the change from their next step.", values) {
+            @Override
+            String check(String value) {
+                if (ToolSwitch.LOCKED.contains(tool)) {
+                    throw new IllegalArgumentException(tool + " is always on: without it an agent couldn't ask the user");
+                }
+                return super.check(value);
+            }
+        };
+    }
+
     /** The chats section of the listing; here = the calling agent's chat id (or null) gets "(this chat)". */
     static void chatLines(StringBuilder b, java.util.List<Sessions.Session> all, String here, Predicate<Sessions.Session> editable) {
         int n = 0;
@@ -1766,6 +1827,13 @@ final class SettingsTool {
                     .append(", approvals ").append(editable.test(c) ? approvalsChoice(c.approvals) : "n/a (notification rule's chat)");
             synchronized (c.allowed) {
                 b.append(", allowed: ").append(c.allowed.isEmpty() ? "none" : String.join(",", c.allowed));
+            }
+            if (!c.tools.isEmpty()) {
+                java.util.List<String> own = new ArrayList<>();
+                for (java.util.Map.Entry<String, Boolean> e : new java.util.TreeMap<>(c.tools).entrySet()) {
+                    own.add(e.getKey() + " " + (e.getValue() ? "on" : "off"));
+                }
+                b.append(", own tools: ").append(String.join(",", own));
             }
             b.append('\n');
         }
@@ -1805,8 +1873,13 @@ final class SettingsTool {
         }
         b.append("\nChats (newest 30). Each has chat/<id>/linux_tools (on, off), chat/<id>/background (on, off), "
                 + "chat/<id>/schedule (JSON), chat/<id>/approvals (ask, routine: Routine allowed, strict: Always ask, bypass: Bypass) and "
-                + "chat/<id>/allowed/<package> (on, off: apps allowed without asking):\n");
+                + "chat/<id>/allowed/<package> (on, off: apps allowed without asking) and chat/<id>/tool/<tool> (on, off, "
+                + "settings: follow Settings → Tools):\n");
         chatLines(b, ChatHub.get(svc).sessions.all, here, ChatHub.get(svc)::approvalsEditable);
+        b.append("\nPhone tools (tool/<tool> = on, off; Settings → Tools; confirm and ask are always on). Off now: ");
+        java.util.List<String> off = new ArrayList<>();
+        for (String[] g : ToolSwitch.GROUPS) for (int i = 1; i < g.length; i++) if (!ToolSwitch.on(svc, g[i])) off.add(g[i]);
+        b.append(off.isEmpty() ? "none" : String.join(", ", off)).append('\n');
         b.append("\nNotification rules (rule/<id>; add one with rule/new):\n");
         for (Rules.Rule r : Rules.all(svc)) {
             b.append("rule/").append(r.id).append(" = ").append(r.on ? "on" : "off").append("  ").append(r.pkg).append(": ")

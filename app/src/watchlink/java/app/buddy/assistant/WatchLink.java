@@ -270,7 +270,9 @@ public class WatchLink extends WearableListenerService {
             if (msg.kind == Bubble.Kind.STEP) {
                 tell(node, "/buddy/step", json("chat", ses.id, "text", msg.text));
             } else if (msg.kind == Bubble.Kind.BUDDY || msg.kind == Bubble.Kind.ERROR) {
-                String text = Voice.spoken(app, msg.text); // one text to show and to speak: no markdown, no URLs
+                // one text to show and to speak: no markdown, no URLs. A reply that is only a file (upstream 2.3.18's
+                // file chips) says the file's name rather than nothing
+                String text = Voice.spoken(app, msg.text.isEmpty() ? msg.label() : msg.text);
                 if (text.length() > SPOKEN_MAX) text = text.substring(0, SPOKEN_MAX) + "…";
                 if (text.isEmpty()) return;
                 // errors keep the watch's own voice (they often come from the failures that also break ChatGPT's)

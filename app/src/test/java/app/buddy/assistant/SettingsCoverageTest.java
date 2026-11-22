@@ -321,6 +321,26 @@ public class SettingsCoverageTest {
     }
 
     @Test
+    public void upstreamToolSwitchesSmsCodesAndFaceAnimAreCovered() { // upstream 2.3.17 controls
+        assertTrue(SettingsTool.isTool("sms_list"));
+        assertTrue(SettingsTool.isTool("phone_shell"));
+        assertTrue(!SettingsTool.isTool("buddy_settings") && !SettingsTool.isTool("screen"));
+        AtomicReference<String> now = new AtomicReference<>("on");
+        SettingsTool.Scalar t = SettingsTool.toolSwitch("tool/call_log", "call_log", now::get, now::set, "on", "off");
+        assertEquals("off", t.check("OFF"));
+        refused(t, "settings");
+        refused(SettingsTool.toolSwitch("tool/confirm", "confirm", now::get, now::set, "on", "off"), "off");
+        refused(SettingsTool.toolSwitch("chat/c1/tool/ask", "ask", now::get, now::set, "on", "off", "settings"), "on");
+        assertEquals("settings", SettingsTool.toolSwitch("chat/c1/tool/tap", "tap", now::get, now::set, "on", "off", "settings")
+                .check("Settings"));
+        assertEquals("settings (off)", SettingsTool.chatTool(null, false));
+        assertEquals("on", SettingsTool.chatTool(true, false));
+        for (String n : new String[]{"tool/sms_list", "chat/c1/tool/call_log", "sms_codes"}) assertTrue(n, SettingsTool.keepsCard(n, false));
+        assertEquals("on", named("sms_codes").check("On"));
+        refused(named("face_anim"), "always");
+    }
+
+    @Test
     public void modelsOnThisPhoneAreNotAnApiKeyService() { // their own screen, as on API keys
         for (String n : new String[]{"service/onphone", "service/onphone/key", "service/onphone/name", "service/onphone/models"}) {
             assertTrue(n, SettingsTool.find(null, n) == null);

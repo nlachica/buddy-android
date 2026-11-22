@@ -1070,7 +1070,7 @@ final class Bubble implements ChatHub.Listener {
 
     void collapse() {
         if (!expanded) return;
-        if (Voice.listening()) Voice.stopListening();
+        if (Voice.listening() && talkTurn == null) Voice.stopListening(); // (not a "hey buddy" turn's: 032)
         expanded = false;
         svc.marks().setPanelOpen(false);
         updateViewing();
@@ -1129,7 +1129,9 @@ final class Bubble implements ChatHub.Listener {
         if (show && wasHidden && !expanded) popIn();
         if (!show) {
             showDismissTarget(false);
-            if (locked) stopTalk(); // locked while listening: its waves stayed on screen (issue #71)
+            // locked while listening: its waves stayed on screen (issue #71). A "hey buddy" turn goes on: it answers
+            // while locked (032); its waves went with the bubble above
+            if (locked && talkTurn == null) stopTalk();
         }
         updateThumb();
     }
@@ -1741,6 +1743,7 @@ final class Bubble implements ChatHub.Listener {
             return;
         }
         talkListening = true;
+        talkTurn = turn;
         noteListening = true; // the pill shows what's heard
         noteStatus(svc.getString(R.string.bubble_listening));
         showWaves(true);
@@ -1748,12 +1751,16 @@ final class Bubble implements ChatHub.Listener {
 
     private void talkDone() {
         talkListening = false;
+        talkTurn = null;
         showWaves(false);
         noteDone();
         applyEnabled(); // (kept up only while it listened, it may go now)
     }
 
     /** Talk mode ends now: the bubble went away (hidden, dragged onto ✕, the screen locked) while it listened. */
+    /** The "hey buddy" turn whose window talk mode listens for now, or null (032). */
+    private WakeWord.Turn talkTurn;
+
     private void stopTalk() {
         if (talkListening) Voice.stopListening(); // (its listener's onEnd ends talk mode)
         if (talkListening || waves != null) talkDone();
