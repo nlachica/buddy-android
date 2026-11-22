@@ -58,9 +58,15 @@ is then as loud as the call volume says, and the volume keys work, as in any cal
   several, or no answer (below 33): false. `setStreamVolume` writes the index of the device media is on at that
   moment, so every read, write and restore is gated on this.
 - `mediaStep(speakerCall, now, call, want, state)`: pure, the whole rule, so it is unit-tested as sequences.
-  `state` = `saved` (Nicholas's level, to put back), `set` (the level Buddy last set), `callSeen` (the call index
-  last mirrored); -1 = none. `now` = the speaker's media index, `want` = `mediaFor(call)`. Returns the index to
-  write, or -1.
+  `state` = `saved` (Nicholas's level, to put back), `set` (the level Buddy last set), `from` (the level before a
+  write that may not have reached Android; only ever set in a state loaded after a crash), `callSeen` (the call
+  index last mirrored); -1 = none. `now` = the speaker's media index, 0 when Media is muted; `want` =
+  `mediaFor(call)`. Returns the index to write, or -1.
+  - `now == 0` (Media muted or at zero): nothing is written and the state is untouched. Android reads a muted
+    stream as 0, so Buddy can't know the level behind the mute, and a write would unmute it. Buddy never saves 0
+    and never writes 0.
+  - `from` set (once, on the first step after a load): `now == from` means the interrupted write never happened, so
+    `set = from`. Either way `from = -1`. The rules below then apply unchanged.
   - Speaker call, nothing saved (take): `saved = now`, write `want`.
   - Speaker call, `now != set`: Nicholas moved Media himself. `saved = set = now`: his level stays, and it is what he
     gets back. This rule writes nothing itself.
@@ -75,12 +81,21 @@ is then as loud as the call volume says, and the volume keys work, as in any cal
     watch drops or comes off the wrist, the next tick takes it again.
   - `mediaOnSpeaker` false: the tick does nothing and the state stays (a headset came; the next tick, `finish()` or
     the next voice session's first tick tries again).
-  - Otherwise read `now`, run `mediaStep`. Before a write the routed query is asked again; if it no longer says
-    speaker alone, the tick changes nothing. Then `setStreamVolume`, keep the state (memory; `saved` and `set` in
-    `Prefs`), log `volume: media 6 -> 15 (call 15/15)`, `volume: media back to 6`, or
-    `volume: media left at 3 (changed since)`.
-  - `use()` loads `saved` and `set` left in `Prefs` by a crash, so the next session's first tick gives the level back
-    or discards it by the same rule (or, in a speaker call, carries on from it).
+  - Otherwise read `now` (`isStreamMute(STREAM_MUSIC)` ? 0 : `getStreamVolume`), run `mediaStep` on a copy of the
+    state. Before a write the routed query is asked again; if it no longer says speaker alone, the tick changes
+    nothing.
+  - A take or a key write, in this order: `Prefs` gets `saved`, `set` = the new level and `from` = `now`, with
+    `commit()` (on disk before Android is touched; `apply()` can be lost with the process); `setStreamVolume`; the
+    copy becomes the state; `Prefs` gets `from = -1`. Killed anywhere in between, the next session finds the speaker
+    at `from` or at `set` and both count as Buddy's level. A `setStreamVolume` that throws leaves the memory state
+    as it was, so the next tick tries again.
+  - A give-back: `setStreamVolume(saved)`, then clear memory and `Prefs`. Killed in between, the next session finds
+    the speaker at neither level and drops the record. A level he changed (in a call or since): `Prefs` updated or
+    cleared, no write.
+  - Log `volume: media 6 -> 15 (call 15/15)`, `volume: media back to 6`, `volume: media left at 3 (changed since)`,
+    or once per call `volume: media muted, left alone`.
+  - `use()` loads `saved`, `set` and `from` left in `Prefs` by a crash, so the next session's first tick gives the
+    level back or discards it by the same rule (or, in a speaker call, carries on from it).
 
 Why this and not something else:
 - It needs no cooperation from the WebView, and it stays correct if a later WebView plays the voice as a call stream
@@ -119,7 +134,8 @@ Alternatives considered:
 3. **State and wiring.** `AudioRoute.java`: `follow()` holding the state; called from `live()` with the speaker-call
    flag, and with `false` from `reconcile()` when the live rule doesn't hold, from the poll's idle branch and from
    `finish()`; `use()` loads the saved pair. `LiveWatch.java`: `static boolean onWatch()` (the call's `watch` flag).
-   `Prefs.java`: `liveMedia(c)` get/set for `saved` and `set` (-1 = none). Class comment: one sentence on 035.
+   `Prefs.java`: `liveMedia(c)` get/set for `saved`, `set` and `from` (-1 = none), written with `commit()`. Class
+   comment: one sentence on 035.
 4. **Docs.** `README.md`: one sentence in the Audio device bullet (on Android 13+, a live call on the phone speaker
    follows the call volume; Buddy moves the media volume for the call and puts it back, unless you changed it
    meanwhile). `decisions.md`: anything the Coder chose.
@@ -142,6 +158,15 @@ Alternatives considered:
       and gives back 3.
     - Restart with a headset connected: the wrapper's gate, covered by the `mediaOnSpeaker` rows (no step, the pair
       stays) and then the restart rows above once media is on the speaker.
+    - Killed around the take (loaded `saved` 6, `set` 15, `from` 6), not a speaker call: `now` 6 (Android never got
+      the write) writes 6, no change, and clears; `now` 15 (it did) writes 6. In a speaker call with `now` 6: writes
+      15, `saved` still 6.
+    - Killed around a key write 15 to 13 (loaded `saved` 6, `set` 13, `from` 15), not a speaker call: `now` 15 writes
+      6; `now` 13 writes 6; `now` 3 writes nothing and clears.
+    - Muted before the call (`now` 0): speaker-call ticks write nothing and save nothing; unmuted at 6 mid-call:
+      take, writes 15, `saved` 6.
+    - Muted mid-call (after the take, `now` 0): ticks, a key (call 13) and the hang-up write nothing and the state
+      stays; a later session with `now` 15 writes 6, with `now` 4 writes nothing and clears.
     - Watch: speaker call true -> false (the watch took the voice) writes 6; false -> true takes again.
     - Nothing saved, not a speaker call: nothing written.
   - 030/031/033 tests unchanged and green (the route logic isn't touched).
@@ -153,7 +178,9 @@ Alternatives considered:
   3. `live.log`: `route: 2:SM-G990W applied`, then `volume: media N -> C (call C/15)`.
   4. `logcat`: `enable_snd_device: snd_device(93: voip-comm-dual-speaker)` and
      `checkAndSetVolume: output …, stream 3, index C, devices 0x2`.
-  5. Volume down twice during the call: the voice gets quieter, Media index = C - 2, two more `volume:` lines.
+  5. Volume down, read the index (C - 1); volume down again, read it (C - 2). The voice gets quieter each time.
+     `live.log` has a `volume:` line ending at C - 2 (one or two lines: two fast presses can land in one 300 ms
+     tick).
   6. End the call. `live.log`: `volume: media back to N`. Media index = N.
 - Watch (Auto, watch worn, no headset): from `watch: playing there` on, and for as long as it plays, the speaker's
   Media index is N (a `volume:` take and give-back pair in the first second is fine). Take the watch off mid-call:
@@ -163,18 +190,29 @@ Alternatives considered:
   LS2 off: the speaker is applied again, Media index = the call index. Hang up: `volume: media back to N`.
   Pass: LS2's two indices are the same at every read (after it connects, after it leaves, after hang-up) and the
   speaker ends at N. While LS2 has the call the speaker's index may read C or N (Risk 3).
+- Hang-up while the headset has the call (LS2, the deferred give-back). Start on the speaker (index C), switch LS2
+  on, hang up with LS2 still connected: no `volume: media back` line, LS2's two indices unchanged. Switch LS2 off:
+  the speaker's Media index may still read C. Start a live call on the speaker and end it: `volume: media back to
+  N`, Media index = N.
+- Media muted (volume panel, speaker at N). Muted before the call: the call has `volume: media muted, left alone`
+  and no other `volume:` line, the voice is silent; hang up, unmute: Media index = N. Muted during a speaker call
+  (after `volume: media N -> C`): no further `volume:` line, also not on a volume key; unmute in the call, hang up:
+  `volume: media back to N`, or `media left at …` if unmuting gave a level other than C (then that level stays).
 - Order still holds (regression, by `live.log`): a call started with LS2 on (`route: 7:LS2 Freecom applied`, no
   `volume:` line).
-- Crash path, by review: `Prefs` holds `saved` and `set` from take to give back; `use()` loads them.
+- Crash path, by review: `Prefs` is committed before each `setStreamVolume` that keeps a record and cleared after
+  the give-back; `use()` loads the three values. What a restart can find is covered by the unit sequences above.
 
 ## Risks
 1. The diagnosis is wrong and the sound really is at the ear, or the keys already move Media. Step 1 catches both
    before code is written.
 2. Buddy changes a system volume. If Buddy is killed mid-call the media volume stays at the call level until the
    next voice session gives it back (only if it is still the level Buddy set); music started on the speaker in
-   between is louder than Nicholas left it.
-3. A headset that connects during a speaker call and stays past the session: the speaker's media volume can stay at
-   the call level until a later voice session sees media on the speaker again.
+   between is louder than Nicholas left it. One case overwrites his choice: Buddy is killed in the instant between
+   a key write and the `from` clear, and he then sets Media to exactly the level before that write.
+3. A headset that connects during a speaker call and stays past the session, or Media muted at hang-up: the
+   speaker's media volume can stay at the call level (behind the mute) until a later voice session sees media on
+   the speaker, unmuted, again.
 4. The routed-devices answer is a prediction and routing can change between the question and the write. Buddy asks
    again right before each write, which leaves a window of a few milliseconds: a headset that takes media exactly
    then gets one write on its own index (the call level, or the saved level). Android has no public call that names
@@ -188,7 +226,10 @@ Alternatives considered:
 8. The media curve is steeper than a call's: a few steps down are quieter than the same steps in a phone call. Tune
    `mediaFor` after the phone check if it feels wrong.
 9. When the watch drops mid-call the voice is at the old media level for up to one tick (300 ms).
-10. A headset call has the same media-volume behaviour (LS2: media index 7 on its call link). Not reported, not in
+10. With Media muted or at 0 a speaker call is silent, as today: Buddy doesn't unmute, and the volume keys move
+    the call volume. Unmuting in the call starts the following. Unmuting for the call and muting again after is a
+    follow-up if Nicholas wants it (the mute state would have to be saved and put back too).
+11. A headset call has the same media-volume behaviour (LS2: media index 7 on its call link). Not reported, not in
     the brief; a follow-up if Nicholas finds headset calls quiet.
 
 ## Open questions

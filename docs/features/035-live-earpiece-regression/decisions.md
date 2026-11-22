@@ -82,3 +82,20 @@
   doing nothing; and if the keys already move Media, following the call volume has no reason.
 - By: Planner (claude-fable-5-2)
 
+
+## 2026-11-22 - The record is on disk before Android's volume is touched (plan review round 2, F1)
+- Options: save after the write (a kill in between loses the original level); save `saved` and `set` before the
+  write (a kill around a later key write still leaves a level that matches neither); also save `from`, the level
+  before the write, until the write is done.
+- Choice: `saved`, `set`, `from`, with `commit()` before `setStreamVolume`; `from` is cleared after it. A restart
+  that finds the speaker at `from` or `set` treats it as Buddy's level. The give-back clears the record after its
+  write. One line at the top of `mediaStep`; the other rules don't change.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Media muted or at 0: Buddy leaves it alone (plan review round 2, F2)
+- Options: take and restore as for any level (restoring the 0 Android reports for a muted stream erases the level
+  behind the mute); leave a muted stream alone; unmute for the call and mute again after.
+- Choice: leave it alone, before and during the call; the record stays until Media is unmuted on the speaker. The
+  call is silent while muted, as today. Unmute-and-remute needs the mute state saved and restored too: a follow-up
+  only if Nicholas asks.
+- By: Planner (claude-fable-5-2)
