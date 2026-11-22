@@ -162,3 +162,10 @@ Brief is the tie-breaker. The plan as written is approved with these rulings:
 - The test harness here has no Gradle (no offline Android plugin; the default JDK 21 does not start on this device):
   phone tests run with the javac + JUnit script copied from feature 026's scratch dir, wear only compiles against stubs.
 - Commit order: step 2 (`WatchLink` calls `LiveWatch.worn`) comes after step 4 so every commit compiles.
+
+## 2026-11-21 - Coder: round 1 of code review
+- F1: the watch's pushes also feed `Worn` (a removal voids the last "worn", a positive push is a fresh sample). No new ask on entry to Auto: the ruling's "fresh positive or leave" stands.
+- F3/F4: `node` is cleared when a find starts, and an `off` flag (the plan's original one, back) keeps an Auto call on the phone after a take-off until it ends or the setting changes. Supersedes "nothing is remembered" above.
+- F2: a sample whose event time is more than 1 s before the ask is "old sample" (can't tell); 1 s is clock slack.
+- F5: ask ids start at the wall clock. F6: the label rechecks the headset. 
+

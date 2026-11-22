@@ -18,3 +18,12 @@ F6 [minor] Settings can say Watch after a headset has taken priority - `app/src/
 The [build for a8bf433](https://github.com/nlachica/buddy-android/actions/runs/44991841061) passed the phone and Wear test and APK tasks. All 122 focused JVM tests passed locally. Three additional tests run outside the checkout reproduced the removal case in F1 and the transitions in F3 and F4. The on-watch sign-off is still pending.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+F1: fixed in 04dd23a (Worn.push; the watch's pushes now go through WatchVoice.wornPush: a removal voids older positive evidence, a positive push is a fresh sample for 3 s; WatchLink calls it). Test: WornTest. Not built: asking again on entry to Auto; a Watch -> Auto switch keeps the call on the watch only on a push or answer under 3 s old (orchestrator ruling F1), otherwise next block plays on the phone. A reply already in flight when a removal push arrives can still re-validate (one reply, risk 5).
+F2: fixed in 9d95282 (the watch sends the sensor event's own `timestamp` offset; a sample taken more than 1 s before the ask is reported as "old sample" = can't tell). Test: wear WornTest `theOffsetIsTheSamplesOwnAgeNotTheCallbacks` (a callback delivered 4 s late still reports 100 ms). Risk: if a sensor stamps its first event with the last change time, the watch will say "old sample"; the on-watch check shows it in the phone's log.
+F3: fixed in 9cf32d9 (`node` is cleared when a find starts; only a call with a node counts as "on the watch" for the Watch -> Auto check). Test: aSwitchToAutoWhileTheWatchIsStillBeingFoundLetsTheFindFinish (fails without the fix).
+F4: fixed in 9cf32d9 (`off` flag: a take-off sets it, so decide() and the retry stay on the phone until the call ends or the setting changes). Tests: after a take-off, both the drain's answer and the drain timeout with the watch findable again open no second reading; a setting change decides again.
+F5: fixed in 04dd23a (ask ids start at `currentTimeMillis()`, as WatchVoiceLink's). Test: aReplyFromThePreviousPhoneProcessCannotSettleTheNewAsk.
+F6: fixed in 9d95282 (AudioRoute.autoNow rechecks `headsetNow` when the answer arrives). No unit test: it is Context-bound like the rest of autoNow, which has none.
+
