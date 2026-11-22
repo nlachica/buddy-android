@@ -381,3 +381,11 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   ChatGPT dictation cancelled mid-startup and replaced within the same instant can end the replacement). The coder
   records which.
 - By: orchestrator (claude-opus-5-5)
+
+## 2026-11-22 - Code review round 3 fixes (coder)
+- F1: a typed message's turn start no longer clears `spokenAsk` while a note with the request is still queued
+  (`ChatHub.turnStarts`); smaller than carrying the flag with each message, same result for the race.
+- F2: `ERROR_CLIENT` on a current fed window counts toward the two-failure fallback; its message stays silent.
+- F3: one class lock covers `CodexDictation`'s page check + `callThread` publish and cancel's `web`/`callThread` swap.
+- F4: phone Live (not a watch call) waits for `WakeWord.release()` and fails with `dictation_mic_failed` if it doesn't.
+- All CI-only: no JVM runs here.

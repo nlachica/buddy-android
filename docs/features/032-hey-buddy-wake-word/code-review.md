@@ -118,3 +118,21 @@ F4 [major] Live voice can open the phone microphone before the detector releases
 All 74 tests in the eight changed local JVM suites passed with Android stubs. All three model checksums matched. The Build workflow passed on the reviewed commit `b438bdc`, including the real-model tests, both release APKs, flavor isolation and F-Droid reproducibility. Physical-phone checks remain scheduled for after release under the orchestrator's ruling. [Build run 45003087939](https://github.com/nlachica/buddy-android/actions/runs/45003087939)
 
 VERDICT: REVISE
+
+### Coder response (round 3)
+Per the orchestrator ruling (decisions.md): F2 and F4 fixed, F1 and F3 were a few lines each and are fixed too.
+- F1: fixed in 3990da2: `ChatHub.turnStarts` keeps `spokenAsk` when the turn is another message's and a note carrying the
+  request is still queued (it is cleared when that note is taken, or the turn that carries it starts). This is not the
+  reviewer's "flag travels with the message", which would touch every send path; same outcome for this race. Test:
+  `SpokenAskTest.aTypedMessageStartingKeepsTheWaitOfAQueuedWakeNote`.
+- F2: fixed in 6800f60: `Voice.Window.onError` counts every error except no-match/timeout on a current fed window,
+  `ERROR_CLIENT` included (a cancelled window's late one is already dropped by `phone != this`). The message to the
+  listener is unchanged (`ERROR_CLIENT` stays silent). Test: `VoiceWindowTest.twoEarlyClientErrorsOnFedWindowsTurnFeedingOff`.
+- F3: fixed in 774e630: the page check and the `callThread` publish in `startCall`, and the `web`/`callThread` swap in
+  `stopSession` and `openPage`, are under `synchronized (CodexDictation.class)`. No test: it needs a WebView and a Codex
+  server; post-release device check.
+- F4: fixed in 706f1f8: `CodexLive.start` calls `WakeWord.release()` (the confirmed release Talk uses) before the page
+  opens, for the phone's microphone only (a watch call is untouched); a failed release returns `dictation_mic_failed`.
+  No test: it needs a `WakeService` and an `AudioRecord`.
+
+Not run: nothing. No JVM works on this phone, so the new tests and the changes are CI-only (unverified here).
