@@ -178,3 +178,49 @@
 - Choice: the overlap (`WakeWord.overlapped`, pure), so "hey buddy, cancel" said after a reply has ended is sent as
   a request. The service knows the end of speech to 100 ms (it checks that often while Buddy speaks).
 - By: Planner (claude-fable-5-2), on Plan Reviewer round 2 F6
+
+## 2026-11-22 - Orchestrator rulings after plan review round 3 (no APPROVE in 3 rounds)
+These override plan.md wherever they differ. Tie-breaker: the brief; keep it simple. The phone probe (step 4) can't be
+run by the pipeline (it needs Nicholas speaking to the phone), so its blocking gates become run-time fallbacks plus
+post-release device checks in `verify.md`. The pipeline does not stop for Nicholas.
+
+- **Step 4 (the probe app `app.buddy.wakeprobe`) is dropped**, with its temporary Gradle module / build.yml route.
+  Steps 7 and 8 are no longer gated on `probe.md`. P1-P6 move to `verify.md` as post-release device checks
+  (pending until the switch). Supersedes "The probe comes after the shared capture code, and P1, P2, P6 block".
+- **P1 (does the model ship):** the pre-release gate is CI only: `OnnxWakeEngineTest` on the real clips (positives
+  ≥ THRESHOLD, sound-alike/silence/noise below) and `WakeIdleTest`. `THRESHOLD` stays a constant (0.5, or what the CI
+  clips justify, recorded). Detection rate, false triggers and the screen-off check are post-release; if poor, the
+  switch turns it off and tuning/training is a follow-up feature.
+- **P2 / round 3 F1 (accepted): echo cancellation is required while Buddy speaks, as the brief says.** `WakeMic.open(true)`
+  uses `VOICE_COMMUNICATION` + `AcousticEchoCanceler` (enabled when `isAvailable()`), `setPrivacySensitive(false)`.
+  Run-time fallback, never a "pass": if that recorder fails to initialise, it opens `VOICE_RECOGNITION` with an
+  `AcousticEchoCanceler` attempt so the detector isn't deaf. Every open logs one `BuddyWake` line with the source and
+  whether the echo canceller is enabled; the post-release P2 check reads it. Plain `VOICE_RECOGNITION` is never
+  chosen as the design.
+- **P6 (is Phone input fed):** ship the fed path (`EXTRA_AUDIO_SOURCE` pipe, documented since API 33, and the feature
+  is Android 14+). Nicholas answered Q1 (a) on 2026-11-22, so the unfed path ("hey buddy", pause, request) is an
+  accepted fallback. Run-time fallback: if two fed Phone windows **in a row** fail within 3 s of `startListening`
+  (a recognizer error other than no-match/speech-timeout, or a row-3 foreign recording that cancels the turn),
+  Phone turns are unfed for the rest of the process, logged once. A pipe that can't be created makes that one window
+  unfed. Two early failures in a row are needed so one unrelated recorder (round 2 F2) can't downgrade it, and a
+  restart resets it. The on-device recognizer alternative is dropped. `Voice.PHONE_FEED` is a flag set by that
+  fallback, not a compile-time probe result. Supersedes "Whether Phone turns are fed is decided by the probe".
+- **Round 3 F4 (P6 probe could hang):** moot, the probe is dropped. The shipping pump already writes from a worker
+  after `startListening`; keep it that way.
+- **Round 3 F2 (accepted): ChatGPT events are bound to their session.** In `CodexDictation`, a transcript, a startup
+  failure or `end(l, …)` from a listener that is no longer the current one changes nothing (no `heard`, no teardown
+  of the current WebView or capture). Unit test if `CodexDictation` can be exercised in a JVM test; otherwise the
+  check is code review plus a post-release device check.
+- **Round 3 F3 (accepted): a socket reader is bound to the capture it was admitted for.** `MicServer.streamCapture`
+  takes the capture id at admission and stops, without reading or setting `drained`, once the current capture id
+  differs. `MicServerTest`: a reader admitted for capture a, then release + re-adopt (b): the reader gets none of
+  b's audio and b isn't marked drained. Device check (post-release) uses the bundled `arecord`'s raw stdout:
+  `arecord | head -c 96000 > /tmp/t.pcm` (16 kHz mono PCM16, 3 s), a word said after it started is there, the
+  earlier "hey buddy" isn't.
+- **Q2 = (a)** (Nicholas, brief Clarifications: Bypass chats running without approval cards is fine), Q3 = (a) answer
+  while locked, Q4 = (a). The guide states the Bypass consequence.
+- **Battery (T8):** before release, `battery.md` and the guide carry research's sourced estimate, marked as an
+  estimate, with what drives it; the measured hour (P4) is a post-release check that replaces it.
+- **Execution:** the coder runs the remaining steps in chunks (1-3, 5-6, 7-8, 9-10) so each fits the 1 h run limit,
+  then `code-loop --ci` reviews the whole branch.
+- By: orchestrator (claude-opus-5-5)

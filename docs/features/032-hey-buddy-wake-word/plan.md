@@ -2,6 +2,12 @@
 <!-- Planner (claude-fable-5-2). Round 1, 2026-11-21: answers plan-review.md round 1 (F1-F10). Round 2, 2026-11-22:
      answers round 2 (F1-F6): §5 row 3, §6, steps 3-5 and their order, probe gates, T2/T4/T5, R10-R13. -->
 
+
+> **Orchestrator rulings, 2026-11-22 (decisions.md, last entry) override this plan where they differ:** step 4 (the
+> probe) is dropped and P1/P2/P6 no longer block (they are post-release checks in verify.md); the playback microphone
+> is VOICE_COMMUNICATION + AcousticEchoCanceler with a logged fallback; Phone input ships fed with a run-time fallback
+> to unfed (Q1 = a); round 3 F2 (ChatGPT stale events) and F3 (socket reader bound to its capture id) are accepted.
+
 ## Goal
 Saying "hey buddy" (alone, or with the request in the same breath) sends the request, without the wake phrase, to
 Buddy hands-free, and the reply is spoken. A later "hey buddy, <follow-up>" continues the same chat. "hey buddy, stop"
