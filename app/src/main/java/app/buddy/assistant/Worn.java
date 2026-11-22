@@ -39,7 +39,19 @@ final class Worn {
     private final List<Consumer<Boolean>> waiting = new ArrayList<>();
 
     Worn(Port port) {
+        this(port, System.currentTimeMillis()); // ids differ across phone restarts: an old reply can't settle a new ask
+    }
+
+    Worn(Port port, long firstId) {
         this.port = port;
+        seq = firstId;
+    }
+
+    /** The watch pushed its state (a reading is playing): a removal voids older "worn" evidence, a "worn" is a fresh sample. */
+    void push(String n, boolean w) {
+        node = n;
+        worn = w;
+        at = port.now();
     }
 
     /** True only when this node said "worn" and the sample is at most FRESH_MS old. */

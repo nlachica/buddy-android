@@ -63,8 +63,18 @@ final class WatchVoice {
 
     /** Auto's "a watch answers" (033): a reachable watch that is worn. A hand-picked Watch is used worn or not. */
     static void find(Context c, Consumer<String> node) {
+        worn(c).find(n -> link().find(c, n), () -> KEY.equals(Prefs.audioDevice(c)), node);
+    }
+
+    private static Worn worn(Context c) {
         if (worn == null) worn = new Worn(new WornPort(c.getApplicationContext()));
-        worn.find(n -> link().find(c, n), () -> KEY.equals(Prefs.audioDevice(c)), node);
+        return worn;
+    }
+
+    /** The watch's push of its wrist state (main thread): kept for the next Auto decision, then given to a live call. */
+    static void wornPush(Context c, String node, boolean w) {
+        worn(c).push(node, w);
+        LiveWatch.worn(node, w);
     }
 
     /** The watch's answer to an ask (main thread). */

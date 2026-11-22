@@ -102,7 +102,7 @@ public class WatchLink extends WearableListenerService {
                         WatchVoice.wornReply(node, in.optLong("id"), in.has("worn") ? Boolean.valueOf(in.optBoolean("worn")) : null,
                                 in.optLong("ms"), in.optString("why"));
                     } else {
-                        LiveWatch.worn(node, in.optBoolean("worn"));
+                        WatchVoice.wornPush(this, node, in.optBoolean("worn"));
                     }
                     break;
                 default:

@@ -241,4 +241,31 @@ public class WornTest {
         w.reply("n1", f.last(), false, 0, null);
         assertNull(found);
     }
+
+    @Test
+    public void aRemovalPushVoidsAnEarlierWornAnswerAndAWornPushIsFresh() {
+        check();
+        w.reply("n1", f.last(), true, 0, null);
+        assertTrue(w.on("n1"));
+        w.push("n1", false);
+        assertFalse(w.on("n1"));
+        w.push("n1", true);
+        assertTrue(w.on("n1"));
+        f.advance(Worn.FRESH_MS + 1);
+        assertFalse(w.on("n1"));
+    }
+
+    @Test
+    public void aReplyFromThePreviousPhoneProcessCannotSettleTheNewAsk() {
+        Worn old = new Worn(f, 1000);
+        old.check("n1", v -> { });
+        long oldId = f.last();
+        Worn fresh = new Worn(f, 2000);
+        fresh.check("n1", v -> got = v);
+        got = null;
+        fresh.reply("n1", oldId, true, 0, null);
+        assertNull(got);
+        fresh.reply("n1", f.last(), true, 0, null);
+        assertTrue(got);
+    }
 }
