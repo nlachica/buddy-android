@@ -49,3 +49,8 @@
 
 ## 2026-11-22 - Coder: tests avoid Java 9+ APIs
 - Choice: `Collections.singletonList` instead of `List.of` in WakeLoopTest (sourceCompatibility is 1.8), by Coder (Claude Sonnet 5.5). No other deviation from the plan.
+
+## 2026-11-22 - Coder: the wake is stamped with the run's first qualifying hop (code review F1)
+- Choice: `WakeLoop` keeps `runStart` (the clock of the first hop of the run) and passes it to `onWake`, so
+  `WakeWord.overlapped` judges where the phrase began, not when N hops confirmed it (up to ~240 ms later, which pushed a
+  barge-in past the 1000 ms window and turned "hey buddy, stop" into a chat request). By: Coder (Claude Sonnet 5.5).

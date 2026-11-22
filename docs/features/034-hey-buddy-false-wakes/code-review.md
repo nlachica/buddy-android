@@ -10,3 +10,7 @@ F2 [minor] The sensitivity-change test starts with an empty count - `app/src/tes
 Both CI jobs passed on the reviewed commit, including the real-model regression and both APK builds. The local JVM failed to start, so the test evidence comes from [CI run 45039935937](https://github.com/nlachica/buddy-android/actions/runs/45039935937).
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+F1: fixed - `WakeLoop` records the clock of the run's first qualifying hop and passes that to `onWake` (the `Host.onWake` doc says so). New test `theWakeIsStampedWithTheFirstQualifyingHop`: hops at 1850, 1970, 2090 ms, no wake after two, one wake after the third with `wakeAt == 1850`, and `WakeWord.overlapped(false, 1000, wakeAt)` is true where the old stamp (2090) gave false.
+F2: fixed - new test `aSensitivityChangeResetsAPartialRun`: two hops at 0.9 under Low, switch to Medium, two more hops give 0 wakes, the third gives 1. Removing the reset now fails it.

@@ -51,7 +51,7 @@ final class WakeLoop {
         /** One line for the log: a wake or a near miss, with its scores. */
         void log(String line);
 
-        /** A detection (capture thread): {@code detectedAt} is the clock the blocks were stamped with. */
+        /** A detection (capture thread): {@code detectedAt} is the clock of the run's first qualifying hop (the phrase's start). */
         void onWake(int seq, long detectedAt);
 
         /** The hold, or a feed, ran past its limit: the audio is dropped, the loop detects again; cancel the turn. */
@@ -77,6 +77,7 @@ final class WakeLoop {
     private Rule rule;
     private int run;
     private float peak;
+    private long runStart; // the clock of the run's first qualifying hop: where the phrase began
     private final StringBuilder hops = new StringBuilder();
 
     WakeLoop(WakeFeatures features, Sink sink, Host host) {
@@ -111,6 +112,7 @@ final class WakeLoop {
                 if (score >= r.threshold) {
                     if (run++ == 0) {
                         peak = 0;
+                        runStart = now;
                         hops.setLength(0);
                     }
                     peak = Math.max(peak, score);
@@ -121,7 +123,7 @@ final class WakeLoop {
                         short[] pre = features.preRoll();
                         for (int i = 0; i < pre.length; i += CHUNK) hold(bytes(pre, i, Math.min(CHUNK, pre.length - i)));
                         host.log("wake " + (seq + 1) + ": " + r + " peak " + fmt(peak) + " hops" + hops);
-                        host.onWake(++seq, now);
+                        host.onWake(++seq, runStart);
                     }
                 } else if (run > 0) {
                     run = 0;

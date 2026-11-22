@@ -303,6 +303,35 @@ public class WakeLoopTest {
     }
 
     @Test
+    public void theWakeIsStampedWithTheFirstQualifyingHop() {
+        Rig r = new Rig();
+        r.warm();
+        r.level = 0.9f;
+        r.blocks(3, 1850);
+        r.blocks(3, 1970);
+        assertEquals(0, r.wakes);
+        r.blocks(3, 2090);
+        assertEquals(1, r.wakes);
+        assertEquals(1850, r.wakeAt);
+        // speech ended at 1000: the phrase began inside the overlap window, so it is a barge-in, not a request
+        assertTrue(WakeWord.overlapped(false, 1000, r.wakeAt + 100));
+        assertFalse(WakeWord.overlapped(false, 1000, 2090));
+    }
+
+    @Test
+    public void aSensitivityChangeResetsAPartialRun() {
+        Rig r = new Rig();
+        r.rule = WakeLoop.Rule.LOW;
+        r.warm();
+        r.hops(2, 0.9f);
+        r.rule = WakeLoop.Rule.MEDIUM;
+        r.hops(2, 0.9f);
+        assertEquals(0, r.wakes);
+        r.hops(1, 0.9f);
+        assertEquals(1, r.wakes);
+    }
+
+    @Test
     public void theRuleIsReadForEachHop() {
         Rig r = new Rig();
         r.rule = WakeLoop.Rule.LOW;
