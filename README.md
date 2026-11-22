@@ -45,7 +45,7 @@ https://github.com/user-attachments/assets/d07936fc-4788-4ab5-a105-31b3e9aeba4f
 | **Asks first** | Approve, Deny or Change before anything is sent, posted, bought or deleted. |
 | **Shows you how** | "Show me how to turn on dark mode": it points at each step and waits for your tap. |
 | **Acts on notifications** | "When a customer asks on WhatsApp, reply with our opening hours", with your OK, a countdown you can stop, or right away. |
-| **Voice** | Talk to it and have replies read aloud. GitHub version, Android 14+: say "hey buddy" and ask, hands-free (on-device wake word, uses battery). |
+| **Voice** | Talk to it and have replies read aloud. GitHub version, Android 14+: say "hey buddy" and ask, hands-free (on-device wake word, sensitivity in Settings, uses battery). |
 | **Background mode** | The agent works in your apps on a screen of its own that you don't see, while you keep using your phone. Set up once with the phone's own Wireless debugging, no computer; watch it live in the chat. Optional: let it run `adb shell` commands on the phone, each one approved by you. |
 | **Sub-agents** | "Compare this on eBay, Amazon and AliExpress": the agent starts sub-agents that each work in an app on a hidden screen of their own, at the same time, and report back. They only look things up; you see every screen in the chat. |
 | **Background browser** | Web pages in a browser inside Buddy, without taking over your screen, even while the phone is locked. Watch and use it live in the chat; it marks what you need to do (sign in, a captcha) and never types your passwords. |

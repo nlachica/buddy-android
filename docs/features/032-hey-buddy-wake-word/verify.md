@@ -8,7 +8,7 @@ until the release is on the phone.
 
 | Done-when item | Evidence | Result |
 |---|---|---|
-| Foreground service listens on-device, model in the APK, persistent notification | `WakeService` (microphone FGS, `foregroundServiceType="microphone"`, `watchlink/AndroidManifest.xml:6-14`), notification channel `wake`; models + `SHA256SUMS` in `app/src/wakeword/assets/wakeword`; CI `OnnxWakeEngineTest` (real models: clean 0.99, augmented 0.17, sound-alike 0.057 at `THRESHOLD` 0.12), `WakeIdleTest` (nothing reaches `MicServer` before a wake; pre-roll ≤ 1.5 s after); `build.yml` APK/manifest flavor check | pass (CI); device P1 pending |
+| Foreground service listens on-device, model in the APK, persistent notification | `WakeService` (microphone FGS, `foregroundServiceType="microphone"`, `watchlink/AndroidManifest.xml:6-14`), notification channel `wake`; models + `SHA256SUMS` in `app/src/wakeword/assets/wakeword`; CI `OnnxWakeEngineTest` (real models: clean 0.99, augmented 0.17, sound-alike 0.057; the threshold is now the sensitivity's, 034), `WakeIdleTest` (nothing reaches `MicServer` before a wake; pre-roll ≤ 1.5 s after); `build.yml` APK/manifest flavor check | pass (CI); device P1 pending |
 | One breath sends the request without the phrase; "hey buddy" alone listens | `WakeWord.strip`, `WakeWord.Turn` (AGAIN once, then END), `WakeLoop` HOLD/FEED; `MicServer.adopt` hand-off with pre-roll; fed Phone path via `EXTRA_AUDIO_SOURCE` with the unfed fallback (Q1 = a); CI `WakeWordTest`, `WakeLoopTest`, `VoiceWindowTest` | pass (CI); device T2 pending |
 | Follow-up goes to the same chat as Talk | `ChatHub.sendTalk` is the one destination for Talk (`Bubble.java:1679`) and wake (`WakeWord.java:235`) | pass (code); device T3 pending |
 | "hey buddy, stop" cuts speech ≤ ~1 s; AEC while speaking | `Voice.stopSpeaking()` on the wake itself (`WakeWord.java:156`); stop swallowed only when playback overlapped (`overlapped`, `isStop`); `WakeMic` opens `VOICE_COMMUNICATION` + `AcousticEchoCanceler` while speaking, logged fallback; CI `WakeWordTest` | pass (CI); device P2/T4 pending |
@@ -23,8 +23,8 @@ settings, toggle, docs, CI check); no probe leftovers. Open review findings: pla
 in decisions.md (code round 3 F3 accepted as a rare race after its fix was reverted).
 
 ## Post-release device checks (pending, run on the phone after the release is installed)
-- **P1 / threshold first:** 10 "hey buddy" at arm's length (≥ 8); 30 min TV/podcast (≤ 2 false wakes; `THRESHOLD`
-  0.12 has only a 2x margin over the sound-alike clip, so tune here first); screen off and unplugged 5 min, then 5
+- **P1 / threshold first:** 10 "hey buddy" at arm's length (≥ 8); 30 min TV/podcast (≤ 2 false wakes; `logcat -s HeyBuddy`
+  shows each wake and near miss with its scores; tune with the sensitivity (034)); screen off and unplugged 5 min, then 5
   "hey buddy" (≥ 4).
 - **P2:** while Buddy speaks at 60% volume, 10 "hey buddy" (≥ 7); `logcat -s BuddyWake` shows the source and whether
   the echo canceller was enabled; Buddy's own speech doesn't trigger it.
