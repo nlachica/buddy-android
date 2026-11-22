@@ -35,11 +35,11 @@ final class CodexDictation {
     private static OutputStream toServer;
     private static String threadId;
     /** The conversation of the call now on: each call has its own, so a cancelled call's late events are told apart. */
-    private static volatile String callThread;
+    static volatile String callThread;
     private static int nextId;
     private static final Map<Integer, JSONObject[]> replies = new HashMap<>();
 
-    private static Voice.Listener listener;
+    static Voice.Listener listener;
     private static WebView web;
     private static boolean finishing, drained, connected;
     private static final StringBuilder done = new StringBuilder();
@@ -409,7 +409,8 @@ final class CodexDictation {
             CodexSpeech.notification(method, p);
             return;
         }
-        boolean mine = p.optString("threadId").equals(callThread); // else a call that was cancelled
+        final String th = p.optString("threadId");
+        boolean mine = th.equals(callThread); // else a call that was cancelled; the main-thread callbacks below ask again
         switch (method) {
             case "turn/started": { // the voice handed something to Codex: stop it, dictation never runs tasks (and live
                 // voice hands it to the chat instead, see CodexLive)
@@ -422,30 +423,39 @@ final class CodexDictation {
                 if (!mine) break;
                 stage = R.string.dictation_stage_connecting;
                 final String sdp = p.optString("sdp");
-                main.post(() -> js("answer(" + JSONObject.quote(sdp) + ")"));
+                main.post(() -> {
+                    if (th.equals(callThread)) js("answer(" + JSONObject.quote(sdp) + ")");
+                });
                 break;
             }
             case "thread/realtime/transcript/delta":
                 if (mine && !"assistant".equals(p.optString("role"))) {
                     final String d = p.optString("delta");
-                    main.post(() -> heard(d, false));
+                    main.post(() -> {
+                        if (th.equals(callThread)) heard(d, false);
+                    });
                 }
                 break;
             case "thread/realtime/transcript/done":
                 if (mine && !"assistant".equals(p.optString("role"))) {
                     final String t = p.optString("text");
-                    main.post(() -> heard(t, true));
+                    main.post(() -> {
+                        if (th.equals(callThread)) heard(t, true);
+                    });
                 }
                 break;
             case "thread/realtime/error": {
                 if (!mine) break;
-                final String msg = p.optString("message");
-                main.post(() -> {
-                    if (listener != null) end(listener, BuddyApp.str(R.string.dictation_chatgpt_error, msg));
-                });
+                final String msg = BuddyApp.str(R.string.dictation_chatgpt_error, p.optString("message"));
+                main.post(() -> callError(th, msg));
                 break;
             }
         }
+    }
+
+    /** Main thread: a call's error ends the listening only if that call is still the current one (it may have been replaced while this was queued). */
+    static void callError(String thread, String message) {
+        if (thread.equals(callThread) && listener != null) end(listener, message);
     }
 
     private static void heard(String text, boolean final_) {
