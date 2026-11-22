@@ -630,4 +630,28 @@ public class AudioRouteTest {
         assertEquals(6, rec[AudioRoute.SAVED]);
         assertEquals(-1, rec[AudioRoute.FROM]);
     }
+
+    @Test
+    public void aConfirmationReadThatThrowsKeepsTheRecordAndEndsAtTheSavedLevel() {
+        int[] rec = AudioRoute.noMedia();
+        FakeVol v = new FakeVol() {
+            boolean thrown;
+
+            public boolean at(int l) {
+                if (writes == 1 && !thrown) { // the first read after the write
+                    thrown = true;
+                    throw new IllegalStateException("audio service died");
+                }
+                return super.at(l);
+            }
+        };
+        v.level = 6;
+        rec = tick(true, 6, 15, rec, v);
+        assertEquals(15, v.level); // the write landed
+        assertEquals(6, rec[AudioRoute.SAVED]); // and the record is kept
+        rec = tick(true, 15, 15, rec, v); // the next tick must not take 15 as the start
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        rec = tick(false, 15, 15, rec, v); // hang-up
+        assertEquals(6, v.level);
+    }
 }

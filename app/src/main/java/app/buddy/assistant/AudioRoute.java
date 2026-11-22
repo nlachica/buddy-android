@@ -578,7 +578,7 @@ final class AudioRoute {
      * alone, the mute and the same index (a headset can take media meanwhile) and on failure puts the old record back and
      * changes nothing; a write that Android ignored (the index isn't w after it) isn't accepted either, so the record
      * stays and the next tick tries again. True: n is the record now. After a take's write that isn't seen to apply (a headset
-     * came, or Android ignored it) n[FROM] stays set: the caller keeps n, and the next speaker read resolves it (mediaStep).
+     * came, Android ignored it, or the write or its read threw) n[FROM] stays set: the caller keeps n, and the next speaker read resolves it (mediaStep).
      */
     static boolean change(boolean speakerCall, int now, int w, int[] old, int[] n, Vol v) {
         boolean take = w >= 0 && speakerCall;
@@ -589,8 +589,12 @@ final class AudioRoute {
         }
         if (w < 0) return true;
         if (take) n[FROM] = now; // the record on disk says so; stays set if the write isn't seen to apply
-        v.put(w);
-        if (!v.at(w)) return false;
+        try {
+            v.put(w);
+            if (!v.at(w)) return false;
+        } catch (RuntimeException e) { // the write may have landed: unconfirmed, n[FROM] stays set for a take
+            return false;
+        }
         n[FROM] = -1;
         return true;
     }

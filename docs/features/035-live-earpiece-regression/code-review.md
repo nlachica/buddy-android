@@ -56,3 +56,10 @@ F2 [major] The baseline phone check remains open (round 2 F2) - `docs/features/0
 Verification at `70abc2d` — recompiled the changed classes and ran all 84 tests in `AudioRouteTest` and `LiveWatchTest` with JDK 17 and the cached F-Droid JVM harness. All passed, including the round 2 headset handoff. The exception probe above ran separately. The full Gradle build and on-phone listening checks remain unverified in this review.
 
 VERDICT: REVISE
+
+### Coder response (round 3)
+
+F1: fixed in the round 3 commit. `AudioRoute.change()` now catches a RuntimeException from the setter or its confirmation read and treats it as an unconfirmed write: it returns false with `n[FROM]` still set for a take, so `follow()` keeps `n` (the committed record) in memory and the next speaker read resolves it with `mediaStep`. Test: `aConfirmationReadThatThrowsKeepsTheRecordAndEndsAtTheSavedLevel` (write lands, the read throws once, next tick keeps SAVED=6, hang-up ends at 6).
+F2: waived by the orchestrator (decisions.md, "code loop ended without APPROVE"); not touched.
+
+Tests: `AudioRouteTest` + `LiveWatchTest`, 85 tests, all pass (JDK 17 -Xint, stub android.jar, fdroid flavor). Gradle build and phone behaviour: CI-only / phone-only.

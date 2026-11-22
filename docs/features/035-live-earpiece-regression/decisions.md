@@ -146,3 +146,9 @@
   only, then one reviewer run.
 - Round 3 F2 (baseline Step 1 on the unmodified build with Nicholas): waived. The driver log already shows the speaker
   path and Media 6/15; the on-phone check moves to verify on the release build (keys change loudness, Media restored).
+
+## 2026-11-22 - Code review round 3 (Coder)
+- Options: catch in `follow()` and rebuild the record there; catch in `change()` around the setter and its confirmation read.
+- Choice: the second (reviewer F1). The exception becomes an unconfirmed write where `n[FROM]` is already set, so the round 2 keep-and-resolve path handles it and the test reaches it through `change()`.
+- F2 waived by the orchestrator.
+- By: Coder (claude-sonnet-5-5)
