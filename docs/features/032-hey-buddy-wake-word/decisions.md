@@ -309,3 +309,11 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - The service's clock for detections, speech end and pause causes is `elapsedRealtime` throughout.
 - Not run anywhere: the fed Phone path (needs a recognizer), `Bubble.talk` and `WakeWord.onWake/openWindow` (need the
   bubble and a phone). They are covered by the post-release device checks in `verify.md`, not by a unit test.
+
+## 2026-11-22 - Steps 9-10 details the plan left open (coder)
+- The hold-menu item shows only where `WakeWord.available()` holds. Turning it on without the microphone permission
+  reuses `dictateNote`'s route (toast `setup_wake_needs_mic`, MainActivity `askMic`); the grant starts the service
+  through the resume callback. `ms_mic_off.xml` is `ms_mic`'s path dimmed plus a drawn slash (no Material Symbols
+  `mic_off` source was at hand), so it is not a verbatim Material icon.
+- Battery in the guide and `battery.md`: research's sourced range, marked as an estimate. The service logs no time per
+  hop, so P5 needs a temporary timing log; `battery.md` says so.

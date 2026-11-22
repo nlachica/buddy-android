@@ -43,6 +43,8 @@ You sign in with these services yourself; Buddy never sees your passwords. Their
 
 If you use the microphone, your voice is turned into text by the engine you choose in Settings: your phone's speech recognizer, Claude's dictation (Anthropic) or ChatGPT's (OpenAI). Replies read aloud use the phone's voice or ChatGPT's voices (OpenAI).
 
+The GitHub version on Android 14 or newer can also listen for "hey buddy" (Settings → Voice → Hey Buddy, on by default once the microphone is allowed). The listening happens on your phone with a model inside the app; the sound is not recorded, stored or sent anywhere. Only after the wake phrase, the sentence you say goes to the engine you chose, as above, together with the second or so before it so no word is lost. It pauses in calls and while another app records, and you can turn it off at any time.
+
 ## Watch
 
 If you use Buddy's watch app (GitHub version only), the chat titles, your words and Buddy's replies, and the latest messages of a chat you open on the watch (also those typed on the phone while it is open), pass between your phone and your watch through Google Play services' Wear OS link: over Bluetooth, or, when the watch is out of range, through Google's servers, encrypted. The watch's speech recognizer turns your voice into text on the watch. During a live call from the watch, the watch's microphone audio goes to the phone over the same link and on to ChatGPT, exactly as the phone's own live voice does, and ChatGPT's voice comes back the same way; when ChatGPT's voice is the phone's engine, replies are also spoken that way (the reply text goes to ChatGPT to be read aloud, as the phone's read-aloud does). Buddy has no servers of its own and gets nothing from this.
@@ -60,7 +62,8 @@ To set up an agent, Buddy downloads a small Linux system from Alpine Linux (dl-c
 Every permission Buddy asks for, why, and what happens without it:
 
 - **Accessibility service:** described above. Buddy's core: without it, agents can't see or use the screen.
-- **Microphone (`RECORD_AUDIO`):** only when you tap the mic or start live voice. Without it, you type instead.
+- **Microphone (`RECORD_AUDIO`):** when you tap the mic or start live voice, and, in the GitHub version on Android 14+ with Hey Buddy on, continuously on the phone to hear the wake phrase (see Voice). Without it, you type instead.
+- **Foreground service, microphone type (`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_MICROPHONE`, GitHub version only):** Android requires them for Hey Buddy's listening service and its "Hey Buddy is listening" notification. Not in the F-Droid version.
 - **Audio settings (`MODIFY_AUDIO_SETTINGS`):** voice input and live voice record through Android's WebView (WebRTC), which needs it to set up the microphone. Buddy doesn't change your volume or sound settings.
 - **Notifications (`POST_NOTIFICATIONS`, `POST_PROMOTED_NOTIFICATIONS`):** task status, approvals while the phone is locked, and on Android 16 the "Buddy is using your phone" chip in the status bar. Without them, you only see these in the app and the bubble.
 - **Vibration (`VIBRATE`):** a short buzz when an approval card or a reply arrives.
