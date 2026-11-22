@@ -76,3 +76,53 @@
 - Choice: github only (engine and models in `src/wakeword`, loaded by name as the watch link is), so the F-Droid APK
   gains no native library or model and its reproducibility check is untouched, and `build.sh` still compiles.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-21 - Wake turns go to Talk's chat (replaces "one dedicated Hey Buddy chat")
+- Options: a dedicated chat (round 0); the chat Talk uses.
+- Choice: Talk's (`sessions.current`, a new chat only if none), because the brief's done-when says "same chat as
+  Buddy's voice/Talk path" (plan review F2). Consequence accepted and documented: the open chat's approvals apply,
+  Bypass included; asked of Nicholas (Q2). `Prefs.wakeChat` is dropped; `Session.spokenRun` stays.
+- By: Planner (claude-fable-5-2), on Plan Reviewer F2
+
+## 2026-11-21 - One hand-off seam for all three inputs; Phone is fed through EXTRA_AUDIO_SOURCE
+- Options: Phone input pause-only (round 0); a pipe for Phone beside MicServer for the others; MicServer as the one
+  seam, pumped into a pipe for Phone; transcribe Phone users' wake turns with Claude.
+- Choice: MicServer as the one seam. The detector's audio (pre-roll first) goes into MicServer for every input;
+  for Phone, `Voice.listen` pumps it into the recognizer's `EXTRA_AUDIO_SOURCE` pipe. Because Phone is the default
+  input and a one-breath request must not lose words there (F1). Unproven on this phone's recognizer
+  (`com.google.android.tts`): probe gate P6, then the on-device recognizer, else Phone is pause-only and that is
+  Nicholas's decision (Q1). A recognizer that opens the microphone itself is noticed at run time (one cancelled
+  turn, then unfed turns until Buddy restarts).
+- By: Planner (claude-fable-5-2), on Plan Reviewer F1
+
+## 2026-11-21 - The wake word is offered on Android 14+ only
+- Options: all of minSdk 30+; a visible-start rule for Android 11-13; Android 14+ only.
+- Choice: Android 14+ (`WakeWord.available()`), because below it a background start of the microphone service gives
+  silence without an error, there is no device to verify a workaround on, and Nicholas's phone is Android 16. It
+  also guarantees API 33's `EXTRA_AUDIO_SOURCE`. Below 14: no switch, `hey_buddy` refuses "on".
+- By: Planner (claude-fable-5-2), on Plan Reviewer F6
+
+## 2026-11-21 - A wake turn is owned by a turn id, reserved on the main thread; calls and recorders beat it
+- Options: adopt MicServer on the capture thread at detection (round 0); hold the audio in the capture loop and
+  reserve on the main thread.
+- Choice: the capture loop (`WakeLoop`, pure) only holds audio; the main thread reserves `MicServer.adopt(turn)` and
+  calls `Voice.listen` in one go, so a tap can't interleave; `feed`/`release`/the 2-minute cut act only for the
+  owner. In `WakeWord.state`, OFF, a call and a foreign recording rank above TURN and cancel it; late transcripts
+  are dropped by the turn-id check (F3, F4).
+- By: Planner (claude-fable-5-2), on Plan Reviewer F3/F4
+
+## 2026-11-21 - "hey buddy" alone: one extra listening window; stop words only count when speech was cut
+- Options: end the turn when the first result is only the wake phrase (round 0); hold the first window open by
+  ignoring the pre-roll's loudness; one more window in the same turn.
+- Choice: one more window (pure `WakeWord.Turn`: AGAIN once, then END), started from the audio held since the first
+  window stopped, because Android's recognizer ends on its own and the same rule then serves all inputs (F7). A stop
+  command is swallowed only if the wake cut speech (speaking then, or up to 2 s before); otherwise it is sent (F8).
+- By: Planner (claude-fable-5-2), on Plan Reviewer F7/F8
+
+## 2026-11-21 - Service start on every Buddy screen's resume; service declared in the github-only manifest
+- Options: hooks in each activity's permission callback; one `ActivityLifecycleCallbacks` in `BuddyApp`. Main
+  manifest; the github overlay manifest.
+- Choice: the one callback (a permission dialog closing resumes the asker, F5), and the overlay
+  `app/src/watchlink/AndroidManifest.xml` for the service and both foreground-service permissions, checked in CI on
+  the merged manifests (F10).
+- By: Planner (claude-fable-5-2), on Plan Reviewer F5/F10
