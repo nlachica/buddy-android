@@ -3,6 +3,8 @@ package app.buddy.assistant;
 import android.content.Context;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
+import android.util.Log;
 
 import java.util.function.Consumer;
 
@@ -27,11 +29,17 @@ final class WatchVoice {
         default ReadQueue.Stream open(Context c, String node, ReadQueue.Events e) {
             return open(c, node, e, null);
         }
+
+        /** Asks the watch whether it is worn (033): its reply comes to wornReply. failed runs when the ask can't be sent. */
+        default void askWorn(Context c, String node, long id, Runnable failed) {
+            failed.run();
+        }
     }
 
     private static Link link;
     private static boolean loaded;
     private static ReadQueue queue;
+    private static Worn worn;
 
     private WatchVoice() {
     }
@@ -51,6 +59,22 @@ final class WatchVoice {
         } catch (ReflectiveOperationException | LinkageError e) {
             return null;
         }
+    }
+
+    /** Auto's "a watch answers" (033): a reachable watch that is worn. A hand-picked Watch is used worn or not. */
+    static void find(Context c, Consumer<String> node) {
+        if (worn == null) worn = new Worn(new WornPort(c.getApplicationContext()));
+        worn.find(n -> link().find(c, n), () -> KEY.equals(Prefs.audioDevice(c)), node);
+    }
+
+    /** The watch's answer to an ask (main thread). */
+    static void wornReply(String node, long id, Boolean w, long ms, String why) {
+        if (worn != null) worn.reply(node, id, w, ms, why);
+    }
+
+    /** A fresh "worn" from this node (a live call that is switched from Watch to Auto, 033). */
+    static boolean worn(String node) {
+        return worn != null && worn.on(node);
     }
 
     /** quiet: Watch isn't the user's pick, so it is Auto's step (016): no notice when the watch can't play it. */
@@ -77,7 +101,7 @@ final class WatchVoice {
 
         @Override
         public void find(Consumer<String> node) {
-            link().find(app, node);
+            WatchVoice.find(app, node);
         }
 
         @Override
@@ -126,6 +150,35 @@ final class WatchVoice {
         @Override
         public String notice() {
             return app.getString(R.string.voice_watch_unavailable);
+        }
+    }
+
+    private static final class WornPort implements Worn.Port {
+        private final Context app;
+        private final Handler main = new Handler(Looper.getMainLooper());
+
+        WornPort(Context app) {
+            this.app = app;
+        }
+
+        @Override
+        public void send(String node, long id, Runnable failed) {
+            link().askWorn(app, node, id, failed);
+        }
+
+        @Override
+        public void after(long ms, Runnable r) {
+            main.postDelayed(r, ms);
+        }
+
+        @Override
+        public long now() {
+            return SystemClock.elapsedRealtime();
+        }
+
+        @Override
+        public void log(String line) {
+            Log.d("Worn", line);
         }
     }
 }
