@@ -132,13 +132,19 @@ final class Voice {
 
         /** A fed window started listening. */
         void started(long now) {
+            if (since != 0) fails = 0; // the window before it ended (cancelled) without failing early: not in a row
             since = now;
         }
 
         /** The fed window failed. True when this turned feeding off. */
         boolean failed(long now) {
-            if (since == 0 || now - since > EARLY_MS) return false;
+            if (since == 0) return false;
+            boolean late = now - since > EARLY_MS;
             since = 0;
+            if (late) {
+                fails = 0;
+                return false;
+            }
             if (++fails < 2 || !on) return false;
             on = false;
             return true;
@@ -244,13 +250,17 @@ final class Voice {
             try (java.io.OutputStream out = new ParcelFileDescriptor.AutoCloseOutputStream(pipe[1])) {
                 while (true) {
                     byte[] b = MicServer.pull(capture, 3200);
-                    if (b == null) return; // that capture is over
+                    if (b == null) break; // that capture is over
                     if (b.length > 0) out.write(b);
-                    else if (!MicServer.recording()) return; // the end of input was marked and all of it is written
+                    else if (!MicServer.recording()) break; // the end of input was marked and all of it is written
                     else Thread.sleep(20);
                 }
             } catch (java.io.IOException | InterruptedException ignored) { // the recognizer closed its end, or finish() closed ours
             }
+            // all of the audio is in and the pipe is closed: only now may the recognizer be told to stop (finishListening waits for this)
+            ends.post(() -> {
+                if (phone == window && inputDone && recognizer != null) recognizer.stopListening();
+            });
         }, "wake-pipe").start();
     }
 
@@ -458,7 +468,7 @@ final class Voice {
         if (recognizer != null) {
             inputDone = true;
             if (phone != null) phone.endInput();
-            recognizer.stopListening();
+            if (phone == null || phone.capture == 0) recognizer.stopListening(); // a fed window's pump does it once its audio is written
         }
     }
 

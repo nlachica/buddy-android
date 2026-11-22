@@ -100,4 +100,24 @@ public class VoiceWindowTest {
         f.failed(44_000);
         assertTrue(f.on);
     }
+
+    @Test
+    public void aLateOrCancelledWindowBreaksTheStreak() {
+        Voice.PhoneFeed f = new Voice.PhoneFeed();
+        f.started(1000);
+        f.failed(2000); // early
+        f.started(10_000);
+        f.failed(15_000); // late: resets
+        f.started(20_000);
+        f.failed(21_000); // early again: only one in a row
+        assertTrue(f.on);
+
+        f = new Voice.PhoneFeed();
+        f.started(1000);
+        f.failed(2000); // early
+        f.started(10_000); // this window is cancelled: no failure, no ok
+        f.started(20_000);
+        f.failed(21_000);
+        assertTrue("a cancelled window in between", f.on);
+    }
 }
