@@ -108,3 +108,22 @@
 - Waiting on Nicholas for "Questions for Nicholas" #1 (a/b/c) before the code loop.
 - 2026-11-22 Nicholas answered Q1: (a), the recommended option (volume keys set loudness, Media mirrored during the
   speaker call and restored afterwards). Proceed to the code loop.
+
+## 2026-11-22 - Round 3 F1 and what the tests can reach (Coder)
+- Options: unit-test `follow()` with a fake AudioManager and Prefs; keep `follow()` thin, test the pure rules
+  (`mediaStep`, `mediaOnSpeaker`, `mediaFor`) and cover the wrapper by review.
+- Choice: the second; a fake layer is an abstraction nobody asked for. `follow()` does what round 3 F1 asks: a take or
+  a key write commits the record first (a failed commit writes nothing); then asks again for the speaker alone, the
+  mute and the same Media index; if any of those fails it puts the old record back and writes nothing. A give-back asks
+  again too and, on failure, keeps its record for the next tick. The failed-commit and route-change-during-commit
+  cases are therefore not unit tests: CI-only for the build, phone-only for the behaviour.
+- Also chosen: `Prefs.liveMedia` is one string "saved,set,from"; `seen` is memory-only (-1 after a load); `follow()`
+  catches RuntimeException around the whole body so a refused write can't end the poll (the next tick asks again);
+  "volume: media muted, left alone" is logged once per session (reset in `finish()`).
+- By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - Plan Step 1 not recorded (Coder)
+- The orchestrator's Step 1 phone check (keys move Call not Media; Media at the top is loud) has no entry in this file
+  and no capture in the folder. The code follows the plan as approved; Step 5's phone checks cover the same ground
+  (Risk 1: if the keys already move Media, or the voice stays quiet, back to the Planner).
+- By: Coder (claude-sonnet-5-5)
