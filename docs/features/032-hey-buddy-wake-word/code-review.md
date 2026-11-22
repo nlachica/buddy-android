@@ -136,3 +136,9 @@ Per the orchestrator ruling (decisions.md): F2 and F4 fixed, F1 and F3 were a fe
   No test: it needs a `WakeService` and an `AudioRecord`.
 
 Not run: nothing. No JVM works on this phone, so the new tests and the changes are CI-only (unverified here).
+
+## Round 4 - Code Reviewer (scoped follow-up)
+
+F1 [major] Starting or cancelling ChatGPT dictation can freeze Buddy’s UI - `app/src/main/java/app/buddy/assistant/CodexDictation.java:156`. Both `stopSession` and `openPage` now take the class lock on the main thread. The background `ensureServer` holds that same lock while waiting up to 60 seconds each for initialization and thread creation. Tapping the mic during server warm-up, or cancelling while startup stalls, can leave the UI unresponsive for that wait. A JVM probe confirmed that holding the startup lock blocks `cancel()` in `stopSession`. -> Use a private lock for the page and call ID. Keep the identity check and ID publication atomic under it, detach the old page under it, and destroy the page after unlocking. Test that cancellation completes while the server startup lock is held.
+
+VERDICT: REVISE
