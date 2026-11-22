@@ -44,3 +44,41 @@
 - Choice: Step 1. The driver log is direct evidence, and the check (drag Media up during a call) needs Nicholas's
   ears, which a Researcher run doesn't have.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Buddy only undoes its own volume write (plan review F2)
+- Options: restore the saved index whenever possible; track the level Buddy last set and restore only while the
+  speaker still has it.
+- Choice: track `set` next to `saved`, both in Prefs. A level Nicholas chose later (after a crash, or on the Media
+  slider during the call) is never overwritten: outside a speaker call the stale value is dropped, inside one his
+  level becomes the value to put back. One pure step function, tested as sequences.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Following needs the voice on the phone, not just the speaker route (plan review F3)
+- Options: follow whenever the speaker is the confirmed call device (also while the watch plays); also require that
+  the voice isn't on the watch.
+- Choice: require it (`LiveWatch.onWatch()`). Muting the page silences only Buddy; other apps on the phone would
+  get the raised media volume while the watch talks.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Android 13+ and speaker-only routing; no fallback for Android 12 (plan review F4, F5)
+- Options: keep the "normal mode and no headset" fallback below API 33; find another speaker check for 31-32; limit
+  to API 33+ with the routed devices being exactly the built-in speaker, asked again before each write.
+- Choice: API 33+, exactly the speaker. The fallback was false in communication mode, so it could take the volume
+  and then never follow, and it proved nothing about where media plays. The phone is Android 16. The remaining
+  window between the question and the write is a stated risk: no public API writes a named device's index.
+  Supersedes the fallback in "Volume writes only while media is on the built-in speaker" above.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Earpiece last resort: 033's ruling carried forward (plan review F6)
+- Options: build the brief's "earpiece last resort"; keep the code (no safe device ends the call) and 033's ruling.
+- Choice: keep. Moot on a phone that always has a speaker, and outside the reported call. Nicholas's literal wording
+  stays unresolved and is relayed in the report.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Step 1 can't leave the sliders changed, and the keys moving Media stops the plan (plan review F1)
+- Options: the one-minute listening check as written; record both speaker indices first, read which one a key
+  moves, put both back on every exit.
+- Choice: the second. Media left at the top equals the call level, so the fixed build's check would pass with Buddy
+  doing nothing; and if the keys already move Media, following the call volume has no reason.
+- By: Planner (claude-fable-5-2)
+
