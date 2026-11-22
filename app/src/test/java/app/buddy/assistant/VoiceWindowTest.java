@@ -102,6 +102,21 @@ public class VoiceWindowTest {
     }
 
     @Test
+    public void twoEarlyClientErrorsOnFedWindowsTurnFeedingOff() { // round 3 F2
+        Voice.phoneFeed.on = true;
+        Voice.phoneFeed.ok();
+        for (int n = 0; n < 2; n++) {
+            Voice.Window w = Voice.openWindow(ctx, new Rec());
+            w.feed(1, new android.os.ParcelFileDescriptor[0]);
+            Voice.phoneFeed.started(1000); // the JVM stub clock reads 0, so this is "just started"
+            w.onError(SpeechRecognizer.ERROR_CLIENT);
+        }
+        assertEquals(false, Voice.phoneFeed.on);
+        Voice.phoneFeed.on = true; // the feed is process-wide
+        Voice.phoneFeed.ok();
+    }
+
+    @Test
     public void aLateOrCancelledWindowBreaksTheStreak() {
         Voice.PhoneFeed f = new Voice.PhoneFeed();
         f.started(1000);

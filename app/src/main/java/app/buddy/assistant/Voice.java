@@ -342,7 +342,7 @@ final class Voice {
             boolean nothing = error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT;
             if (capture != 0) {
                 if (nothing) phoneFeed.ok();
-                else if (error != SpeechRecognizer.ERROR_CLIENT) fedFailed();
+                else fedFailed(); // also ERROR_CLIENT: a cancelled window's late one never gets here (phone != this)
             }
             finish();
             if (nothing) {
