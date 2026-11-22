@@ -34,6 +34,8 @@ final class CodexDictation {
     private static Process server;
     private static OutputStream toServer;
     private static String threadId;
+    /** The conversation of the call now on: each call has its own, so a cancelled call's late events are told apart. */
+    private static volatile String callThread;
     private static int nextId;
     private static final Map<Integer, JSONObject[]> replies = new HashMap<>();
 
@@ -154,7 +156,8 @@ final class CodexDictation {
             web.destroy();
             web = null;
         }
-        final String t = threadId;
+        final String t = callThread;
+        callThread = null;
         if (t != null && server != null) {
             new Thread(() -> {
                 try {
@@ -228,8 +231,11 @@ final class CodexDictation {
             for (int i = 0; i < 600 && threadId == null; i++) Thread.sleep(100); // the server is still starting
             if (threadId == null) throw new Exception(BuddyApp.str(R.string.dictation_codex_no_start));
             stage = R.string.dictation_stage_call;
+            String call = newThread();
+            if (web != page) return; // cancelled meanwhile
+            callThread = call;
             JSONObject r = request("thread/realtime/start", new JSONObject()
-                    .put("threadId", threadId)
+                    .put("threadId", call)
                     .put("transport", new JSONObject().put("type", "webrtc").put("sdp", sdp))
                     .put("version", "v3") // ChatGPT's voice (AVAS) over WebRTC only accepts v1 headers as v3
                     .put("outputModality", "audio")
@@ -378,6 +384,7 @@ final class CodexDictation {
         if (server == p) {
             server = null;
             threadId = null;
+            callThread = null;
         }
     }
 
@@ -402,6 +409,7 @@ final class CodexDictation {
             CodexSpeech.notification(method, p);
             return;
         }
+        boolean mine = p.optString("threadId").equals(callThread); // else a call that was cancelled
         switch (method) {
             case "turn/started": { // the voice handed something to Codex: stop it, dictation never runs tasks (and live
                 // voice hands it to the chat instead, see CodexLive)
@@ -411,24 +419,26 @@ final class CodexDictation {
                 break;
             }
             case "thread/realtime/sdp": {
+                if (!mine) break;
                 stage = R.string.dictation_stage_connecting;
                 final String sdp = p.optString("sdp");
                 main.post(() -> js("answer(" + JSONObject.quote(sdp) + ")"));
                 break;
             }
             case "thread/realtime/transcript/delta":
-                if (!"assistant".equals(p.optString("role"))) {
+                if (mine && !"assistant".equals(p.optString("role"))) {
                     final String d = p.optString("delta");
                     main.post(() -> heard(d, false));
                 }
                 break;
             case "thread/realtime/transcript/done":
-                if (!"assistant".equals(p.optString("role"))) {
+                if (mine && !"assistant".equals(p.optString("role"))) {
                     final String t = p.optString("text");
                     main.post(() -> heard(t, true));
                 }
                 break;
             case "thread/realtime/error": {
+                if (!mine) break;
                 final String msg = p.optString("message");
                 main.post(() -> {
                     if (listener != null) end(listener, BuddyApp.str(R.string.dictation_chatgpt_error, msg));
