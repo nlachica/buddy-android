@@ -85,25 +85,43 @@ public class FalseWakeDiagTest {
         return sb.toString();
     }
 
+    /** pcm plus noise (kind 0 white, 1 brown/rumble) of standard deviation s, clipped. */
+    static short[] mix(short[] pcm, int kind, int s, long seed) {
+        Random r = new Random(seed);
+        short[] out = new short[pcm.length];
+        double b = 0;
+        for (int i = 0; i < pcm.length; i++) {
+            double n;
+            if (kind == 0) n = r.nextGaussian() * s;
+            else { b = 0.995 * b + r.nextGaussian(); n = b * s / 10.0; }
+            out[i] = (short) Math.max(-32768, Math.min(32767, pcm[i] + n));
+        }
+        return out;
+    }
+
     @Test
     public void report() throws Exception {
         OnnxWakeEngineTest.load();
         short[] speech = ulaw("librispeech.ulaw");
-        short[] loud = new short[speech.length], noisy = new short[speech.length], quiet = new short[speech.length];
-        Random r = new Random(7);
-        for (int i = 0; i < speech.length; i++) {
-            loud[i] = (short) Math.max(-32768, Math.min(32767, speech[i] * 3));
-            noisy[i] = (short) Math.max(-32768, Math.min(32767, speech[i] + r.nextGaussian() * 800));
-            quiet[i] = (short) (speech[i] / 4);
-        }
         StringBuilder sb = new StringBuilder("[DEBUG-hb34] wakes per rule t:n=1/2/3/4, run = longest run of hops >= t");
-        sb.append(stats("speech", hops(speech)));
-        sb.append(stats("speech x3 clipped", hops(loud)));
-        sb.append(stats("speech + noise", hops(noisy)));
-        sb.append(stats("speech /4", hops(quiet)));
+        int[] sig = {100, 300, 800, 1500, 3000};
+        for (int k = 0; k < sig.length; k++) {
+            sb.append(stats("noise only s" + sig[k], hops(mix(new short[speech.length], 0, sig[k], 11 + k))));
+            sb.append(stats("noise only brown s" + sig[k], hops(mix(new short[speech.length], 1, sig[k], 21 + k))));
+        }
+        for (int k = 0; k < sig.length; k++) {
+            sb.append(stats("speech + noise s" + sig[k], hops(mix(speech, 0, sig[k], 31 + k))));
+            sb.append(stats("speech + noise seed2 s" + sig[k], hops(mix(speech, 0, sig[k], 41 + k))));
+            sb.append(stats("speech + brown s" + sig[k], hops(mix(speech, 1, sig[k], 51 + k))));
+        }
         for (String c : new String[]{"hey_buddy.wav", "hey_buddy_augmented.wav", "hey_buddy_adv.wav"}) {
-            float[] h = hops(OnnxWakeEngineTest.clip(c));
+            short[] clip = OnnxWakeEngineTest.clip(c);
+            float[] h = hops(clip);
             sb.append(stats(c, h)).append(around(c, h));
+            for (int s : new int[]{300, 800, 1500}) {
+                float[] hn = hops(mix(clip, 0, s, 61 + s));
+                sb.append(around(c + " + noise s" + s, hn));
+            }
         }
         OnnxWakeEngineTest.close();
         fail(sb.toString());
