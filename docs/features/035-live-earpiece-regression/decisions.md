@@ -133,3 +133,10 @@
 - Choice: the second (reviewer F4; the plan requires the failed-commit and route-change tests). Supersedes "Round 3 F1 and what the tests can reach".
 - Also: the recovery record lives in its own prefs file `live_media`, not in `buddy`, so Backup neither exports nor overwrites it (F3). A write Android ignored is not accepted: the record stays, the next tick retries (F2). A record change without a write (the user moved Media) is rechecked like a write (F1).
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - Code review round 2 (Coder)
+- Options: a separate "pending" field next to the record; reuse `from`/`set` and keep the committed record in memory after a write not seen to apply.
+- Choice: the second (reviewer F1). `change()` leaves `n[FROM]` set after an unconfirmed take write and `follow()` keeps `n`; `mediaStep` resolves it on the next speaker read and resets `seen` if the write never applied.
+- F3: a failed final commit sets `unsaved`; `follow()` retries only the disk write. Not unit-tested (static Prefs); phone-only.
+- F2 (baseline phone check) stays open for the orchestrator and Nicholas.
+- By: Coder (claude-sonnet-5-5)

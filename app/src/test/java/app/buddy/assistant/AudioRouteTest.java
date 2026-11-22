@@ -584,4 +584,50 @@ public class AudioRouteTest {
         assertTrue(change(false, 15, 15, st(6, 15, -1, 15), v)); // the next tick
         assertEquals(6, v.level);
     }
+
+    /** A tick as follow() runs it: keeps n when a write was made but not seen to apply. */
+    private static int[] tick(boolean speakerCall, int now, int call, int[] rec, FakeVol v) {
+        int[] n = rec.clone();
+        int w = step(speakerCall, now, call, n);
+        return AudioRoute.change(speakerCall, now, w, rec, n, v) || n[AudioRoute.FROM] >= 0 ? n : rec;
+    }
+
+    @Test
+    public void aHeadsetRightAfterTheTakeKeepsTheRecordThroughTheHangUp() {
+        int[] rec = AudioRoute.noMedia();
+        // the write lands, then the headset connects before the check
+        FakeVol h = new FakeVol() {
+            public void put(int l) {
+                super.put(l);
+                speaker = writes > 1;
+            }
+        };
+        h.level = 6;
+        rec = tick(true, 6, 15, rec, h);
+        assertEquals(1, h.writes);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(6, rec[AudioRoute.FROM]);
+        h.speaker = true; // headset gone, still in the call: Media reads 15, the take is not repeated
+        rec = tick(true, 15, 15, rec, h);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(1, h.writes);
+        rec = tick(false, 15, 15, rec, h); // hang-up
+        assertEquals(6, h.level);
+        assertEquals(-1, rec[AudioRoute.SAVED]);
+    }
+
+    @Test
+    public void anIgnoredTakeIsWrittenAgain() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.applies = false;
+        int[] rec = tick(true, 6, 15, AudioRoute.noMedia(), v);
+        assertEquals(1, v.writes);
+        v.applies = true;
+        rec = tick(true, 6, 15, rec, v); // no key since, but it never applied
+        assertEquals(2, v.writes);
+        assertEquals(15, v.level);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(-1, rec[AudioRoute.FROM]);
+    }
 }

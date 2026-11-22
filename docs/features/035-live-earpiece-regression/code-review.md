@@ -38,3 +38,11 @@ F3 [minor] A failed final preference commit never gets retried - `app/src/main/j
 Verification at `6f4ee76` — recompiled the changed classes and ran all 82 tests in `AudioRouteTest` and `LiveWatchTest` with JDK 17 and the cached F-Droid JVM harness. All passed. A separate handoff probe ended at 15 instead of 6. The full Gradle build and on-phone listening checks remain unverified in this review.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+F1: fixed in the round 2 commit. `change()` sets `n[FROM] = now` before a take's write and clears it only when the speaker alone, unmuted, reads the written index. If the write isn't seen to apply (headset came, or Android ignored it), `follow()` keeps `n` in memory, so memory matches the committed disk record. The next speaker read resolves it with the existing `mediaStep` rule (`from`/`set`). An ignored write also resets `seen`, so the take is written again without a new key. Tests: `aHeadsetRightAfterTheTakeKeepsTheRecordThroughTheHangUp` (take, headset after the setter, back to the speaker, hang-up at 6) and `anIgnoredTakeIsWrittenAgain`; the round 1 ignored-restore case still passes.
+F2: not fixed here, left open (same as round 1 F5). It is a listening check on the unmodified installed build with Nicholas; a Coder can't do it from this chat. Plan Step 1 stays the orchestrator's; the stop rule applies if either observation contradicts the diagnosis.
+F3: fixed in the round 2 commit. `follow()` remembers a failed final `setLiveMedia` (`unsaved`) and retries only the disk write on the next call, before any early return, with no second volume write. No unit test: the retry lives in `follow()` over static `Prefs`/`AudioManager`, which the repo can't fake without the abstraction F4 already rejected for this path (YAGNI); phone-only.
+
+Tests: `AudioRouteTest` + `LiveWatchTest`, 84 tests (JDK 17 -Xint, stub android.jar, fdroid flavor). Gradle build and phone behaviour: CI-only / phone-only.

@@ -46,7 +46,7 @@ final class AudioRoute {
     private static final Set<String> liveRefused = new HashSet<>();
     /** 035: see mediaStep; the volume record Prefs keeps (without seen) until it is given back. */
     private static int[] media = noMedia();
-    private static boolean mutedSaid;
+    private static boolean mutedSaid, unsaved;
 
     private AudioRoute() {
     }
@@ -252,8 +252,11 @@ final class AudioRoute {
      */
     static int mediaStep(boolean speakerCall, int now, int call, int want, int[] st) {
         if (now == 0) return -1;
-        if (st[FROM] >= 0) { // loaded after a crash: the write either reached Android (set) or didn't (from)
-            if (now == st[FROM]) st[SET] = now;
+        if (st[FROM] >= 0) { // loaded after a crash, or kept after a write not seen to apply: the write either reached Android (set) or didn't (from)
+            if (now == st[FROM]) { // not written: the next tick writes again
+                st[SET] = now;
+                st[SEEN] = -1;
+            }
             st[FROM] = -1;
         }
         if (speakerCall) {
@@ -517,7 +520,9 @@ final class AudioRoute {
      * writes nothing and keeps the old record. Main thread.
      */
     private static void follow(AudioManager am, boolean speakerCall) {
-        if (Build.VERSION.SDK_INT < 33 || (!speakerCall && media[SAVED] < 0)) return;
+        if (Build.VERSION.SDK_INT < 33) return;
+        if (unsaved) unsaved = !Prefs.setLiveMedia(app, media[SAVED], media[SET], media[FROM]); // a failed final commit: only the disk write again
+        if (!speakerCall && media[SAVED] < 0) return;
         try {
             if (!onSpeaker(am)) return;
             int now = am.isStreamMute(AudioManager.STREAM_MUSIC) ? 0 : am.getStreamVolume(AudioManager.STREAM_MUSIC);
@@ -542,7 +547,10 @@ final class AudioRoute {
                 public void put(int level) {
                     am.setStreamVolume(AudioManager.STREAM_MUSIC, level, 0);
                 }
-            })) return;
+            })) {
+                if (n[FROM] >= 0) media = n; // written, not seen to apply: the record on disk is this one
+                return;
+            }
             if (w >= 0) {
                 CodexLive.log(speakerCall ? "volume: media " + now + " -> " + w + " (call " + call + "/" + callMax + ")"
                         : "volume: media back to " + w);
@@ -550,7 +558,7 @@ final class AudioRoute {
                 CodexLive.log("volume: media left at " + now + " (changed since)");
             }
             media = n;
-            Prefs.setLiveMedia(app, n[SAVED], n[SET], n[FROM]);
+            unsaved = !Prefs.setLiveMedia(app, n[SAVED], n[SET], n[FROM]);
         } catch (RuntimeException ignored) { // a refused write: the next tick asks again
         }
     }
@@ -569,7 +577,8 @@ final class AudioRoute {
      * failed commit writes nothing); every change, a give-back or a drop of the record too, asks again for the speaker
      * alone, the mute and the same index (a headset can take media meanwhile) and on failure puts the old record back and
      * changes nothing; a write that Android ignored (the index isn't w after it) isn't accepted either, so the record
-     * stays and the next tick tries again. True: n is the record now.
+     * stays and the next tick tries again. True: n is the record now. After a take's write that isn't seen to apply (a headset
+     * came, or Android ignored it) n[FROM] stays set: the caller keeps n, and the next speaker read resolves it (mediaStep).
      */
     static boolean change(boolean speakerCall, int now, int w, int[] old, int[] n, Vol v) {
         boolean take = w >= 0 && speakerCall;
@@ -579,8 +588,11 @@ final class AudioRoute {
             return false;
         }
         if (w < 0) return true;
+        if (take) n[FROM] = now; // the record on disk says so; stays set if the write isn't seen to apply
         v.put(w);
-        return v.at(w);
+        if (!v.at(w)) return false;
+        n[FROM] = -1;
+        return true;
     }
 
     @TargetApi(33)
