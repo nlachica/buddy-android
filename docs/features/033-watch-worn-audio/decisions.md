@@ -88,3 +88,42 @@
   the flow unless trivial (it is a runtime grant, renamed on Wear OS 6), and (a) could ship an Auto that never uses the
   watch (F5). Supersedes "No sensor permission flow now" where it says release gate.
 - By: Planner
+
+## 2026-11-21 - During a call the watch pushes its worn state; the phone no longer asks per utterance
+- Options: (a) ask after each utterance (round 1); (b) ask before each utterance and hold or move the voice until
+  the answer; (c) while a reading's channel is open, the watch keeps the off-body listener registered and sends each
+  event (`/buddy/worn {worn}`, no id); the call leaves the watch when one says "off" and Watch isn't the pick.
+- Choice: (c), because (a) checks after the audio is sent (plan review round 2, F1), (b) needs a waiting state in a
+  tested state machine and its pending answer can outlive a setting change (F3), while (c) needs none: `ReadAloud`
+  is already a foreground service under a wake lock whenever a reading is open, and a call always has one open. Cost:
+  register/unregister in `ReadAloud`, `Call.worn` + `leave` + one boolean; `LiveWatch.Out` and its fake unchanged.
+  Kept from before: once off the wrist an Auto call stays on the phone until it ends or the setting changes; a picked
+  Watch ignores the push (the last one is remembered for a switch to Auto). Accepted limits: the sensor's lag (up to
+  3 s), and held voice is dropped on leaving as `stop()` does today. Read aloud stays placement only. Supersedes the
+  per-utterance asks of "A call checks worn after each utterance and on a setting change".
+- By: Planner (claude-fable-5-2), answering plan review round 2 (the run instruction: decide simply and record it)
+
+## 2026-11-21 - Freshness bounds the sample's age; no answer is reused
+- Options: (a) stamp on receipt, reuse 3 s (round 1); (b) stamp at the ask's send time; (c) the watch returns `ms`
+  (receipt to sensor event) and the phone stamps `sentAt + ms`; reuse or not.
+- Choice: (c) without reuse. (a) gave a positive delivered late a new 3 s life (F2); (b) rejects a sensor that uses
+  its allowed 5 s for the first event; (c) is an upper bound of the sample's age on the phone's own clock. An answer
+  counts while that age is at most `FRESH_MS` = 3 s. Every placement sends its own ask (callers during one join it),
+  so nothing cached survives a reconnect; reuse only helped placements under 3 s apart. A "can't tell" keeps its
+  reason up to the phone's log (F5). Supersedes "An answer is reused for 3 s, not 30".
+- By: Planner
+
+## 2026-11-21 - "Is Watch the pick" and "does the watch still win" are read when the answer arrives
+- Options: (a) decide Auto or pick when the find starts; (b) read the pick when the node and the worn answer arrive
+  (`Worn.find`), and recheck `watchWins()` in `LiveWatch.found`.
+- Choice: (b), because the ask made a find last up to 11 s: a Watch picked meanwhile must not be refused by Auto's
+  "not worn", and a headset that came meanwhile must keep a call's voice on the phone (F3). Two conditions, both
+  tested; `ReadQueue` already rechecks after its find.
+- By: Planner
+
+## 2026-11-21 - Q2 (earpiece) is answered before coding
+- Options: (a) code on the recommendation and revise later; (b) the orchestrator records Nicholas's answer in the
+  brief's Clarifications first.
+- Choice: (b), because the ask names the earpiece as the last resort while 030/031 end the call, and the Verifier
+  needs one expected outcome (F4). The plan carries both: no code (recommended), or step 4b.
+- By: Planner

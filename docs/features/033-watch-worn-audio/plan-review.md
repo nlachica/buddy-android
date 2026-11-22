@@ -70,3 +70,42 @@ F4 [major] The earpiece acceptance case still awaits a decision - Q2 now identif
 F5 [minor] The phone drops the sensor diagnostic needed for sign-off - The watch returns `why` for an unknown state, but the proposed phone handler passes only node, ID and nullable worn state (`plan.md:54,64-66,73-75`). All three sensor failures therefore look identical in the phone log that the verifier is told to inspect (`plan.md:149-152`). -> Carry the reason through the matched reply and log it on the phone. Check that a refused registration and a missing reply yield distinguishable diagnostics.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - the check after `openNext` is gone, and so is asking during a call. While a reading's channel is open
+the watch's `ReadAloud` is already a foreground service under a wake lock, and during a call a reading is always open
+(the next one is opened ahead). It now keeps the off-body listener registered for that time and sends every event
+(the first one, then each change) to the phone as `/buddy/worn {worn}`. `LiveWatch.Call.worn(node, false)` on an Auto
+call runs the existing `stop()` at once, whatever the utterance state: an idle reading opened ahead is cancelled (a
+reply after an off-wrist pause plays on the phone from its first block), a reading under way is closed and the
+microphone waits for its answer (the drain is kept), held voice is not forwarded. Placement is unchanged: the phone
+plays until a positive answer has arrived and the channel is attached, so unknown is always audible on the phone.
+What is left is the sensor's own lag (Android: up to 3 s to notice a removal), which no ask could beat either. Voice
+held for the watch at the moment of leaving is dropped, as `stop()` does on a setting change today; recorded as a
+risk. Tests added: taken off in a pause (first block and all later ones never reach a reading, `toWatch()` is 0);
+taken off with a whole reply queued (never forwarded, nothing more opened); taken off mid-utterance (drain kept).
+
+F2: accepted - freshness is now about the sample, not the delivery. The watch returns `ms`, the time from receiving
+the ask to the sensor event; the phone stamps the answer `at = sentAt + ms` on its own clock, the earliest moment the
+sample can have been taken, and an answer counts only while `now - at <= 3 s`. A positive sampled at once and
+delivered 7 s later is not worn. Reuse is gone: every placement sends its own ask (callers during an ask still join
+it, under the same bound), so a reconnect has nothing cached to revive. Tests added: delayed positive (3 s + 1 ms:
+not worn); slow sensor (`ms` 4 s, arrives at 6 s: worn); a second placement 1 s after a positive one asks again and
+its "not worn" wins.
+
+F3: accepted - nothing in `Call` waits on a worn answer any more, so no stale callback can stop a picked Watch: a push
+is judged on arrival against the setting then (a picked Watch ignores it; the last push is kept, so Watch switched to
+Auto off the wrist leaves at that poll). For placement, `Worn.find` reads "is Watch the pick" when each answer
+arrives, not when the find started: Watch picked while Auto's ask is pending and then "not worn" still gives the node.
+`LiveWatch.found` rechecks `watchWins()` and stays on the phone when a headset came meanwhile (the check `ReadQueue`
+already makes after its find). Tests for both with the answer held pending.
+
+F4: accepted - Q2 is now a gate in front of step 1: the orchestrator records Nicholas's answer in the brief's
+Clarifications before the Coder starts (the Planner may not edit the brief). The plan covers both answers: 030 stands
+(recommended, no code), or step 4b makes the earpiece the last resort when Android lists no speaker and no headset,
+with the earpiece-only test.
+
+F5: accepted - `why` travels with the reply into `Worn.reply`, and `Worn` logs one line per answer under the tag
+`Worn`: `worn`, `not worn`, `stale (age N ms)`, `can't tell: no sensor | refused | no event`, `no reply`,
+`send failed`. Test: a refused registration and a missing reply give different lines.
