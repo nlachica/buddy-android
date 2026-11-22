@@ -94,3 +94,9 @@
 - Choice: `next()` returns on an empty queue; no further handling. The words of the second begin are still sent by the
   first `onStartCommand`; only that send's `noHeard` deadline is lost (the second reset removes it). Needs two
   speech results in one frame, so not worth state. By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - Upstream 2.3.18 sync: a reply that is only a file
+- Upstream 2.3.18 shows files an agent saves as chips under its reply; a reply can then be a file with no text, and
+  `WatchLink`'s relay skipped empty text, so Quick Talk got nothing. It now sends `msg.label()` (the file's name) when
+  the text is empty (Codex review of the sync).
+- By: sync (claude-opus-5-5)

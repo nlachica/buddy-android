@@ -206,3 +206,23 @@
 - Upstream 2.3.15 added Models on this phone → **Think before answering** (`OnPhone.think`, off by default). Added `onphone_think` (on, off) to `buddy_settings`, with the same note as `onphone_device` (setThink restarts the engine when idle). JVM test added.
 - Not patched (Codex review of the sync, upstream's own code as in official 2.3.16, no fork feature involved): upstream 2.3.15's Lite fallback in `Tools.call` (a lite background chat whose hidden screen is empty reads the user's real screen, read only) also applies to a Lite sub-agent before it opens an app, and `ownScreenEmpty` counts an app window with a null root as empty. Listed as upstream issues.
 - By: sync (claude-opus-5-5)
+
+## 2026-11-22 - Upstream 2.3.18 sync: phone tool switches, sms_codes, face_anim
+- Upstream 2.3.17 added Settings → Tools and connections → Tools (a switch per phone tool, `ToolSwitch`), its "show
+  codes" switch (`Prefs.smsCodes`, sms_list), the same tool list per chat (Chat options → Tools, `Session.tools`), and
+  Appearance → animation of an animated picture (`Prefs.faceAnim`). Added to `buddy_settings`: `tool/<tool>` (on, off),
+  `chat/<id>/tool/<tool>` (on, off, settings: the chat follows Settings; as on the screen, a choice equal to Settings
+  isn't kept as the chat's own), `sms_codes` (on, off) and `face_anim` (loop, once, off; refused unless the bubble shows
+  the user's own animated picture, as the screen hides it otherwise). confirm and ask are refused (always on). The
+  listing shows the tools that are off and each chat's own choices. The chat screen's "Same as Settings" button is
+  covered tool by tool (`settings`).
+- Upstream protects the Tools screen ("an agent must never turn a tool back on"). The fork covers it as it covers the
+  other protected screens (App permissions, a chat's Linux tools): through the approval card. `tool/`, `chat/<id>/tool/`
+  and `sms_codes` are `keepsCard` names, so they card even in a Bypass chat.
+- buddy_settings itself is in no Tools group (fork tool): it stays on, with no switch, as before.
+- By: sync (claude-opus-5-5)
+- Not patched (Codex nit): `buddy_settings` has no Tools switch and Lite's "advanced" group text lists only Tools-screen
+  tools; it is still offered as before. A switch would need a row and strings in upstream's Tools screen.
+- Second Codex pass on the patch: `chat/<id>/tool/<tool>`'s snapshot holds both the chat's choice and Settings'
+  ("off (Settings: on)"), so a Settings change while the card is open makes the write stale; `face_anim` rechecks the
+  animated picture when it writes. Every chat tool request cards (no "Already" shortcut), which is harmless.

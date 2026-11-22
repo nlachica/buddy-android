@@ -397,3 +397,20 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
   cancelled mid-startup and replaced in the same instant can end the replacement). Per the earlier ruling, F3 is
   accepted; a private-lock fix can be a follow-up. Round 3 F1, F2, F4 stay fixed (CI green on a3e161a, run 45004142469).
 - By: orchestrator (claude-opus-5-5)
+
+## 2026-11-22 - Upstream 2.3.18 sync: two additive conflicts
+- Bubble talk `onFinal`: upstream marks `sentAt` before sending (#73, so the sent message shows); 032 sends through
+  `hub.sendTalk(text, false)`. Kept both: `sentAt` first, then `sendTalk`.
+- HiddenNotice.onReceive and Prefs: upstream's `ACTION_RESUME` (paused bubble's Resume, #72) and `faceAnim` (#68) sit
+  where 032 added `WakeService.ACTION_OFF` and `wakeWord`. Kept both, each with its own `return`/method.
+- By: sync (claude-opus-5-5)
+
+## 2026-11-22 - Upstream 2.3.18 sync: a lock doesn't end a "hey buddy" turn's listening
+- Codex review of the sync: upstream 2.3.18 (#71) made `Bubble.applyEnabled` call `stopTalk()` whenever the bubble hides
+  on a locked phone, and `collapse()` stops any listening. 032 listens for its request through the same talk mode and
+  must answer while locked (Nicholas, 2026-11-22), so a lock (or any `applyEnabled` while locked) cut the request off.
+- Choice: `talkTurn` remembers the turn talk mode listens for; on lock only talk without a turn stops, and `collapse()`
+  and `restyle()` (a theme change applied on collapse) leave a turn's listening alone. The waves still go with the hidden bubble (upstream's fix for #71 stays).
+- Not patched (Codex, upstream's own design): an `sms_codes` already on lets sms_list return codes with no card, in
+  Bypass too; the switch itself now always cards (005).
+- By: sync (claude-opus-5-5)
