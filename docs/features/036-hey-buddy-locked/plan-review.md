@@ -81,3 +81,11 @@ F5: accepted - The deep-doze row uses natural idle. Forcing is only a fallback N
 `dumpsys deviceidle unforce` on completion or interruption and a check that `mState` reads `ACTIVE` with the screen on.
 F6: accepted - Two unlocked turns: a request (waves, spoken reply), and separately "hey buddy" then silence (the
 nothing-heard toast).
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] Four successes can hide the failure the feature is meant to diagnose - If the baseline passes and the fifth verification attempt gets no spoken answer, the 1-minute row still passes at 4/5 (plan.md:154). Even if the deep-Doze try also passes, Q2 would then tell Nicholas “It works every time we test it” (plan.md:182–191). That fifth attempt reproduced his symptom, and its log can expire in about ten minutes (plan.md:162). -> Keep the 4/5 threshold for spoken-answer verification. For any failed verification attempt, capture its evidence immediately and follow the same decision-table row as a failed baseline. Reserve “could not reproduce” and Q2 for runs with zero observed failures.
+
+F2 [major] Unlocking can erase the evidence for a missed wake - Step 0 puts the chat inspection after unlock and the no-detection microphone and notification checks after classification (plan.md:113–121). If the listener stopped while locked, resuming Buddy can start it again (BuddyApp.java:19, WakeWord.java:64–70). The resulting active recorder describes the recovered phone and cannot establish what happened at the utterance. -> For an unheard attempt, preserve the timestamped wake and service log and take the notification, recording and power snapshots while the phone is still locked, before opening the chat. If a locked snapshot is unavailable, record that gap and use only timestamped evidence from the locked interval to attribute the failure.
+
+VERDICT: REVISE
