@@ -224,6 +224,49 @@ final class AudioRoute {
         }
     }
 
+    /** 035: the media index that matches a call index on the other scale; never 0 (0 is silence and a mute's reading). */
+    static int mediaFor(int call, int callMax, int mediaMax) {
+        return Math.max(1, (call * mediaMax + callMax - 1) / callMax);
+    }
+
+    /** 035: Android's routed devices for media (API 33+, null below): true only for the built-in speaker alone. */
+    static boolean mediaOnSpeaker(int[] routed) {
+        return routed != null && routed.length == 1 && routed[0] == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
+    }
+
+    /** 035 state of mediaStep: saved = the level to put back, set = the level Buddy last wrote, from = the level before a write that may not have happened (after a crash), seen = the call index last mirrored; -1 = none. */
+    static final int SAVED = 0, SET = 1, FROM = 2, SEEN = 3;
+
+    static int[] noMedia() {
+        return new int[]{-1, -1, -1, -1};
+    }
+
+    /**
+     * 035: the whole media-volume rule. now: the speaker's media index (0 when Media is muted: then nothing happens, as a
+     * write would unmute it); want: mediaFor(call). Changes st, returns the index to write or -1.
+     */
+    static int mediaStep(boolean speakerCall, int now, int call, int want, int[] st) {
+        if (now == 0) return -1;
+        if (st[FROM] >= 0) { // loaded after a crash: the write either reached Android (set) or didn't (from)
+            if (now == st[FROM]) st[SET] = now;
+            st[FROM] = -1;
+        }
+        if (speakerCall) {
+            if (st[SAVED] < 0) st[SAVED] = now;
+            else {
+                if (now != st[SET]) st[SAVED] = st[SET] = now; // he moved Media: that is his level now
+                if (call == st[SEEN]) return -1;               // no key since the last write
+            }
+            st[SET] = want;
+            st[SEEN] = call;
+            return want;
+        }
+        if (st[SAVED] < 0) return -1;
+        int back = now == st[SET] ? st[SAVED] : -1; // only undo Buddy's own write
+        java.util.Arrays.fill(st, -1);
+        return back;
+    }
+
     /** 017: the device applied isn't Android's communication device any more, after the time it needs to take. */
     static boolean slipped(String applied, String actual, long sinceMs, long graceMs) {
         return applied != null && sinceMs >= graceMs && !applied.equals(actual);
