@@ -183,7 +183,8 @@ final class Voice {
         if (!micAllowed(c)) return c.getString(R.string.voice_mic_needed);
         if (CodexLive.on()) return c.getString(R.string.live_mic_busy); // the call has the microphone
         stopListening();
-        WakeWord.release(); // the detector's microphone closes before the recognizer (another app) starts, unless a wake window just took MicServer
+        // the detector's microphone closes before the recognizer (another app) starts, unless a wake window just took MicServer
+        if (!WakeWord.release()) return c.getString(R.string.dictation_mic_failed);
         stopSpeaking();
         AudioRoute.use(c);
         final Listener l = endpoint(c, given);
@@ -216,7 +217,10 @@ final class Voice {
             i.putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
                     .putExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, langs);
         }
-        if (android.os.Build.VERSION.SDK_INT >= 33 && phoneFeed.on && MicServer.adopted()) feed(window, i);
+        if (android.os.Build.VERSION.SDK_INT >= 33 && phoneFeed.on && MicServer.adopted() && !feed(window, i)) {
+            finish();
+            return unwatchOnError(l, c.getString(R.string.dictation_mic_failed));
+        }
         recognizer.startListening(i);
         return null;
     }
@@ -224,9 +228,9 @@ final class Voice {
     /**
      * A wake turn's audio (what the detector heard, pre-roll first) goes to the recognizer through a pipe: the
      * documented EXTRA_AUDIO_SOURCE, so the recognizer opens no microphone of its own. A pipe that can't be made makes
-     * this one window unfed.
+     * this one window unfed: the detector's microphone is closed first, and false (the window fails) if it won't close.
      */
-    private static void feed(final Window window, Intent i) {
+    private static boolean feed(final Window window, Intent i) {
         final int capture = MicServer.capture();
         final ParcelFileDescriptor[] pipe;
         try {
@@ -234,7 +238,7 @@ final class Voice {
         } catch (java.io.IOException e) {
             MicServer.release(capture);
             WakeWord.unfed();
-            return;
+            return WakeWord.release();
         }
         window.feed(capture, pipe);
         i.putExtra(RecognizerIntent.EXTRA_AUDIO_SOURCE, pipe[0])
@@ -262,6 +266,7 @@ final class Voice {
                 if (phone == window && inputDone && recognizer != null) recognizer.stopListening();
             });
         }, "wake-pipe").start();
+        return true;
     }
 
     /** The phone recognizer's open window. */

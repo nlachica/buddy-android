@@ -81,11 +81,11 @@ final class WakeWord {
     /**
      * Buddy's own voice path is starting (Voice.listen): the detector's microphone closes at once, unless a wake
      * window has just adopted MicServer for it. Android's recognizer runs in another app and must not start against an
-     * open microphone.
+     * open microphone. False when the detector's recorder is still open (it didn't release in time): input must not start.
      */
-    static void release() {
+    static boolean release() {
         WakeService s = WakeService.get();
-        if (s != null && !MicServer.adopted()) s.closeNow();
+        return s == null || MicServer.adopted() || s.closeNow();
     }
 
     // ---- the turn on now (main thread)
