@@ -63,3 +63,11 @@ F1: fixed in the round 3 commit. `AudioRoute.change()` now catches a RuntimeExce
 F2: waived by the orchestrator (decisions.md, "code loop ended without APPROVE"); not touched.
 
 Tests: `AudioRouteTest` + `LiveWatchTest`, 85 tests, all pass (JDK 17 -Xint, stub android.jar, fdroid flavor). Gradle build and phone behaviour: CI-only / phone-only.
+
+## Round 4 - Code Reviewer (gpt-6.2-astra)
+
+Round 3 F1 is fixed at `b85a65c`. I reran the Round 3 probe against production `AudioRoute.follow()`. The setter raised Media from 6 to 15, the confirmation read threw, and the next poll retained the saved 6. Hang-up restored Media to 6 and cleared the recovery record.
+
+All 85 tests in `AudioRouteTest` and `LiveWatchTest` passed in the JDK 17 F-Droid JVM harness, including the new exception test and the existing headset handoff and ignored-write cases. F2 is waived in `decisions.md`. On-phone loudness and volume-key checks are scheduled for release verification.
+
+VERDICT: APPROVE
