@@ -9,6 +9,7 @@ import com.google.android.gms.wearable.ChannelClient;
 import com.google.android.gms.wearable.CapabilityClient;
 import com.google.android.gms.wearable.Wearable;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -83,6 +84,14 @@ public class WatchVoiceLink implements WatchVoice.Link {
             s.openTimedOut();
         })).addOnFailureListener(x -> s.openTimedOut());
         return s;
+    }
+
+    /** 033: "are you on the wrist?"; the watch's answer comes to WatchLink and on to WatchVoice.wornReply. */
+    @Override
+    public void askWorn(Context c, String node, long id, Runnable failed) {
+        Wearable.getMessageClient(c.getApplicationContext())
+                .sendMessage(node, "/buddy/worn", ("{\"id\":" + id + "}").getBytes(StandardCharsets.UTF_8))
+                .addOnFailureListener(e -> main().post(failed));
     }
 
     /** One callback for all readings: a channel's close goes to its stream. */

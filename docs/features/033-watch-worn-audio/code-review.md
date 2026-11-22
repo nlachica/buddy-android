@@ -1,0 +1,55 @@
+# Code review: 033-watch-worn-audio
+<!-- Rounds: "## Round N - Code Reviewer (model)", findings F1.., "VERDICT: APPROVE|REVISE", then "### Coder response (round N)" -->
+
+## Round 1 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] Switching Watch to Auto can use the opposite of the last reported wrist state - `app/src/watchlink/java/app/buddy/assistant/WatchLink.java:105` sends pushes only to the live call. A hand-picked Watch ignores a removal, so a recent positive ask still makes `out.worn(node)` true at `LiveWatch.java:160`. Switching to Auto can then keep playing on the removed watch for the rest of the open reading. Conversely, a hand-picked Watch bypasses the ask, so even a just-delivered positive push cannot keep a worn watch on the call. The transition tests set the fake's answer independently of the push. -> Invalidate older positive evidence on a delivered removal. On entry to Auto, use a verifiably fresh positive for that node or route to the phone while asking again. Test both transitions through the same wrist-state handling that production uses.
+
+F2 [major] A delayed sensor callback makes an old sample look fresh - `wear/src/main/java/app/buddy/assistant/wear/ReadAloud.java:73` calculates the sample offset when the callback runs. If a positive event occurs at registration and the watch main thread delivers it four seconds later, the reply reports a four-second offset. The phone can accept that sample as new even though it exceeds the three-second bound. The phone tests supply the offset directly. -> Derive the offset from the sensor event timestamp on the watch's elapsed-realtime clock, handle samples predating the ask conservatively, and test a prompt sample whose callback is delayed four seconds. [Android SensorEvent.timestamp](https://developer.android.com/reference/android/hardware/SensorEvent#timestamp)
+
+F3 [major] Switching to Auto during discovery discards a subsequently confirmed worn watch - `app/src/main/java/app/buddy/assistant/LiveWatch.java:156` treats every outstanding turn as a call already on the watch. If the poll sees the setting switch before discovery returns, the first call has no node yet. `leave()` clears the turn, and `found()` drops the later positive result. The call stays on the phone. -> Distinguish pending discovery from an active watch route. Let the pending find finish under the current setting. Test the switch with discovery held across a poll.
+
+F4 [major] An Auto call can return to the watch after removal without a setting change - `app/src/main/java/app/buddy/assistant/LiveWatch.java:193` uses the same stop path as a setting change. If a reading is draining, its later acknowledgement runs `decide()` at line 300. Putting the watch back on before that answer opens a second reading, contrary to the documented rule that this call stays on the phone. The existing drain test forces the finder to return null. -> Remember that removal ended watch playback until the setting changes or a new call starts. Cover both acknowledgement and drain timeout with the watch available again.
+
+F5 [minor] A reply from before a phone process restart can match a new ask - `app/src/main/java/app/buddy/assistant/Worn.java:31` starts the sequence at zero in each process. If the phone restarts with its first ask outstanding, both processes can send ID 1 to the same node. A delayed positive for the first ask then gets the new ask's timestamp, and the real answer is discarded. -> Give each process a distinct starting ID, as the reading channel IDs in `WatchVoiceLink` already do. Test that a reply from the previous instance cannot settle the new ask.
+
+F6 [minor] Settings can say Watch after a headset has taken priority - `app/src/main/java/app/buddy/assistant/AudioRoute.java:162` publishes Watch on any positive wrist answer. A headset connected during the ask already takes priority in read-aloud and Live when their find completes. The label can still say Watch until the next settings poll. -> Recheck the headset route before publishing the label. Exercise a headset connection while the wrist answer is pending.
+
+The [build for a8bf433](https://github.com/nlachica/buddy-android/actions/runs/44991841061) passed the phone and Wear test and APK tasks. All 122 focused JVM tests passed locally. Three additional tests run outside the checkout reproduced the removal case in F1 and the transitions in F3 and F4. The on-watch sign-off is still pending.
+
+VERDICT: REVISE
+
+### Coder response (round 1)
+F1: fixed in 04dd23a (Worn.push; the watch's pushes now go through WatchVoice.wornPush: a removal voids older positive evidence, a positive push is a fresh sample for 3 s; WatchLink calls it). Test: WornTest. Not built: asking again on entry to Auto; a Watch -> Auto switch keeps the call on the watch only on a push or answer under 3 s old (orchestrator ruling F1), otherwise next block plays on the phone. A reply already in flight when a removal push arrives can still re-validate (one reply, risk 5).
+F2: fixed in 9d95282 (the watch sends the sensor event's own `timestamp` offset; a sample taken more than 1 s before the ask is reported as "old sample" = can't tell). Test: wear WornTest `theOffsetIsTheSamplesOwnAgeNotTheCallbacks` (a callback delivered 4 s late still reports 100 ms). Risk: if a sensor stamps its first event with the last change time, the watch will say "old sample"; the on-watch check shows it in the phone's log.
+F3: fixed in 9cf32d9 (`node` is cleared when a find starts; only a call with a node counts as "on the watch" for the Watch -> Auto check). Test: aSwitchToAutoWhileTheWatchIsStillBeingFoundLetsTheFindFinish (fails without the fix).
+F4: fixed in 9cf32d9 (`off` flag: a take-off sets it, so decide() and the retry stay on the phone until the call ends or the setting changes). Tests: after a take-off, both the drain's answer and the drain timeout with the watch findable again open no second reading; a setting change decides again.
+F5: fixed in 04dd23a (ask ids start at `currentTimeMillis()`, as WatchVoiceLink's). Test: aReplyFromThePreviousPhoneProcessCannotSettleTheNewAsk.
+F6: fixed in 9d95282 (AudioRoute.autoNow rechecks `headsetNow` when the answer arrives). No unit test: it is Context-bound like the rest of autoNow, which has none.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A delayed positive push can keep an off-wrist call on the watch - `app/src/main/java/app/buddy/assistant/Worn.java:54` timestamps the push when the phone handles it. The watch discards the sensor timestamp at `wear/src/main/java/app/buddy/assistant/wear/ReadAloud.java:165`. A positive event delayed four seconds therefore passes the three-second freshness check when the user switches Watch to Auto. -> Use only a positive with a known age to authorize this switch. An uncorrelated positive push can trigger a timestamped ask if fresh evidence is needed. Add a delayed-push transition test.
+
+F2 [major] An older positive reply can undo a removal the phone already received - `app/src/main/java/app/buddy/assistant/Worn.java:85` accepts the pending ID even after a removal from that node. In a JVM check, the watch sampled worn at 100 ms, the phone received removal at 500 ms, and the positive reply arrived at 600 ms. The waiting Auto placement selected the watch. Risk 5 covers a lost removal. This sequence delivers both messages. -> On removal, settle that node's pending ask as off-wrist and ignore its later reply. Test the placement callback and cached state with those messages in that order.
+
+F3 [minor] The one-second allowance understates the age of samples taken before an ask - `wear/src/main/java/app/buddy/assistant/wear/Worn.java:34` rounds a sample taken 900 ms before receipt of the ask to a zero offset. With immediate outbound delivery and a reply arriving 2,500 ms later, the phone accepts a 3,400 ms old positive. -> Reject pre-ask samples or preserve their signed offset in the phone's age calculation. Cover this boundary in the freshness test.
+
+All 114 focused phone and Wear JVM tests passed. Three temporary regression tests reproduced F1–F3. CI passed the GitHub, F-Droid and Wear release builds and the phone and Wear unit tests at `3ba5de7`. The on-watch sign-off remains pending. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44992825671)
+
+VERDICT: REVISE
+
+### Coder response (round 2)
+F1: fixed in the round-2 commit (the watch's push now carries `age`, the sensor event's age when sent; `Worn.push` stamps `now - age`, and a push without `age` counts as stale). A positive event delivered 4 s late is no longer fresh for Watch -> Auto. Test: WornTest `aPositivePushIsAsOldAsItsSampleNotAsItsArrival`. Not built: a timestamped ask on entry to Auto (round-1 ruling stands: fresh positive or leave).
+F2: fixed in the same commit (a removal push settles that node's pending ask as not worn, so the older positive reply finds no ask and is dropped). Test: WornTest `aRemovalSettlesThePendingAskAndItsOlderPositiveReplyIsDropped` (the waiting placement gets false, `on` stays false).
+F3: fixed in the same commit (`Worn.offset` returns -1 for any sample before the ask's receipt; the 1 s slack is gone since sensor event and ask share the watch's elapsed-realtime clock). Test: wear WornTest `theOffsetIsTheSamplesOwnAgeNotTheCallbacks` (900 ms before: -1). Round-1's own slack assertion in that test was changed with it.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+F1 [major] A positive push can expire in transit and still keep a call on the watch - `app/src/main/java/app/buddy/assistant/Worn.java:57` subtracts the age at send time from the phone's receipt time. A watch that sends immediately reports age zero. In a JVM check, delivering that push four seconds later made `on(node)` return true. Switching Watch to Auto then keeps the call on the watch even though the sample exceeds the three-second limit. -> Use a still-fresh answer to a phone-initiated ask to authorize the switch. A removal push should still invalidate that answer immediately. Cover delay after the watch sends the push.
+
+F2 [major] A settings poll can undo a removal that already moved an Auto call to the phone - `app/src/main/java/app/buddy/assistant/LiveWatch.java:159` clears `off` when the poll first sees a setting change. If the user selects Auto and a removal arrives before that poll, `leave()` already sees Auto and stops watch playback. The poll then clears the flag for that same switch. In a JVM check, putting the watch back on and delivering the old reading's playback acknowledgement opened a second watch reading in the same call. -> Record which setting was current when removal stopped playback. Keep the call on the phone until a subsequent setting change or a new call. Test removal between selecting Auto and the first poll.
+
+All 116 focused JVM tests passed. Two additional tests outside the checkout reproduced F1 and F2. CI passed the phone and Wear unit tests and the GitHub, F-Droid and Wear release builds at `128a861`. The on-watch sign-off is pending. [CI run](https://github.com/nlachica/buddy-android/actions/runs/44994726364)
+
+VERDICT: REVISE

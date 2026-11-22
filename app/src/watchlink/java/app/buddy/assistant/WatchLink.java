@@ -27,10 +27,11 @@ import java.util.Set;
  * one of them, and gets Buddy's answer back to show and speak. Messages are JSON over the Wear Data Layer, paths under
  * /buddy (the table is in docs/features/003-wear-companion/plan.md; the live call's and the ChatGPT voice's additions
  * are in docs/features/007-watch-live-voice/plan.md; the New chat field is in docs/features/013-watch-new-chat/plan.md; /buddy/history, a chat's latest messages for the
- * watch's talk screen, is in docs/features/022-watch-chat-view/plan.md). Github build only (src/watchlink).
+ * watch's talk screen, is in docs/features/022-watch-chat-view/plan.md; /buddy/worn, whether the watch is on the wrist, is in
+ * docs/features/033-watch-worn-audio/plan.md). Github build only (src/watchlink).
  */
 public class WatchLink extends WearableListenerService {
-    private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status", HISTORY = "/buddy/history";
+    private static final String CHATS = "/buddy/chats", SEND = "/buddy/send", STATUS = "/buddy/status", HISTORY = "/buddy/history", WORN = "/buddy/worn";
     private static final int TITLE_MAX = 40;
     /** MessageClient carries 100 KB; stop adding chats before the list itself can fail (about 900 chats). */
     private static final int LIST_MAX_BYTES = 90_000;
@@ -95,6 +96,14 @@ public class WatchLink extends WearableListenerService {
                     break;
                 case HISTORY:
                     watching(node, in.optString("chat"), in.optLong("view"), in.optBoolean("stop"));
+                    break;
+                case WORN: // not through holdWake: nothing here outlives the main-thread call
+                    if (in.has("id")) {
+                        WatchVoice.wornReply(node, in.optLong("id"), in.has("worn") ? Boolean.valueOf(in.optBoolean("worn")) : null,
+                                in.optLong("ms"), in.optString("why"));
+                    } else {
+                        WatchVoice.wornPush(this, node, in.optBoolean("worn"), in.optLong("age", Worn.FRESH_MS + 1));
+                    }
                     break;
                 default:
                     break;

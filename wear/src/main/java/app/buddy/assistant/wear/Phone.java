@@ -17,7 +17,9 @@ final class Phone {
             // 007: the call (a channel), its status and end, a reply's voice (a channel per reply: VOICE + id) and the
             // phone's "the voice couldn't say reply id"
             LIVE = "/buddy/live", LIVE_STATUS = "/buddy/live/status", LIVE_END = "/buddy/live/end",
-            VOICE = "/buddy/voice/", SAY = "/buddy/say";
+            VOICE = "/buddy/voice/", SAY = "/buddy/say",
+            // 033: "are you on the wrist?" and its answer; the sensor's events while a reading plays
+            WORN = "/buddy/worn";
     /** The capability the phone's Buddy (github build) declares in app/src/watchlink/res/values/wear.xml. */
     private static final String CAPABILITY = "buddy_phone";
 
