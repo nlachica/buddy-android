@@ -147,3 +147,18 @@ Brief is the tie-breaker. The plan as written is approved with these rulings:
   the main thread directly (no lock, or a short independent one released after dispatch).
 - **F4 rejected (out of scope)**: Android reporting a media route over a connected A2DP device is 016/031's existing
   preference, unchanged by this feature (before 033 the watch was also next in that case). Not touched here.
+
+## 2026-11-21 - Coder: how the rulings were built
+- Step 0's probe skipped (no watch on adb, per the Verifier note): the sensor's permission and wake-up state are the
+  Verifier's first check on the watch.
+- F1 (Watch -> Auto mid-call): `LiveWatch.Out` got `default boolean worn(String node)` (true; the phone's end is
+  `WatchVoice.worn` = `Worn.on`, a fresh positive answer). In `Call.poll`, a setting change away from Watch while a
+  turn is under way runs `leave()` (the existing `stop()`) unless `out.worn(node)`. The fake's default keeps every
+  existing test as it was; the new tests set `worn`. The plan's `off` flag is gone: the push (`Call.worn`) and this
+  check both call `leave()` and nothing is remembered, because a later `decide()` asks again and an off-wrist watch
+  finds no node.
+- F3: `/buddy/worn` is handled in `WatchLink.onMessageReceived` without `holdWake`; it goes to the main thread as is.
+- Not built: F2/F4, step 4b (Q2: no earpiece change), the permission flow (Q1).
+- The test harness here has no Gradle (no offline Android plugin; the default JDK 21 does not start on this device):
+  phone tests run with the javac + JUnit script copied from feature 026's scratch dir, wear only compiles against stubs.
+- Commit order: step 2 (`WatchLink` calls `LiveWatch.worn`) comes after step 4 so every commit compiles.
