@@ -32,6 +32,7 @@ public class WakeLoopTest {
 
         @Override
         public float score(float[] embeddings) {
+            if (thrown != null) throw thrown;
             return level;
         }
 
@@ -47,6 +48,14 @@ public class WakeLoopTest {
             wakes++;
             lastSeq = seq;
             wakeAt = detectedAt;
+        }
+
+        RuntimeException thrown; // scoring throws this when set
+        int failures;
+
+        @Override
+        public void onFailed(RuntimeException e) {
+            failures++;
         }
 
         @Override
@@ -200,5 +209,18 @@ public class WakeLoopTest {
         assertEquals(1, r.wakes);
         r.blocks(36, 0);
         assertEquals(2, r.wakes);
+    }
+
+    @Test
+    public void aScoringFailureStopsTheLoopAndTellsTheHostOnce() {
+        Rig r = new Rig();
+        r.thrown = new IllegalStateException("model");
+        r.blocks(80, 0); // past the first hops: scoring throws, and nothing escapes block()
+        assertEquals(1, r.failures);
+        r.thrown = null;
+        r.level = 1;
+        r.blocks(80, 0); // dead: no detection and no second report
+        assertEquals(1, r.failures);
+        assertEquals(0, r.wakes);
     }
 }

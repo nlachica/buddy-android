@@ -48,6 +48,11 @@ public class WakeIdleTest {
             @Override
             public void onHoldExpired(int seq) {
             }
+
+            @Override
+            public void onFailed(RuntimeException e) {
+                throw e; // a model that can't run fails the test
+            }
         });
     }
 

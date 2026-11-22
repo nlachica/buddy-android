@@ -79,10 +79,6 @@ final class WakeMic {
         return r == null ? 0 : r.getAudioSessionId();
     }
 
-    boolean isOpen() {
-        return rec != null;
-    }
-
     void close() {
         AudioRecord r = rec;
         AcousticEchoCanceler e = aec;

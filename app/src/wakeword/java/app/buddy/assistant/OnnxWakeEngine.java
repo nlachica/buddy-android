@@ -14,14 +14,25 @@ import java.util.Collections;
  */
 public final class OnnxWakeEngine implements WakeFeatures.Engine, AutoCloseable {
     private final OrtEnvironment env = OrtEnvironment.getEnvironment();
+    private final OrtSession.SessionOptions options = new OrtSession.SessionOptions();
     private final OrtSession mel, embed, classify;
 
     public OnnxWakeEngine(byte[] classifier, byte[] melModel, byte[] embeddingModel) throws OrtException {
-        OrtSession.SessionOptions o = new OrtSession.SessionOptions();
-        o.setIntraOpNumThreads(1);
-        mel = env.createSession(melModel, o);
-        embed = env.createSession(embeddingModel, o);
-        classify = env.createSession(classifier, o);
+        OrtSession m = null, e = null, c = null;
+        try {
+            options.setIntraOpNumThreads(1);
+            m = env.createSession(melModel, options);
+            e = env.createSession(embeddingModel, options);
+            c = env.createSession(classifier, options);
+        } catch (OrtException | RuntimeException x) { // sessions made so far, then the options, have no other owner
+            if (m != null) m.close();
+            if (e != null) e.close();
+            options.close();
+            throw x;
+        }
+        mel = m;
+        embed = e;
+        classify = c;
     }
 
     @Override
@@ -56,5 +67,6 @@ public final class OnnxWakeEngine implements WakeFeatures.Engine, AutoCloseable 
         mel.close();
         embed.close();
         classify.close();
+        options.close();
     }
 }

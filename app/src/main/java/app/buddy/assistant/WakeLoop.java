@@ -25,6 +25,9 @@ final class WakeLoop {
 
         /** The hold, or a feed, ran past its limit: the audio is dropped, the loop detects again; cancel the turn. */
         void onHoldExpired(int seq);
+
+        /** The models threw while scoring (capture thread): the loop is dead from now on; stop the detector. */
+        void onFailed(RuntimeException e);
     }
 
     /** 90 s: longer than any engine lets a transcript take (Claude's own waits add up to 80 s). */
@@ -39,6 +42,7 @@ final class WakeLoop {
     private Mode mode = Mode.DETECT;
     private final ArrayList<byte[]> held = new ArrayList<>();
     private int heldBytes, fedBytes, capture, seq;
+    private boolean failed;
 
     WakeLoop(WakeFeatures features, Sink sink, Host host) {
         this.features = features;
@@ -52,9 +56,18 @@ final class WakeLoop {
 
     /** Capture thread: one block of n samples, stamped {@code now} (ms). */
     synchronized void block(short[] pcm, int n, long now) {
+        if (failed) return;
         switch (mode) {
             case DETECT:
-                if (features.feed(pcm, n) >= WakeFeatures.THRESHOLD) {
+                float score;
+                try {
+                    score = features.feed(pcm, n);
+                } catch (RuntimeException e) { // OnnxWakeEngine.run: a model that can't run
+                    failed = true;
+                    host.onFailed(e);
+                    break;
+                }
+                if (score >= WakeFeatures.THRESHOLD) {
                     mode = Mode.HOLD;
                     short[] pre = features.preRoll();
                     for (int i = 0; i < pre.length; i += CHUNK) hold(bytes(pre, i, Math.min(CHUNK, pre.length - i)));

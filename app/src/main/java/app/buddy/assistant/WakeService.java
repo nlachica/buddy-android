@@ -78,10 +78,10 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
 
     /**
      * Main thread: the detector's microphone closes now (the loop forgets what it heard); the next tick may reopen it.
-     * Returns once the capture thread has released the recorder (one 40 ms read at most; 300 ms cap), so the caller's
-     * own recorder never opens against it.
+     * Returns true once the capture thread has released the recorder (one 40 ms read at most), false after 300 ms
+     * without it: the caller's own recorder must not open against it then.
      */
-    void closeNow() {
+    boolean closeNow() {
         synchronized (held) {
             want = 0;
         }
@@ -89,6 +89,7 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         if (l != null) l.drop();
         long end = SystemClock.elapsedRealtime() + 300;
         while (heldOpen && SystemClock.elapsedRealtime() < end) SystemClock.sleep(5);
+        return !heldOpen;
     }
 
     // ---- the service
@@ -230,6 +231,13 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
     @Override
     public void onWake(int seq, long detectedAt) {
         main.post(() -> WakeWord.onWake(seq, detectedAt));
+    }
+
+    @Override
+    public void onFailed(RuntimeException e) {
+        Log.i(TAG, "the models failed: " + e); // the loop stops scoring; the capture loop ends with the service and releases the microphone
+        broken = true;
+        main.post(this::shutdown);
     }
 
     @Override
