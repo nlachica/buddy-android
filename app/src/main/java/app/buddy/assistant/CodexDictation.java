@@ -123,7 +123,7 @@ final class CodexDictation {
                     String text = (done + " " + partial).replaceAll("\\s+", " ").trim();
                     stopSession();
                     listener = null;
-                    if (text.isEmpty()) l.onEnd(BuddyApp.str(R.string.dictation_no_speech));
+                    if (text.isEmpty()) l.onNothing(BuddyApp.str(R.string.dictation_no_speech));
                     else l.onFinal(text);
                     return;
                 }
@@ -140,7 +140,8 @@ final class CodexDictation {
     }
 
     private static void end(Voice.Listener l, String message) {
-        if (listener == l) listener = null;
+        if (listener != l) return; // a late failure of a listening that is over must not tear down the current one
+        listener = null;
         stopSession();
         l.onEnd(message);
     }
@@ -438,7 +439,7 @@ final class CodexDictation {
     }
 
     private static void heard(String text, boolean final_) {
-        if (listener == null) return;
+        if (listener == null || !connected) return; // ChatGPT hears audio only once connected: earlier words are a past call's
         lastHeard = System.currentTimeMillis();
         if (final_) {
             if (done.length() > 0) done.append(' ');

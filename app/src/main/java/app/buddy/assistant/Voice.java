@@ -25,6 +25,11 @@ final class Voice {
         /** Stopped without a result (silence, error, cancelled). message may be null. */
         void onEnd(String message);
 
+        /** Stopped because nothing was heard (an error is onEnd): a listener that tells the two apart overrides this. */
+        default void onNothing(String message) {
+            onEnd(message);
+        }
+
         /** Microphone loudness, 0..1, many times a second while recording. */
         default void onLevel(float level) {
         }
@@ -128,54 +133,10 @@ final class Voice {
         }
         if ("chatgpt".equals(Prefs.voiceEngine(c))) return unwatchOnError(l, CodexDictation.listen(c, l));
         if (!SpeechRecognizer.isRecognitionAvailable(c)) return unwatchOnError(l, c.getString(R.string.voice_no_recognizer));
-        current = l;
-        inputDone = false;
+        Window window = openWindow(c, l);
         l.onStatus(c.getString(R.string.voice_starting));
         recognizer = SpeechRecognizer.createSpeechRecognizer(c.getApplicationContext());
-        recognizer.setRecognitionListener(new RecognitionListener() {
-            @Override
-            public void onPartialResults(Bundle b) {
-                String t = best(b);
-                if (t != null && current == l) l.onPartial(t);
-            }
-
-            @Override
-            public void onResults(Bundle b) {
-                String t = best(b);
-                finish();
-                if (t != null && !t.trim().isEmpty()) l.onFinal(t.trim());
-                else l.onEnd(c.getString(R.string.voice_didnt_catch));
-            }
-
-            @Override
-            public void onError(int error) {
-                finish();
-                l.onEnd(error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT
-                        ? c.getString(R.string.voice_didnt_catch) : error == SpeechRecognizer.ERROR_CLIENT ? null
-                        : c.getString(R.string.voice_error, error));
-            }
-
-            @Override
-            public void onReadyForSpeech(Bundle b) {
-                if (current == l) l.onStatus(null);
-            }
-
-            @Override
-            public void onRmsChanged(float rms) { // about -2 (quiet) to 10 dB (loud)
-                if (current == l) l.onLevel(Math.max(0f, Math.min(1f, (rms + 2f) / 12f)));
-            }
-
-            @Override public void onBeginningOfSpeech() {}
-            @Override public void onBufferReceived(byte[] buf) {}
-            @Override
-            public void onEndOfSpeech() {
-                if (current == l) {
-                    inputDone = true;
-                    l.onStatus(c.getString(R.string.voice_finishing));
-                }
-            }
-            @Override public void onEvent(int type, Bundle b) {}
-        });
+        recognizer.setRecognitionListener(window);
         Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
                 .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
@@ -197,6 +158,81 @@ final class Voice {
         return null;
     }
 
+    /** The phone recognizer's open window. */
+    private static Window phone;
+
+    /** Starts a phone-recognizer window for l: it is the only one whose callbacks count until finish(). */
+    static Window openWindow(Context c, Listener l) {
+        current = l;
+        inputDone = false;
+        phone = new Window(c, l);
+        return phone;
+    }
+
+    /**
+     * What the phone recognizer says to one listening window. A callback that is already on its way from a cancelled
+     * recognizer finds another window (or none) open and changes nothing: it can neither end a newer recognizer nor
+     * deliver to an old listener.
+     */
+    static final class Window implements RecognitionListener {
+        private final Context c;
+        private final Listener l;
+
+        Window(Context c, Listener l) {
+            this.c = c;
+            this.l = l;
+        }
+
+        @Override
+        public void onPartialResults(Bundle b) {
+            String t = best(b);
+            if (t != null && phone == this && current == l) l.onPartial(t);
+        }
+
+        @Override
+        public void onResults(Bundle b) {
+            if (phone != this) return;
+            String t = best(b);
+            finish();
+            if (t != null && !t.trim().isEmpty()) l.onFinal(t.trim());
+            else l.onNothing(c.getString(R.string.voice_didnt_catch));
+        }
+
+        @Override
+        public void onError(int error) {
+            if (phone != this) return;
+            finish();
+            if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                l.onNothing(c.getString(R.string.voice_didnt_catch));
+            } else {
+                l.onEnd(error == SpeechRecognizer.ERROR_CLIENT ? null : c.getString(R.string.voice_error, error));
+            }
+        }
+
+        @Override
+        public void onReadyForSpeech(Bundle b) {
+            if (phone == this && current == l) l.onStatus(null);
+        }
+
+        @Override
+        public void onRmsChanged(float rms) { // about -2 (quiet) to 10 dB (loud)
+            if (phone == this && current == l) l.onLevel(Math.max(0f, Math.min(1f, (rms + 2f) / 12f)));
+        }
+
+        @Override public void onBeginningOfSpeech() {}
+        @Override public void onBufferReceived(byte[] buf) {}
+
+        @Override
+        public void onEndOfSpeech() {
+            if (phone == this && current == l) {
+                inputDone = true;
+                l.onStatus(c.getString(R.string.voice_finishing));
+            }
+        }
+
+        @Override public void onEvent(int type, Bundle b) {}
+    }
+
     /** The listening that endpoint() watches now: an earlier one's timer must not end a later one. */
     private static Listener watched;
     private static final android.os.Handler ends = new android.os.Handler(android.os.Looper.getMainLooper());
@@ -207,7 +243,10 @@ final class Voice {
      * a car) keeps the engine listening, as it waits for quiet; it doesn't make new words, so this pause still ends.
      */
     private static Listener endpoint(Context c, final Listener l) {
-        final long pause = Prefs.voicePauseMs(c), max = Prefs.voiceMaxMs(c);
+        return endpoint(Prefs.voicePauseMs(c), Prefs.voiceMaxMs(c), l);
+    }
+
+    static Listener endpoint(final long pause, final long max, final Listener l) {
         if (pause <= 0 && max <= 0) return l; // Auto: the engine decides, as before
         final long started = android.os.SystemClock.elapsedRealtime();
         final Listener[] me = new Listener[1];
@@ -248,6 +287,12 @@ final class Voice {
             public void onEnd(String message) {
                 if (watched == me[0]) watched = null;
                 l.onEnd(message);
+            }
+
+            @Override
+            public void onNothing(String message) {
+                if (watched == me[0]) watched = null;
+                l.onNothing(message);
             }
 
             @Override
@@ -304,6 +349,7 @@ final class Voice {
 
     private static void finish() {
         current = null;
+        phone = null;
         if (recognizer != null) {
             recognizer.destroy();
             recognizer = null;

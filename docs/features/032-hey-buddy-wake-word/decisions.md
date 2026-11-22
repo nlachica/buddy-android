@@ -252,3 +252,14 @@ post-release device checks in `verify.md`. The pipeline does not stop for Nichol
 - Tests could not exercise: `WakeMic` (needs `AudioRecord`) and `WakeIdleTest` (real models, CI-only like
   `OnnxWakeEngineTest`; compiled here against the ORT jar). `BypassTest.everyShortLabelOfATapReachesTheDecision` fails
   in this machine's hand-made harness (real `android.jar` has native `Log.isLoggable`); it does not touch these files.
+
+## 2026-11-22 - Step 5 details the plan left open (coder)
+- The window's identity is the named listener object, not `recognizer != mine`: `Voice.phone` holds the open
+  `Voice.Window`, set by `openWindow` and cleared by `finish()`; every callback starts with `phone != this`. Same effect
+  (a callback from a cancelled recognizer finds another window or none), and a JVM test can open a window without a
+  `SpeechRecognizer`. It also stops a second `onEnd(null)` from a cancelled recognizer's late `ERROR_CLIENT`.
+- `Voice.endpoint(pause, max, l)` is package-visible so the test can reach the wrapper without `Prefs`.
+- Round 3 F2 in `CodexDictation`: `end(l, …)` does nothing unless `l` is the current listener; `heard()` ignores
+  transcripts until the page reports `connected` (audio is sent only once connected, so earlier words are a past
+  call's). `ClaudeDictation.end` has the same shape; not changed (the ruling names ChatGPT). Not unit-tested:
+  `CodexDictation` needs a WebView and a Codex server; code review plus the post-release device check.
