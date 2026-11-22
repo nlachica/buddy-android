@@ -42,3 +42,9 @@ F1: accepted - a take or a key write is now: `Prefs` `commit()` of `saved`, `set
 F2: accepted - Media muted or at 0 (`isStreamMute`, passed to `mediaStep` as `now` 0) is left alone: no take, no key write, no give-back, the record stays; Buddy never saves or writes 0. Unit sequences for muted before the call and muted mid-call, two phone checks (unmuting after hang-up gives N), and Risks 3 and 10 say what it costs (a muted call stays silent, as today; unmuting for the call is a follow-up, not built).
 F3: accepted - check 5 reads the index after each press (C - 1, then C - 2) and accepts one or two `volume:` lines ending at C - 2.
 F4: accepted - added a second LS2 check: speaker-started call, LS2 on, hang up with LS2 connected (no give-back line, LS2's indices unchanged), LS2 off, then a speaker call started and ended gives `volume: media back to N`.
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] The speaker or mute state can change while Buddy saves the recovery record - `plan.md:84-91` checks Media, then commits the recovery record before changing the volume. The commit can wait for earlier preference writes. If LS2 takes Media during that wait, a write intended to raise the speaker from 6 to 15 can raise the headset to 15. If Nicholas mutes the speaker during the wait, the same write can undo his mute. A failed commit also leaves the original level without the promised crash protection. -> Require a successful commit, then check the speaker-only route, mute state and observed Media index immediately before calling `setStreamVolume`. If a check fails, skip the volume write and retain the previous recovery state. Cover a failed commit and a route or mute change during the commit with a check that Android receives no volume write. [Android preference commit semantics](https://developer.android.com/reference/android/content/SharedPreferences.Editor#commit())
+
+VERDICT: REVISE
