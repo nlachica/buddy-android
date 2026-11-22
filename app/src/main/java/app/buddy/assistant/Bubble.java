@@ -1530,6 +1530,20 @@ final class Bubble implements ChatHub.Listener {
         // the spoken conversation (CodexLive) next to Talk's one request; ended from here too
         if (CodexLive.on()) acts.add(new RadialMenu.Action(R.drawable.ms_graphic_eq, svc.getString(R.string.menu_end_live), true, () -> CodexLive.end(null)));
         else if (hub.runningCount() == 0 && liveReady()) acts.add(new RadialMenu.Action(R.drawable.ms_graphic_eq, svc.getString(R.string.live_option), false, this::goLive));
+        // 032: the quick switch for "hey buddy" (same setting as Settings → Voice)
+        if (WakeWord.available()) {
+            boolean on = Prefs.wakeWord(svc);
+            acts.add(new RadialMenu.Action(on ? R.drawable.ms_mic_off : R.drawable.ms_mic,
+                    svc.getString(on ? R.string.menu_wake_off : R.string.menu_wake_on), false, () -> {
+                Prefs.setWakeWord(svc, !on);
+                WakeWord.ensure(svc);
+                if (!on && !Voice.micAllowed(svc)) { // the grant starts it (WakeWord.ensure on resume)
+                    toast(svc.getString(R.string.setup_wake_needs_mic));
+                    svc.startActivity(new android.content.Intent(svc, MainActivity.class)
+                            .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK).putExtra("askMic", true));
+                }
+            }));
+        }
         acts.add(new RadialMenu.Action(R.drawable.ms_forum, svc.getString(R.string.menu_open_chat), false, this::expand));
         acts.add(new RadialMenu.Action(R.drawable.ms_close, svc.getString(R.string.menu_hide), false, this::dismissToNotification));
         int[] loc = new int[2];

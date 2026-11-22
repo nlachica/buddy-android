@@ -327,6 +327,8 @@
     <!-- Verb: starts voice input to the agent. A hold-menu label (keep under ~12 characters) and the chat panel's
          mic button (read by TalkBack). -->
     <string name="bubble_talk">Talk</string>
+    <string name="menu_wake_off">Hey Buddy off</string>
+    <string name="menu_wake_on">Hey Buddy on</string>
     <string name="menu_open_chat">Open chat</string>
     <!-- Hides the bubble; a notification brings it back. -->
     <string name="menu_hide">Hide</string>
