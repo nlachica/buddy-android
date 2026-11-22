@@ -60,3 +60,5 @@ Orchestrator constraints (from the task):
 
 ## Clarifications
 <!-- Nicholas's later answers, dated, appended -->
+
+- 2026-11-22 (Nicholas): Answer while locked = yes. Bypass chats run without approval cards = fine ("approval cards still need unlock"). Q1 and Q4: the planner's recommendations (a).
