@@ -232,18 +232,8 @@ final class WakeWord {
     private static void send(String request) {
         BuddyService svc = BuddyService.get();
         if (svc == null) return;
-        ChatHub hub = ChatHub.get(svc);
-        Sessions.Session ses = hub.sessions.current;
-        if (ses == null) {
-            ses = hub.create(Prefs.backend(svc));
-            hub.select(ses);
-        }
-        ses.spokenRun = true;
-        String e = hub.send(ses, request);
-        if (e != null) {
-            ses.spokenRun = false;
-            toast(e);
-        }
+        String e = ChatHub.get(svc).sendTalk(request, true);
+        if (e != null) toast(e);
     }
 
     private static void toast(String message) {

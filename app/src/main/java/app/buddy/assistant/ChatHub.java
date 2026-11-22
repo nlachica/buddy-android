@@ -258,6 +258,30 @@ final class ChatHub {
         return send(ses, text, files, null);
     }
 
+    /**
+     * What the bubble's Talk and "hey buddy" send: to the current chat (a new one with the default agent if there is
+     * none). spoken: this request's reply is read aloud even with read aloud off; it is tied to this text, so it
+     * reaches the turn that carries it (now, as a note of the run going, or queued until that run ends), not a later one.
+     */
+    String sendTalk(String text, boolean spoken) {
+        Sessions.Session ses = sessions.current;
+        if (ses == null) {
+            ses = create(Prefs.backend(app));
+            select(ses);
+        }
+        if (spoken) ses.spokenAsk = text.trim();
+        String e = send(ses, text);
+        if (e != null) ses.spokenAsk = null;
+        else if (ses.spokenAsk != null && ses.running) ses.spokenRun = true; // a note of the run going: that run's answer
+        return e;
+    }
+
+    /** A turn starts with this text: its reply is spoken if it is the "hey buddy" request that waited (either way the wait ends). */
+    private static void turnStarts(Sessions.Session ses, String text) {
+        ses.spokenRun = ses.spokenAsk != null && text.contains(ses.spokenAsk); // contains: notes left at a run's end are joined
+        ses.spokenAsk = null;
+    }
+
     /** A notification rule's run (see Triggers): the chat shows a short line, the agent gets the whole prompt. */
     String sendFromRule(Sessions.Session ses, String shown, String prompt) {
         return send(ses, shown, null, prompt, false);
@@ -346,6 +370,7 @@ final class ChatHub {
         }
         for (Listener l : new ArrayList<>(listeners)) l.onMessage(ses, um);
         startRun(ses);
+        turnStarts(ses, text);
         ses.scheduledRun = scheduled;
         ses.status = app.getString(R.string.hub_thinking);
         changed();
@@ -978,6 +1003,7 @@ final class ChatHub {
                     ses.lastReply = r;
                     CodexLive.agentSaid(ses, r);
                 }
+                ses.spokenRun = false; // this turn's reply is out: a later turn of a run that goes on is not "hey buddy"'s
                 // notes written during the agent's last non-phone steps: it won't take them, so they go as a new turn
                 String late = turnEndNotes(ses);
                 if (late != null) sendLive(ses, late, true);
@@ -1151,6 +1177,7 @@ final class ChatHub {
     private void sendLive(Sessions.Session ses, String text, boolean note) {
         if (!note) add(ses, Bubble.Kind.USER, text);
         ses.turnOver = false; // a turn is starting: later messages are updates to it
+        turnStarts(ses, text);
         final int run = ses.runId; // a failed send must not be retried into this same run's closed input
         String forAgent = note ? "(Added while you were working; if it asks something, answer it:) " + text : text;
         try {
@@ -1213,6 +1240,7 @@ final class ChatHub {
             return;
         }
         startRun(ses);
+        turnStarts(ses, text);
         run[0] = ses.runId;
         ses.status = app.getString(R.string.hub_thinking);
         changed();

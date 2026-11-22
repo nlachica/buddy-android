@@ -164,6 +164,8 @@ final class Sessions {
         boolean scheduledRun;
         /** The current run answers a "hey buddy" request: its reply is spoken even with read aloud off (cleared at the run's end). */
         boolean spokenRun;
+        /** The "hey buddy" request that has not started a turn yet (queued behind a run): its reply will be spoken. */
+        String spokenAsk;
         /** How the current run ended so far: null (fine), "stopped" or "failed". */
         String outcome;
         /** The agent's turn is over but its process lives on (background jobs): a message can go to it at once (ChatHub.liveInput). */
