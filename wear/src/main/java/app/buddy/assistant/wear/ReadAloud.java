@@ -9,10 +9,19 @@ import android.content.pm.ServiceInfo;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
+import android.os.SystemClock;
 
 import com.google.android.gms.wearable.ChannelClient;
+import com.google.android.gms.wearable.MessageEvent;
 import com.google.android.gms.wearable.Wearable;
 import com.google.android.gms.wearable.WearableListenerService;
+
+import org.json.JSONException;
+import org.json.JSONObject;
+
+import java.nio.charset.StandardCharsets;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Plays one of the phone's readings (docs/features/012-watch-audio-device/plan.md): the phone opens the channel
@@ -20,7 +29,8 @@ import com.google.android.gms.wearable.WearableListenerService;
  * foreground service keeps the watch awake. The channel is closed with a code the phone relies on: {@link #PLAYED}
  * (it played to the end of the stream), {@link #NOT_PLAYED} (nothing of it sounded: busy, the service was refused, an
  * empty or silent stream, a failed player; the phone then reads it itself) or 0 (broke or was hushed after sound:
- * nobody reads it again). State is static and main-thread only; the system's callbacks are posted to main.
+ * nobody reads it again). It also answers the phone's "are you on the wrist?" (033) and, while a reading plays, sends
+ * the off-body sensor's events to the phone. State is static and main-thread only; the system's callbacks are posted to main.
  */
 public class ReadAloud extends WearableListenerService {
     static final int NOT_PLAYED = 1, PLAYED = 2;
@@ -33,10 +43,54 @@ public class ReadAloud extends WearableListenerService {
     private static ChannelClient.Channel channel; // the reading
     private static Speaker speaker;
     private static PowerManager.WakeLock wake;
+    /** 033: while a reading plays, the off-body sensor's events go to the node that opened its channel. */
+    private static Worn push;
 
     /** Another voice of the watch has the speaker or the microphone. */
     private static boolean busy() {
         return Talk.busy() || Call.on || TalkActivity.dictating();
+    }
+
+    /** 033: the phone asks whether the watch is worn: register the sensor, wait for its first event (Android allows 5 s), answer. */
+    @Override
+    public void onMessageReceived(MessageEvent e) {
+        if (!Phone.WORN.equals(e.getPath())) return;
+        final long id;
+        try {
+            id = new JSONObject(new String(e.getData(), StandardCharsets.UTF_8)).getLong("id");
+        } catch (JSONException x) {
+            return;
+        }
+        PowerManager.WakeLock lock = getSystemService(PowerManager.class).newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "buddy:worn");
+        lock.acquire(8000);
+        final long t0 = SystemClock.elapsedRealtime();
+        final CountDownLatch got = new CountDownLatch(1);
+        final Boolean[] worn = new Boolean[1];
+        final long[] ms = new long[1];
+        Worn sensor = new Worn(this, w -> {
+            if (got.getCount() == 0) return;
+            worn[0] = w;
+            ms[0] = SystemClock.elapsedRealtime() - t0;
+            got.countDown();
+        });
+        String why = sensor.start();
+        try {
+            if (why == null && !got.await(5, TimeUnit.SECONDS)) why = "no event";
+        } catch (InterruptedException x) {
+            Thread.currentThread().interrupt();
+            why = "no event";
+        } finally {
+            sensor.stop();
+            lock.release();
+        }
+        try {
+            JSONObject o = new JSONObject().put("id", id);
+            if (why == null) o.put("worn", worn[0]).put("ms", ms[0]);
+            else o.put("why", why);
+            Wearable.getMessageClient(this).sendMessage(e.getSourceNodeId(), Phone.WORN, o.toString().getBytes(StandardCharsets.UTF_8));
+        } catch (JSONException x) {
+            throw new IllegalStateException(x); // only for a NaN number
+        }
     }
 
     @Override
@@ -105,6 +159,12 @@ public class ReadAloud extends WearableListenerService {
                 }
             });
             speaker = sp;
+            if (push == null) { // 033: the phone hears the wrist state at the start of the reading and each change
+                final String phone = ch.getNodeId();
+                push = new Worn(this, w -> Wearable.getMessageClient(app).sendMessage(phone, Phone.WORN,
+                        ("{\"worn\":" + w + "}").getBytes(StandardCharsets.UTF_8)));
+                push.start(); // no sensor or refused: the phone hears nothing and keeps its own answer
+            }
             Wearable.getChannelClient(this).getInputStream(ch)
                     .addOnSuccessListener(in -> {
                         if (speaker == sp) sp.play(in);
@@ -136,6 +196,8 @@ public class ReadAloud extends WearableListenerService {
     }
 
     private static void down() {
+        if (push != null) push.stop();
+        push = null;
         if (wake != null && wake.isHeld()) wake.release();
         ReadAloud i = instance;
         instance = null;

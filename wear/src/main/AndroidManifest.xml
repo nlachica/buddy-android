@@ -80,6 +80,14 @@
                     android:host="*"
                     android:pathPrefix="/buddy/read" />
             </intent-filter>
+            <!-- 033: the phone asks whether the watch is worn -->
+            <intent-filter>
+                <action android:name="com.google.android.gms.wearable.MESSAGE_RECEIVED" />
+                <data
+                    android:scheme="wear"
+                    android:host="*"
+                    android:path="/buddy/worn" />
+            </intent-filter>
         </service>
 
         <!-- Passes the user's words to Buddy on the phone and reads the answer out; no runtime permission needed -->
