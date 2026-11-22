@@ -49,4 +49,15 @@ public class SpokenAskTest {
         assertFalse(s.spokenRun);
         assertNull(s.spokenAsk);
     }
+
+    @Test
+    public void aTypedMessageStartingKeepsTheWaitOfAQueuedWakeNote() { // round 3 F1
+        Sessions.Session s = running();
+        s.notes.add("what time is it");
+        ChatHub.turnStarts(s, "typed message"); // the typed live delivery completed first
+        assertFalse(s.spokenRun);
+        assertEquals("what time is it", s.spokenAsk);
+        ChatHub.notesTaken(s, "what time is it");
+        assertTrue(s.spokenRun);
+    }
 }

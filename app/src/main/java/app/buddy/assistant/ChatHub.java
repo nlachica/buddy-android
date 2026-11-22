@@ -279,6 +279,11 @@ final class ChatHub {
     /** A turn starts with this text: its reply is spoken if it is the "hey buddy" request that waited (either way the wait ends). */
     static void turnStarts(Sessions.Session ses, String text) {
         ses.spokenRun = ses.spokenAsk != null && text.contains(ses.spokenAsk); // contains: notes left at a run's end are joined
+        if (ses.spokenAsk != null && !ses.spokenRun) { // another message's turn: a request still queued as a note keeps its wait
+            synchronized (ses.notes) {
+                for (String n : ses.notes) if (n.contains(ses.spokenAsk)) return;
+            }
+        }
         ses.spokenAsk = null;
     }
 
