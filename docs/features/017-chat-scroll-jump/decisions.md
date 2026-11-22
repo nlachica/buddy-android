@@ -128,3 +128,16 @@
 - Full chat `onResume`: a Search `found` view still wins over everything (as today); otherwise it scrolls to the end only if at the end or `lastShown` is gone.
 - `ToolLog`/`StepLog.setLive(on)`: when `on` it opens the rows as before; when not, it goes through `fold()`.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - Upstream 2.3.18 sync: upstream's #73 "follow only at the end" replaces 012/017's follow logic
+- Conflict: Bubble (followEnd/scrollToEnd, showMessage, the bubble send) and ChatActivity (onMessage, atEnd, scrollToEnd).
+  Upstream 2.3.18 fixed the same bug (#73) with a flag set by the user's scrolling (`pinned` in Bubble, `following` in
+  ChatActivity, 160dp), a layout listener that keeps the end while the chat grows there, an instant `scrollTo`
+  (smoothScrollTo's frames read as "scrolled up"), and "what the user just sent shows" (3 s, not a rule's or schedule's).
+- Choice: upstream's mechanism (AGENTS.md: prefer upstream's where both fixed the same thing). Kept from 017: no
+  fullScroll, FOCUS_BLOCK_DESCENDANTS in the bubble, the ChatActivity ScrollView's reveal overrides, onResume keeping a
+  reader's place, logs not folding under a reader, backToChat. Bubble keeps its own 48dp `atEnd()` for those last two;
+  ChatActivity's fork 48dp `atEnd()` was dropped for upstream's (160dp), which the same callers now use. The bubble's
+  page trim now happens only when scrolling to the end (upstream), so 017's "trim only when following" still holds.
+  `ChatScrollTest` passes.
+- By: sync (claude-opus-5-5)

@@ -151,12 +151,17 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         public void onReceive(Context c, Intent i) {
             keepAwake.update(); // locked: the screen may sleep; unlocked: a long task keeps it on again
             if (bubble == null) return;
-            if (Intent.ACTION_USER_PRESENT.equals(i.getAction())) bubble.setLocked(false);
-            else if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
+            if (Intent.ACTION_USER_PRESENT.equals(i.getAction())) {
+                bubble.setLocked(false);
+                bubble.replayFace(); // an animated picture plays once each time the phone is unlocked (issue #68)
+            } else if (Intent.ACTION_SCREEN_OFF.equals(i.getAction())) {
                 bubble.setLocked(true);
                 bubble.noticeWaitingCard(); // a card that was on screen when it went dark: its notification now
+            } else {
+                boolean locked = getSystemService(KeyguardManager.class).isKeyguardLocked();
+                bubble.setLocked(locked);
+                if (!locked) bubble.replayFace(); // (a phone without a lock screen: on is unlocked)
             }
-            else bubble.setLocked(getSystemService(KeyguardManager.class).isKeyguardLocked());
         }
     };
 
@@ -512,7 +517,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
     @Override
     public JSONArray listTools() throws JSONException {
         Sessions.Session lite = Lite.caller(this); // a small model's chat: a dozen tools, more on request
-        return lite != null ? Lite.filter(tools.list(), lite) : tools.list();
+        JSONArray all = ToolSwitch.filter(this, tools.list()); // (the ones the user turned off aren't offered)
+        return lite != null ? Lite.filter(all, lite) : all;
     }
 
     @Override
@@ -751,6 +757,20 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
         if (ses != null) hub.note(ses, Bubble.Kind.STEP, getString(R.string.service_resumed_note));
     }
 
+    /**
+     * Resume from a notification's button: the shade it was tapped in closes first (Android leaves it open, the agent's
+     * next step saw it, and closing it by hand was a touch that paused again), then the task goes on.
+     */
+    void resumeFromShade() {
+        if (!paused) return;
+        performGlobalAction(GLOBAL_ACTION_DISMISS_NOTIFICATION_SHADE);
+        main.removeCallbacks(shadeResume);
+        main.postDelayed(shadeResume, 600); // (once it's gone: the agent reads the screen again first)
+    }
+
+    /** Resume from a notification, due once the shade is closed; called off when this pause ends some other way. */
+    private final Runnable shadeResume = this::resume;
+
     /** A chat was stopped while paused (main thread): end the pause without letting waiting actions go ahead. */
     void stopPaused() {
         if (!paused) return;
@@ -760,6 +780,8 @@ public class BuddyService extends AccessibilityService implements McpServer.Hand
 
     private void endPause() {
         if (!paused) return;
+        main.removeCallbacks(shadeResume); // (a Resume tap was for this pause: not for the next one)
+        HiddenNotice.pauseEnded(this); // the hidden bubble's notice loses its Resume
         paused = false;
         heldInPause = false;
         main.removeCallbacks(pauseExpired);
