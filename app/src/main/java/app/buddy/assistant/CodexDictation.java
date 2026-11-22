@@ -152,15 +152,12 @@ final class CodexDictation {
         finishing = false;
         MicServer.levels = null;
         MicServer.endCapture();
-        final String t;
-        synchronized (CodexDictation.class) { // with startCall's check and publish: a cancelled startup can't claim a later call
-            if (web != null) {
-                web.destroy();
-                web = null;
-            }
-            t = callThread;
-            callThread = null;
+        if (web != null) {
+            web.destroy();
+            web = null;
         }
+        final String t = callThread;
+        callThread = null;
         if (t != null && server != null) {
             new Thread(() -> {
                 try {
@@ -175,10 +172,8 @@ final class CodexDictation {
 
     @SuppressLint({"SetJavaScriptEnabled", "AddJavascriptInterface"})
     private static void openPage(Context c) {
-        synchronized (CodexDictation.class) {
-            if (web != null) web.destroy();
-            web = new WebView(c.getApplicationContext());
-        }
+        if (web != null) web.destroy();
+        web = new WebView(c.getApplicationContext());
         web.getSettings().setJavaScriptEnabled(true);
         web.getSettings().setMediaPlaybackRequiresUserGesture(false);
         web.setWebChromeClient(new WebChromeClient() {
@@ -237,10 +232,8 @@ final class CodexDictation {
             if (threadId == null) throw new Exception(BuddyApp.str(R.string.dictation_codex_no_start));
             stage = R.string.dictation_stage_call;
             String call = newThread();
-            synchronized (CodexDictation.class) {
-                if (web != page) return; // cancelled meanwhile
-                callThread = call;
-            }
+            if (web != page) return; // cancelled meanwhile
+            callThread = call;
             JSONObject r = request("thread/realtime/start", new JSONObject()
                     .put("threadId", call)
                     .put("transport", new JSONObject().put("type", "webrtc").put("sdp", sdp))
