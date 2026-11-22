@@ -37,3 +37,19 @@ sequence numbers, a word count and the `State` name; no message, transcript or e
 test plan has a code-review row for exactly that.
 F5: accepted - The deep-doze row counts only if deep `mState=IDLE` is read immediately before the words with the
 screen still off; otherwise the state seen is written down and deep doze stays "unverified".
+
+## Round 2 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] Baseline setup can restart the listener being diagnosed - Step 0 requires a listening notification and a new chat (plan.md:91–94), even though a stopped service after an update is an open hypothesis (plan.md:43–44). Resuming any Buddy activity calls `WakeWord.ensure` (BuddyApp.java:17–19), which can start a missing service (WakeWord.java:64–70). A passing test after opening Buddy could hide exactly what Nicholas encountered. -> Record the notification or its absence and recent service logs before opening Buddy or tapping anything. If paused, stopped or offering “Tap to turn on,” capture one locked attempt in that state, then change just the indicated condition and repeat. Use the idle-chat baseline for the listening case.
+
+F2 [major] A wrong transcript or wrong spoken answer has no decision-table row - Step 0 collects the request text, but the table only handles absent messages, absent audio, or hearing the time (plan.md:58–66,100–103). A nonempty misrecognition can be sent and answered aloud because `Turn.heard` sends the stripped transcript (WakeWord.java:358–362). This fails brief.md:33 even though every stage ran. -> Compare the chat request with the meaning of the time question, then compare the reply with what Nicholas heard. Return a different request to the Planner as transcription evidence, or a correct request with an incorrect answer as agent evidence. Neither case needs a diagnostic release to distinguish it.
+
+F3 [major] The no-reproduction branch can close with the cause still unknown - If Nicholas cannot recall what differed, step 0b says to stop testing, and the risk section says the feature ends with a GUIDE update (plan.md:111–114,143–145). The same plan requires cause evidence and four successful locked trials out of five (plan.md:131–132). A guess about what differed supplies neither a causal link nor the remaining trials. -> Run the stated verification before documenting success. Record spoken-answer verification and diagnosis separately. If the trials pass and the original cause remains unknown, report “could not reproduce” and leave diagnosis unresolved unless Nicholas accepts closure on that basis.
+
+F4 [minor] A connected watch does not establish the playback route - Step 0 attributes watch playback to the link (plan.md:107–108). The linked implementation queues the reading, checks the selected route and, in Auto, checks whether the watch is worn. A headset can take priority (ReadQueue.java:173–189, WatchVoice.java:64–66, AudioRoute.java:155–163). -> Record connected headset, watch wear and actual audible output. For an inaudible reply, use route evidence from the playback interval or leave the destination unknown.
+
+F5 [minor] Forced Doze has no cleanup step - The optional `force-idle` in plan.md:133 changes device-wide state. -> Prefer natural idle for this test on Nicholas's phone. If forcing it, include `dumpsys deviceidle unforce` on completion or interruption and verify normal idle management resumes. [Android Doze testing procedure](https://developer.android.com/training/monitoring-device-state/doze-standby#testing_doze)
+
+F6 [minor] The unlocked regression check asks one turn to both succeed and hear nothing - Plan.md:136 expects an answer and a “Didn't catch that” toast from one request. Sending and ending after empty listening windows are separate outcomes (WakeWord.java:203–207,358–369). -> Check waves and a spoken reply on one unlocked request. Exercise silence in a separate turn if verifying the toast.
+
+VERDICT: REVISE
