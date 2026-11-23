@@ -49,3 +49,11 @@ other state (`ASLEEP`, `PAUSED`, `OFF`, no service) ends the turn. Tests: `aSend
 both END; power connected, no call: SEND and AGAIN).
 
 Tests: not run here, the JVM cannot start in this environment (`Failed to mark memory page as executable`); CI is the check.
+
+## Round 3 - Code Reviewer (gpt-6.2-astra)
+
+Both round 2 findings are resolved at `1a9aed0`. The plugged-in fed-turn test clears the unfed recognizer’s recording before asserting `TURN`. The transcript and retry callbacks read the current state before dispatch. A call on a dark, unplugged phone ends either callback, and a plugged-in turn with no pause cause can still send or reopen. The tests cover both callbacks and all eight setting, screen and power combinations.
+
+The GitHub unit tests and both release APK builds passed for this commit. The local JVM could not start because it could not mark memory executable. Phone checks P1–P6, including microphone release, wake-lock release and resume timing, remain for post-install verification. [CI run 45096156373](https://github.com/nlachica/buddy-android/actions/runs/45096156373)
+
+VERDICT: APPROVE
