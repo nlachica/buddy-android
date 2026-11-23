@@ -174,3 +174,9 @@ Round 3 had a single major issue (F1), and it concerns only how the phone verifi
 phone_shell truncation. The code design itself isn't in question. Accepted: the Verifier extracts the recording and
 wakelock sections on the phone for each sample (timestamp, heading, owners, explicit empty) and needs a complete
 before/after pair. The plan is approved as-is otherwise; proceed to code.
+
+## 2026-11-22 - A transcript that arrives after the screen went dark is dropped, not sent
+- Options: send what was already heard (a sent request is left alone); end the turn if `ASLEEP` at send time.
+- Choice: end it, via `WakeWord.gate`, reading `stateNow()` at the callback instead of the tick's last state. Matches
+  the brief's "screen off + battery: nothing listens" and closes the up-to-500 ms window. Code review round 1, F1.
+- By: Coder (claude-sonnet-5-5)

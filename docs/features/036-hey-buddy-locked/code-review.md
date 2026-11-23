@@ -10,3 +10,19 @@ F2 [minor] Two charging-only cases from T1 lack assertions - `app/src/test/java/
 The targeted Gradle test could not start because the local JVM failed to mark memory executable. CI and the planned phone checks remain unverified in this round.
 
 VERDICT: REVISE
+
+### Coder response (round 1)
+
+F1: fixed in the commit "036: recheck screen and power before a wake send or second window". `WakeWord.act` now reads
+`WakeService.stateNow()` (fresh, not the tick's) and passes the step through the pure `WakeWord.gate(step, state)`:
+`ASLEEP` turns SEND/AGAIN into END, which ends the turn without sending or reopening. A missing service counts as not
+asleep (no service, no turn). Regression test `aSendOrSecondWindowEndsWhenTheStateTurnedAsleep` covers the gate for
+every state; the callback-after-state-change ordering itself needs the phone (Android statics), so it stays a
+Verifier phone check. Note: this drops a request the recognizer already transcribed when the screen went dark in
+that window; the brief's "no capture with the screen off on battery" rules, and the reviewer asked for exactly this.
+
+F2: fixed in the same commit. In `screenOnOrChargingOnly`'s sibling test (`screenOffOnBatteryBeatsATurn...`) with the
+screen off and power connected, a fed turn now asserts `TURN` and playback asserts `SPEAKING`.
+
+Tests: not run here, the JVM cannot start in this environment (`Failed to mark memory page as executable`). CI and
+the phone checks remain the check.

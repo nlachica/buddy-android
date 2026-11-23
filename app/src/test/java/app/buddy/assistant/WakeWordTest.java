@@ -188,6 +188,13 @@ public class WakeWordTest {
         i.screenOn = false;
         i.charging = true;
         assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+        i.turnFed = true; // screen off, power connected: a fed turn and playback go on
+        assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+        i.turn = i.turnFed = false;
+        i.foreignRecordings = 0;
+        i.speaking = true;
+        assertEquals(WakeWord.State.SPEAKING, WakeWord.state(i));
+        i.speaking = false;
         i.charging = false;
         i.turn = false;
         i.foreignRecordings = 1; // a foreign recording is a cause: PAUSED, as before
@@ -199,5 +206,16 @@ public class WakeWordTest {
         i.msSinceCause = 400; // no resume wait counted against it
         assertEquals(WakeWord.State.ASLEEP, WakeWord.state(i));
         assertFalse(WakeWord.cause(i));
+    }
+
+    @Test
+    public void aSendOrSecondWindowEndsWhenTheStateTurnedAsleep() {
+        WakeWord.Turn.Step send = new WakeWord.Turn.Step(WakeWord.Turn.Act.SEND, "what's the weather");
+        WakeWord.Turn.Step again = new WakeWord.Turn.Step(WakeWord.Turn.Act.AGAIN, null);
+        for (WakeWord.State st : WakeWord.State.values()) {
+            boolean asleep = st == WakeWord.State.ASLEEP;
+            assertEquals(asleep ? WakeWord.Turn.Act.END : WakeWord.Turn.Act.SEND, WakeWord.gate(send, st).act);
+            assertEquals(asleep ? WakeWord.Turn.Act.END : WakeWord.Turn.Act.AGAIN, WakeWord.gate(again, st).act);
+        }
     }
 }
