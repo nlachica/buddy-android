@@ -128,3 +128,26 @@
 - Choice: neither, because the text can't be read with the screen off and is right within one tick of screen-on, and
   the brief asks for one fixed rule.
 - By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - No exception for a turn or an answer: `ASLEEP` beats `TURN` (supersedes "A turn in flight finishes…")
+- Options: turn finishes plus 2 min of listening after a sent request; turn finishes only; the gate applies to
+  everything of the wake word.
+- Choice: everything, because the brief's done-when is "screen off + on battery: no mic capture". `ASLEEP` sits below
+  the cause row and above `TURN`; the tick cancels the turn (`WakeWord.cancelTurn`) and closes the recorder; a sent
+  request is left alone. `ANSWER_MS` and plan Q1 are dropped. Cost, accepted with the rule: a request cut when the
+  lock screen goes dark mid-sentence, a possibly late answer, no "stop" once dark. Plan review round 1, F1.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - An unknown screen or power state counts as off and unplugged (supersedes "unreadable counts as charging")
+- Options: unknown allows listening (never deaf); unknown closes the microphone (never records without evidence).
+- Choice: closes, because the brief allows capture only with the screen on or power connected. `WakeService.inputs`
+  reads the default display itself (not null and `STATE_ON`); `BuddyService.screenOn` keeps "missing = on" for its
+  callers. Both are read fresh each tick. Round 1, F2.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - One receiver runs the tick on power-connected and screen-on (amends "polled, no receivers")
+- Options: tick only; receivers that hold the state; a receiver that only runs the tick.
+- Choice: the last, because the tick's timer stands still in deep sleep, so a dark plug-in had no bound, and running
+  it on the event also leaves room for the detector's 1.44 s warm-up inside "~2 s". The tick still reads everything
+  itself. Round 1, F3 and F4.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's finding

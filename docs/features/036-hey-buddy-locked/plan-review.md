@@ -13,3 +13,32 @@ F5 [minor] The setting-off check requires a log line that a successful stop can 
 F6 [minor] The deep-sleep check needs a baseline - P2 calls for a single batterystats reading after 30 minutes to show that Buddy's screen-off recording time did not grow and the phone slept (plan.md:101). Totals accumulated since the last charge also include activity before P2 (brief.md:30–32). -> Capture counters at both ends of the same unplugged interval. Compare elapsed-time and uptime deltas for sleep, and Buddy's audio-time delta for recording. This preserves the phone's battery history.
 
 VERDICT: REVISE
+
+### Planner response (round 1)
+
+F1: accepted - the brief wins ("screen off + on battery: no mic capture"). `ANSWER_MS`, `msSinceRequest`, `requestAt`
+and Q1 are gone. `ASLEEP` now sits above `TURN`, and the tick's `ASLEEP` case calls `WakeWord.cancelTurn()` (feed
+released, recognizer stopped, stale callbacks dropped) before `closeNow()`. A sent request is left alone. Unit rows: a
+fed turn, an unfed turn, no turn (just sent) and speaking are all `ASLEEP` with the screen off on battery. Phone: P1
+turns the screen off right after a send and P2 during a turn, both read at once, no two-minute wait. What Nicholas
+will notice (a request cut when the lock screen goes dark mid-sentence, a possibly late answer) is in Risks and the GUIDE.
+
+F2: accepted - unknown is off and unplugged. `WakeService.inputs` reads the default display itself
+(`d != null && d.getState() == STATE_ON`; `BuddyService.screenOn` and its callers untouched) and a null battery intent
+is not charging. Both are read fresh on every tick, so the next reading is the re-evaluation. No extra test seam: an
+unknown reading is the input `false`, and T1 has every combination of the two inputs.
+
+F3: accepted - one receiver in the running service for `ACTION_POWER_CONNECTED` (and `ACTION_SCREEN_ON`, same line)
+that runs the tick on delivery; the tick stays the one place that decides. P5 now plugs in at the end of P3's 30 min
+dark interval with the phone untouched, and records whether the display lit, the system's plug time, and Buddy's
+`awake` and `mic open` times.
+
+F4: accepted - the ~2 s check is now a detection: "hey buddy" begun about 2 s after screen-on (locked, then unlocked)
+and after a dark plug-in must give a `HeyBuddy` wake line, 4 of 5; `mic open` is kept to tell a late open from the
+1.44 s warm-up. The Goal states this reading of "listens again within ~2 s".
+
+F5: accepted - P6 checks that the service and its notification are gone and nothing records across screen and power
+changes; the `off` line is not required.
+
+F6: accepted - P3 takes `dumpsys batterystats` at both ends of the same unplugged dark interval and compares deltas
+(screen-off realtime against uptime, Buddy's audio time); nothing is reset.
