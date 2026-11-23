@@ -78,3 +78,9 @@ F4: accepted - the `asleep` line is logged on entering the state, from the one b
 or not a recorder was closed; `closeNow()` keeps its `want != 0` condition. P2 samples `dumpsys audio` through the
 turn: the samples during the turn name the recording's owner, the ones after screen-off show it released. The other
 kind of turn is repeated if a `voice_input` setting gives it, otherwise written down as unverified.
+
+## Round 3 - Plan Reviewer (gpt-6.2-astra)
+
+F1 [major] The phone checks can lose the evidence that recording stopped - P2 collects 40 device-wide audio dumps in 20 seconds and needs samples from both sides of screen-off. P1 and P6 also use the absence of an active recorder as a pass condition (plan.md:116–119, 125, 128). `phone_shell` returns only the last 20,000 characters (Tools.java:751–753). Returning the raw dumps can discard the sample identifying the active recorder or the section that would show it still active. -> For each sample, extract the device-wide current recording section on the phone before returning it. Keep its timestamp, section heading and active owners, including an explicit empty result when the section was present. Do the same for the held wake locks. Require a sample showing the active owner before screen-off and a complete sample showing its release afterwards. A missing section or truncated interval needs a repeat or a complete capture through Nicholas's ADB session.
+
+VERDICT: REVISE
