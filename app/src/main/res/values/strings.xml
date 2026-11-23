@@ -737,7 +737,7 @@
     <string name="setup_voice_pause">Stop listening after a pause of</string>
     <string name="setup_voice_auto">Auto</string>
     <string name="setup_wake">Hey Buddy</string>
-    <string name="setup_wake_info">Always listening on this phone for \"hey buddy\"; nothing leaves it before that. Uses more battery. Paused in calls and while another app records.</string>
+    <string name="setup_wake_info">Listens on this phone for \"hey buddy\" while the screen is on or the phone is charging; nothing leaves it before that. Uses more battery. Paused in calls and while another app records.</string>
     <string name="wake_channel">Hey Buddy</string>
     <string name="wake_listening">Hey Buddy is listening</string>
     <string name="wake_paused_call">Hey Buddy is paused: in a call</string>
