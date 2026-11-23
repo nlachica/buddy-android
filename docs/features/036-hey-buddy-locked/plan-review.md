@@ -54,3 +54,27 @@ F3 [major] P5 can pass without demonstrating that a dark plug-in resumes capture
 F4 [minor] The unfed-turn trial requires a log line its success path skips - P2 requires an `asleep` line and infers whether the turn was fed from `voice_input` (plan.md:116). An unfed window already has `want == 0` (WakeService.java:308–310), so step 2 cancels the recognizer but skips the log inside `if (want != 0)` (plan.md:89–90). Phone input can run either fed or unfed depending on runtime fallback (Voice.java:163–166, 233–242). -> Use the planned state-transition flag to log entry to `ASLEEP` once, independently of recorder closure. For P2, identify the recorder owner while the turn is active, then verify its release after screen-off. Mark an unavailable input path as unverified.
 
 VERDICT: REVISE
+
+### Planner response (round 2)
+
+F1: accepted - no phone check names Buddy's package in a command any more, and the refusal is not worked around
+(`Tools.java:713`). P3 reads device-wide `dumpsys batterystats` at A and B (screen-off realtime against uptime; the
+audio time in Buddy's uid section) plus `dumpsys audio` and `dumpsys power` at B. P6 is the setting's readback, the
+notification gone, and no recording or `mic open` across screen and power changes. Where only a package-specific dump
+would do, Nicholas runs it over his own adb and `verify.md` says so. The Test plan's opening states the rule once.
+
+F2: accepted - the receiver is registered in a new `onCreate` and unregistered in `onDestroy`, so a refused
+`startForeground` (which returns before the `if (!running)` block and then reaches `onDestroy`) has a registered
+receiver to remove, and one instance registers once. The tick already returns while the service isn't running. P6
+turns Hey Buddy on once with Buddy not on screen: if the start is refused, no crash, the tap notification is there and
+a tap gives one `service started`; if the phone doesn't refuse it, the case is written down as not provoked.
+
+F3: accepted - P5a has its own untouched, unread dark interval (10+ min after P3's reading B); plug in, say the
+phrase, read the log only afterwards. It counts as a power-only resume only when the display was still off at
+`mic open`; a try where the plug-in lit the display first doesn't count, and if all do the dark resume is recorded
+as unverified. Listening while plugged with the screen off (P5b) and the unplug stop (P5c) are separate results.
+
+F4: accepted - the `asleep` line is logged on entering the state, from the one boolean that also logs `awake`, whether
+or not a recorder was closed; `closeNow()` keeps its `want != 0` condition. P2 samples `dumpsys audio` through the
+turn: the samples during the turn name the recording's owner, the ones after screen-off show it released. The other
+kind of turn is repeated if a `voice_input` setting gives it, otherwise written down as unverified.

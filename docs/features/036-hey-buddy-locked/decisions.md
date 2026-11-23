@@ -151,3 +151,20 @@
   it on the event also leaves room for the detector's 1.44 s warm-up inside "~2 s". The tick still reads everything
   itself. Round 1, F3 and F4.
 - By: Planner (claude-fable-5-2), on the Plan Reviewer's finding
+
+## 2026-11-22 - The receiver lives from `onCreate` to `onDestroy`; `asleep` is logged on entering the state
+- Options: register with the recording callback in `onStartCommand`'s first-start block; register in `onCreate`.
+- Choice: `onCreate`, because a refused `startForeground` returns before that block and still reaches `onDestroy`,
+  where unregistering an unregistered receiver throws; the tick already returns while the service isn't running. The
+  `asleep` log line moves from the recorder's close to the state's entry (one boolean, also logs `awake`), because an
+  unfed turn has no recorder of the detector's to close. Round 2, F2 and F4.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's findings
+
+## 2026-11-22 - Phone checks use device-wide dumps only; the dark plug-in may end as unverified
+- Options: package-specific `dumpsys` through `phone_shell` (refused, `Tools.java:713`); word the command around the
+  refusal; device-wide dumps read for Buddy's lines, with Nicholas's own adb for anything package-specific.
+- Choice: the last; the refusal is Buddy's own rule and is not worked around. The dark plug-in gets its own untouched
+  interval and counts only if the display was still off at `mic open`; if this phone lights its display on every
+  plug-in it is recorded as unverified, and listening while plugged is reported separately. Round 2, F1 and F3.
+- By: Planner (claude-fable-5-2), on the Plan Reviewer's findings
+
