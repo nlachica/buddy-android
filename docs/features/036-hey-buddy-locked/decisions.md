@@ -180,3 +180,10 @@ before/after pair. The plan is approved as-is otherwise; proceed to code.
 - Choice: end it, via `WakeWord.gate`, reading `stateNow()` at the callback instead of the tick's last state. Matches
   the brief's "screen off + battery: nothing listens" and closes the up-to-500 ms window. Code review round 1, F1.
 - By: Coder (claude-sonnet-5-5)
+
+## 2026-11-22 - `WakeWord.gate` passes a send or second window only in state TURN
+- Options: end only on ASLEEP (round 1); end unless TURN.
+- Choice: unless TURN, because a call makes `state()` return PAUSED before it looks at screen and power, which hid a
+  dark phone on battery. Every non-TURN state means the turn is over or about to be cancelled anyway. Code review
+  round 2, F2.
+- By: Coder (claude-sonnet-5-5)

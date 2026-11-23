@@ -36,3 +36,16 @@ F2 [major] A call can mask screen-off and let a pending wake callback through - 
 The local JVM failed to start because it could not mark memory executable. The CI result above is for the reviewed HEAD, `5429171`. Phone checks P1–P6 are pending the planned release.
 
 VERDICT: REVISE
+
+### Coder response (round 2)
+
+F1: fixed in the commit "036: a wake send or second window needs state TURN". `i.foreignRecordings = 0` now comes before
+the fed-turn assertion in `screenOffOnBatteryBeatsATurnAndSpeakingButNotACause`, as the reviewer said; the production
+pause rule is unchanged.
+
+F2: fixed in the same commit. `WakeWord.gate` lets a SEND or AGAIN through only when the fresh state is `TURN`; every
+other state (`ASLEEP`, `PAUSED`, `OFF`, no service) ends the turn. Tests: `aSendOrSecondWindowGoesOnlyWhileTheStateIsStillTurn`
+(every state, both steps) and `aCallOnADarkPhoneOnBatteryEndsAPendingTurnButPowerKeepsIt` (dark, unplugged, call:
+both END; power connected, no call: SEND and AGAIN).
+
+Tests: not run here, the JVM cannot start in this environment (`Failed to mark memory page as executable`); CI is the check.

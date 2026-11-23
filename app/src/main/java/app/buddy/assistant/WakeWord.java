@@ -216,7 +216,7 @@ final class WakeWord {
 
     private static void act(Turn t, Turn.Step step) {
         WakeService s = WakeService.get();
-        // the service's tick may be up to 500 ms behind: look at the screen and power now, before a send or a second window
+        // the service's tick may be up to 500 ms behind: look at the state now, before a send or a second window
         switch (gate(step, s == null ? State.OFF : s.stateNow()).act) {
             case AGAIN:
                 openWindow();
@@ -230,9 +230,9 @@ final class WakeWord {
         }
     }
 
-    /** A step that would send or listen again becomes END while the state is ASLEEP (screen off on battery). */
+    /** A step that would send or listen again becomes END unless the state is still TURN (PAUSED, e.g. a call, can hide ASLEEP). */
     static Turn.Step gate(Turn.Step step, State st) {
-        return st == State.ASLEEP ? new Turn.Step(Turn.Act.END, null) : step;
+        return st == State.TURN ? step : new Turn.Step(Turn.Act.END, null);
     }
 
     /** To the chat Talk uses (a new one with the default agent if there is none); its reply is spoken. */
