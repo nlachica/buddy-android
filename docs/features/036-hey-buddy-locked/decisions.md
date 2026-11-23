@@ -85,3 +85,46 @@
 ## 2026-11-22 Orchestrator: plan loop ended without APPROVE (exit 3)
 - Accepting the diagnose-first plan as the frame; step 0 (a live locked test with Nicholas) runs before any code.
   Remaining round-3 findings go to the next Planner round, which will have step 0's evidence.
+
+## 2026-11-22 - Rescope: every entry above is background; the plan is now the battery gate
+- Options: keep the locked-screen diagnosis; follow the rescoped brief.
+- Choice: the rescoped brief (listen only with the screen on or while charging). The entries above belong to
+  `plan-superseded-locked.md`; "No wake lock, screen wake or watchdog" still holds.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - The gate is a new `ASLEEP` row in `WakeWord.state`; the service stays and only the recorder closes
+- Options: stop and restart the foreground service on screen changes; a new state in the existing pure function,
+  applied by the existing tick; reuse `PAUSED`.
+- Choice: `ASLEEP`, below `TURN` and above the resume delay, because Android 14+ refuses a microphone service started
+  from the background (screen-on would end at "Tap to turn on Hey Buddy"), closing the recorder is what releases the
+  audio server's wake lock, and `PAUSED` would show "microphone in use" and add the 1 s resume delay.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - Screen and power are polled in the 500 ms tick, no receivers
+- Options: `SCREEN_ON/OFF` and `POWER_CONNECTED/DISCONNECTED` receivers; read both in `WakeService.inputs`.
+- Choice: polled, because the tick doesn't run in deep sleep and runs within 500 ms of a wake, which meets "~2 s"
+  with no receiver to register or miss.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - "Screen on" is the default display's state; "charging" is plugged in
+- Options: `PowerManager.isInteractive()` or `BuddyService.screenOn`; `BatteryManager.isCharging()` or
+  `EXTRA_PLUGGED != 0`.
+- Choice: `BuddyService.screenOn` (isInteractive stays true while a background chat's display is awake,
+  `Triggers.java:1141`; the always-on display counts as off) and `EXTRA_PLUGGED` (isCharging can be false while
+  plugged; the brief says "power is connected" and "unplugging"). An unreadable battery state counts as charging.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - A turn in flight finishes, and the detector stays up 2 min after a sent request
+- Options: close the moment the screen goes off; let the turn finish only; turn plus `ANSWER_MS` of listening after a
+  sent request; a timed partial wake lock for the answer.
+- Choice: turn plus 2 min, because the lock screen goes dark seconds after a wake and the open recording is the only
+  thing holding the CPU for the run (rules, schedules and the watch each hold a wake lock for theirs); it keeps
+  "hey buddy, stop" and a follow-up working, adds no Buddy wake lock and is a pure row. Only a sent request starts it.
+  Bends "screen off + battery: no capture" for up to 2 min after a request: asked as plan.md Q1.
+- By: Planner (claude-fable-5-2)
+
+## 2026-11-22 - No new notification text or setting
+- Options: a "sleeping" notification text; a setting for the rule; neither.
+- Choice: neither, because the text can't be read with the screen off and is right within one tick of screen-on, and
+  the brief asks for one fixed rule.
+- By: Planner (claude-fable-5-2)
