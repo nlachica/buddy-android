@@ -26,3 +26,13 @@ screen off and power connected, a fed turn now asserts `TURN` and playback asser
 
 Tests: not run here, the JVM cannot start in this environment (`Failed to mark memory page as executable`). CI and
 the phone checks remain the check.
+
+## Round 2 - Code Reviewer (gpt-6.2-astra)
+
+F1 [blocker] The plugged-in fed-turn test carries over the unfed recognizer's recording - `app/src/test/java/app/buddy/assistant/WakeWordTest.java:192` expects `TURN` after switching to a fed turn, but `foreignRecordings` is still 1 from line 184. A fed turn gets its audio from the detector, so one foreign recording correctly yields `PAUSED` (`WakeWord.java:324`). CI run 45095699462 failed here, with 1 of 384 tests failing. -> Move the existing `i.foreignRecordings = 0` before the fed-turn assertion. Keep the production pause rule and rerun CI.
+
+F2 [major] A call can mask screen-off and let a pending wake callback through - `app/src/main/java/app/buddy/assistant/WakeWord.java:235` ends the step only for `ASLEEP`. If the phone is dark on battery and a call has started when the transcript arrives, `state()` returns `PAUSED` at line 334 before checking screen and power. Before the next tick cancels the turn, `act` can still send the transcript or open another listening window. The test at `WakeWordTest.java:217` explicitly permits both actions in `PAUSED`. -> Allow a pending turn to send or reopen only when its fresh state is `TURN`. Test both callbacks with a dark, unplugged phone and an active call, plus a permitted turn with power connected.
+
+The local JVM failed to start because it could not mark memory executable. The CI result above is for the reviewed HEAD, `5429171`. Phone checks P1–P6 are pending the planned release.
+
+VERDICT: REVISE
