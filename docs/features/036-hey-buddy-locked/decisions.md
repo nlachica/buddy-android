@@ -168,3 +168,9 @@
   plug-in it is recorded as unverified, and listening while plugged is reported separately. Round 2, F1 and F3.
 - By: Planner (claude-fable-5-2), on the Plan Reviewer's findings
 
+
+## 2026-11-22 orchestrator: plan loop (rescoped) ended REVISE after 3 rounds
+Round 3 had a single major issue (F1), and it concerns only how the phone verification captures evidence: the 20k
+phone_shell truncation. The code design itself isn't in question. Accepted: the Verifier extracts the recording and
+wakelock sections on the phone for each sample (timestamp, heading, owners, explicit empty) and needs a complete
+before/after pair. The plan is approved as-is otherwise; proceed to code.
