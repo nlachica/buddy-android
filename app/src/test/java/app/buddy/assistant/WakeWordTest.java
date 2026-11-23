@@ -94,6 +94,7 @@ public class WakeWordTest {
     private static WakeWord.Inputs in() {
         WakeWord.Inputs i = new WakeWord.Inputs();
         i.enabled = true;
+        i.screenOn = true;
         return i;
     }
 
@@ -155,5 +156,80 @@ public class WakeWordTest {
         i.msSinceCause = 400;
         i.turn = true; // a turn is not held back by it
         assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+    }
+
+    @Test
+    public void listensOnlyWithTheScreenOnOrCharging() {
+        for (int m = 0; m < 8; m++) {
+            WakeWord.Inputs i = new WakeWord.Inputs();
+            i.enabled = (m & 1) != 0;
+            i.screenOn = (m & 2) != 0;
+            i.charging = (m & 4) != 0;
+            WakeWord.State want = !i.enabled ? WakeWord.State.OFF
+                    : i.screenOn || i.charging ? WakeWord.State.IDLE : WakeWord.State.ASLEEP;
+            assertEquals("mask " + m, want, WakeWord.state(i));
+        }
+    }
+
+    @Test
+    public void screenOffOnBatteryBeatsATurnAndSpeakingButNotACause() {
+        WakeWord.Inputs i = in();
+        i.screenOn = false;
+        i.speaking = true;
+        assertEquals(WakeWord.State.ASLEEP, WakeWord.state(i));
+        i.speaking = false;
+        i.turn = i.turnFed = true;
+        assertEquals(WakeWord.State.ASLEEP, WakeWord.state(i));
+        i.turnFed = false; // an unfed turn with its one expected recording
+        i.foreignRecordings = 1;
+        assertEquals(WakeWord.State.ASLEEP, WakeWord.state(i));
+        i.screenOn = true; // the same with the screen on
+        assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+        i.screenOn = false;
+        i.charging = true;
+        assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+        i.foreignRecordings = 0; // a fed turn takes its audio from the detector: the recognizer's recording is gone
+        i.turnFed = true; // screen off, power connected: a fed turn and playback go on
+        assertEquals(WakeWord.State.TURN, WakeWord.state(i));
+        i.turn = i.turnFed = false;
+        i.speaking = true;
+        assertEquals(WakeWord.State.SPEAKING, WakeWord.state(i));
+        i.speaking = false;
+        i.charging = false;
+        i.turn = false;
+        i.foreignRecordings = 1; // a foreign recording is a cause: PAUSED, as before
+        assertEquals(WakeWord.State.PAUSED, WakeWord.state(i));
+        i.foreignRecordings = 0;
+        i.call = true;
+        assertEquals(WakeWord.State.PAUSED, WakeWord.state(i));
+        i.call = false;
+        i.msSinceCause = 400; // no resume wait counted against it
+        assertEquals(WakeWord.State.ASLEEP, WakeWord.state(i));
+        assertFalse(WakeWord.cause(i));
+    }
+
+    @Test
+    public void aSendOrSecondWindowGoesOnlyWhileTheStateIsStillTurn() {
+        WakeWord.Turn.Step send = new WakeWord.Turn.Step(WakeWord.Turn.Act.SEND, "what's the weather");
+        WakeWord.Turn.Step again = new WakeWord.Turn.Step(WakeWord.Turn.Act.AGAIN, null);
+        for (WakeWord.State st : WakeWord.State.values()) {
+            boolean go = st == WakeWord.State.TURN;
+            assertEquals(st.name(), go ? WakeWord.Turn.Act.SEND : WakeWord.Turn.Act.END, WakeWord.gate(send, st).act);
+            assertEquals(st.name(), go ? WakeWord.Turn.Act.AGAIN : WakeWord.Turn.Act.END, WakeWord.gate(again, st).act);
+        }
+    }
+
+    @Test
+    public void aCallOnADarkPhoneOnBatteryEndsAPendingTurnButPowerKeepsIt() {
+        WakeWord.Inputs i = in();
+        i.turn = i.turnFed = true;
+        i.screenOn = false;
+        i.call = true; // the call masks the dark screen: PAUSED, which must not let a callback through
+        assertEquals(WakeWord.Turn.Act.END, WakeWord.gate(new WakeWord.Turn.Step(WakeWord.Turn.Act.SEND, "x"), WakeWord.state(i)).act);
+        assertEquals(WakeWord.Turn.Act.END, WakeWord.gate(new WakeWord.Turn.Step(WakeWord.Turn.Act.AGAIN, null), WakeWord.state(i)).act);
+        i.call = false;
+        i.charging = true; // power connected: the turn is permitted
+        assertEquals(WakeWord.Turn.Act.SEND, WakeWord.gate(new WakeWord.Turn.Step(WakeWord.Turn.Act.SEND, "x"), WakeWord.state(i)).act);
+        assertEquals(WakeWord.Turn.Act.AGAIN, WakeWord.gate(new WakeWord.Turn.Step(WakeWord.Turn.Act.AGAIN, null), WakeWord.state(i)).act);
     }
 }

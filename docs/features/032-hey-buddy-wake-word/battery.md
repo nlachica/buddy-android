@@ -30,3 +30,9 @@ with the screen off, until measured. Nothing here is a promise.
 2. The same hour with the switch off. The difference is the cost.
 3. P5, time per hop: the service does not log it. Measure with a temporary timing log around `WakeFeatures.feed` (or a
    profiler) on the same run, and record the figure here.
+
+## 2026-11-22 - measured, and the rule from 036
+On battery for 6 h, Buddy used 1372 of 4783 mAh (29%): foreground-service audio 4h11m (390 mAh), 2h22m of it with the
+screen off (221 mAh), and the device never deep-slept. Since 036 the detector listens only with the screen on or while
+charging; with the screen off on battery the microphone is closed ("Asleep", like "Paused = free"). See
+`docs/features/036-hey-buddy-locked/`.

@@ -5,16 +5,21 @@ import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.pm.ServiceInfo;
+import android.hardware.display.DisplayManager;
 import android.media.AudioManager;
 import android.media.AudioRecordingConfiguration;
+import android.os.BatteryManager;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.util.Log;
+import android.view.Display;
 
 import java.util.List;
 
@@ -22,7 +27,8 @@ import java.util.List;
  * "Hey buddy": the foreground service that owns the detector's microphone, its capture thread and the notification.
  * Declared in the github-only manifest (app/src/watchlink); WakeWord.ensure is the one way it is started. Every 500 ms
  * (100 ms while Buddy speaks) and on every recording change the main thread asks {@link WakeWord#state} what the
- * microphone should be and tells the capture thread; the capture thread alone opens, reads and closes it.
+ * microphone should be and tells the capture thread; the capture thread alone opens, reads and closes it. With the
+ * screen off on battery (ASLEEP) the microphone is closed, which frees the audio server's wake lock; the service stays.
  */
 public final class WakeService extends Service implements WakeLoop.Host, WakeLoop.Sink {
     static final String ACTION_OFF = "app.buddy.assistant.WAKE_OFF";
@@ -44,6 +50,13 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
             main.post(tick);
         }
     };
+    /** Plugging in or the screen coming on: run the tick now, its timer stands still in deep sleep. */
+    private final BroadcastReceiver wakeUp = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context c, Intent i) {
+            tick();
+        }
+    };
     private final WakeMic mic = new WakeMic();
     private volatile WakeLoop loop;
     private volatile boolean running;
@@ -55,7 +68,7 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
     /** The detector's own audio session (0 while its recorder is closed or opening). */
     private volatile int session;
     private long lastCause, speechEndedAt; // elapsedRealtime ms; 0: never
-    private boolean wasSpeaking;
+    private boolean wasSpeaking, asleep;
     private int shown;
 
     static boolean running() {
@@ -100,6 +113,14 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
     }
 
     @Override
+    public void onCreate() {
+        super.onCreate();
+        IntentFilter f = new IntentFilter(Intent.ACTION_POWER_CONNECTED);
+        f.addAction(Intent.ACTION_SCREEN_ON);
+        registerReceiver(wakeUp, f); // in onCreate: a refused start still reaches onDestroy, which unregisters
+    }
+
+    @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         try {
             startForeground(FG_ID, notification(R.string.wake_listening), ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE);
@@ -128,6 +149,7 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         running = false;
         instance = null;
         main.removeCallbacksAndMessages(null);
+        unregisterReceiver(wakeUp);
         getSystemService(AudioManager.class).unregisterAudioRecordingCallback(recordings);
         if (WakeWord.turnOn()) WakeWord.cancelTurn();
         super.onDestroy();
@@ -267,6 +289,10 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
             int s = c.getClientAudioSessionId();
             if (s != own && c.getClientAudioSource() != HOTWORD && !MicServer.mine(s)) in.foreignRecordings++;
         }
+        Display d = getSystemService(DisplayManager.class).getDisplay(Display.DEFAULT_DISPLAY);
+        in.screenOn = d != null && d.getState() == Display.STATE_ON; // not isInteractive(): a background chat's display keeps it true
+        Intent bat = registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
+        in.charging = bat != null && bat.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
         in.turn = WakeWord.turnOn();
         in.turnFed = WakeWord.turnFed();
         in.ownVoice = Voice.listening() || CodexLive.on() || MicServer.serving();
@@ -289,8 +315,12 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
         wasSpeaking = speaking;
         WakeWord.Inputs in = inputs(now);
         WakeWord.State st = WakeWord.state(in);
-        if ((st == WakeWord.State.OFF || st == WakeWord.State.PAUSED) && WakeWord.turnOn()) {
-            if (in.foreignRecordings > 0 && !in.call) Voice.fedCancelled(); // 2 of these in a row: Phone input is no longer fed
+        if (asleep != (st == WakeWord.State.ASLEEP)) {
+            asleep = !asleep;
+            Log.i(TAG, asleep ? "asleep: screen off, on battery" : "awake");
+        }
+        if ((st == WakeWord.State.OFF || st == WakeWord.State.PAUSED || st == WakeWord.State.ASLEEP) && WakeWord.turnOn()) {
+            if (st != WakeWord.State.ASLEEP && in.foreignRecordings > 0 && !in.call) Voice.fedCancelled(); // 2 of these in a row: Phone input is no longer fed
             WakeWord.cancelTurn();
         }
         switch (st) {
@@ -304,6 +334,9 @@ public final class WakeService extends Service implements WakeLoop.Host, WakeLoo
                     Log.i(TAG, "paused: " + (in.call ? "call" : "microphone in use"));
                 }
                 show(in.call ? R.string.wake_paused_call : R.string.wake_paused_mic);
+                break;
+            case ASLEEP:
+                if (want != 0) closeNow();
                 break;
             case TURN:
                 if (!in.turnFed) want = 0; // the recognizer records by itself; a fed turn keeps the microphone as it is
