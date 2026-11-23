@@ -288,12 +288,14 @@ final class WakeWord {
 
     // ---- states
 
-    enum State { OFF, PAUSED, TURN, SPEAKING, IDLE }
+    enum State { OFF, PAUSED, ASLEEP, TURN, SPEAKING, IDLE }
 
     /** What {@link #state} looks at; the service gathers it on the main thread. */
     static final class Inputs {
         /** The setting is on, the microphone is granted and {@link #available()}. */
         boolean enabled;
+        /** The default display is known and on (locked or not), or power is plugged in: the only times it listens. */
+        boolean screenOn, charging;
         /** A call (AutoPause's rule). */
         boolean call;
         /** Active recordings that aren't Buddy's: not the detector's own session, not HOTWORD clients, not ones MicServer runs. */
@@ -318,11 +320,12 @@ final class WakeWord {
 
     /**
      * What the detector should be. The first row that matches wins: OFF; PAUSED for a cause (it beats a turn, which
-     * is then cancelled); TURN; PAUSED until the cause has been gone for {@link #RESUME_MS}; SPEAKING; IDLE.
+     * is then cancelled); ASLEEP with the screen off on battery (a turn is cancelled too, nothing records); TURN; PAUSED until the cause has been gone for {@link #RESUME_MS}; SPEAKING; IDLE.
      */
     static State state(Inputs in) {
         if (!in.enabled) return State.OFF;
         if (cause(in)) return State.PAUSED;
+        if (!in.screenOn && !in.charging) return State.ASLEEP;
         if (in.turn) return State.TURN;
         if (in.msSinceCause < RESUME_MS) return State.PAUSED;
         return in.speaking ? State.SPEAKING : State.IDLE;
