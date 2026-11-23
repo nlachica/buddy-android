@@ -1,5 +1,6 @@
 package app.buddy.assistant;
 
+import static org.junit.Assert.assertArrayEquals;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotEquals;
@@ -383,5 +384,274 @@ public class AudioRouteTest {
         assertFalse(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", null));
         assertFalse(AudioRoute.pickOn("7:LS2 Freecom", null, "7:LS2 Freecom"));
         assertTrue(AudioRoute.pickOn("7:LS2 Freecom", "7:LS2 Freecom", "7:LS2 Freecom"));
+    }
+
+    // 035: the media volume follows the call volume in a speaker call
+    private static int step(boolean speaker, int now, int call, int[] st) {
+        return AudioRoute.mediaStep(speaker, now, call, AudioRoute.mediaFor(call, 15, 15), st);
+    }
+
+    private static int[] st(int saved, int set, int from, int seen) {
+        return new int[]{saved, set, from, seen};
+    }
+
+    @Test
+    public void mediaForScalesAndIsNeverZero() {
+        assertEquals(15, AudioRoute.mediaFor(15, 15, 15));
+        assertEquals(8, AudioRoute.mediaFor(8, 15, 15));
+        assertEquals(1, AudioRoute.mediaFor(1, 15, 15));
+        assertEquals(15, AudioRoute.mediaFor(7, 7, 15));
+        assertEquals(9, AudioRoute.mediaFor(4, 7, 15));
+        assertEquals(3, AudioRoute.mediaFor(1, 7, 15));
+        assertEquals(1, AudioRoute.mediaFor(0, 15, 15));
+    }
+
+    @Test
+    public void mediaOnlyOnTheSpeakerAlone() {
+        assertTrue(AudioRoute.mediaOnSpeaker(new int[]{SPEAKER}));
+        assertFalse(AudioRoute.mediaOnSpeaker(new int[]{AudioDeviceInfo.TYPE_BUILTIN_EARPIECE}));
+        assertFalse(AudioRoute.mediaOnSpeaker(new int[]{A2DP}));
+        assertFalse(AudioRoute.mediaOnSpeaker(new int[]{SPEAKER, A2DP}));
+        assertFalse(AudioRoute.mediaOnSpeaker(new int[0]));
+        assertFalse(AudioRoute.mediaOnSpeaker(null)); // below API 33
+    }
+
+    @Test
+    public void aNormalCallTakesFollowsAndGivesBack() {
+        int[] s = AudioRoute.noMedia();
+        assertEquals(15, step(true, 6, 15, s));
+        assertEquals(6, s[AudioRoute.SAVED]);
+        assertEquals(-1, step(true, 15, 15, s));
+        assertEquals(-1, step(true, 15, 15, s));
+        assertEquals(13, step(true, 15, 13, s));
+        assertEquals(6, step(false, 13, 13, s));
+        assertEquals(-1, s[AudioRoute.SAVED]);
+        assertEquals(-1, step(false, 6, 13, s)); // nothing saved, nothing written
+    }
+
+    @Test
+    public void aLevelSetByHandInTheCallIsKept() {
+        int[] s = AudioRoute.noMedia();
+        step(true, 6, 15, s);
+        assertEquals(-1, step(true, 10, 15, s)); // he moved Media: no write
+        assertEquals(10, s[AudioRoute.SAVED]);
+        assertEquals(14, step(true, 10, 14, s));
+        assertEquals(10, step(false, 14, 14, s));
+    }
+
+    @Test
+    public void aRestartAfterACrash() {
+        assertEquals(6, step(false, 15, 15, st(6, 15, -1, -1))); // still Buddy's level
+        int[] s = st(6, 15, -1, -1);
+        assertEquals(-1, step(false, 3, 15, s)); // his newer level stays
+        assertEquals(-1, s[AudioRoute.SAVED]);
+        s = st(6, 15, -1, -1);
+        assertEquals(15, step(true, 3, 15, s)); // a speaker call takes from his level
+        assertEquals(3, s[AudioRoute.SAVED]);
+        assertEquals(3, step(false, 15, 15, s));
+    }
+
+    @Test
+    public void killedAroundTheTake() {
+        int[] s = st(6, 15, 6, -1); // the write may not have reached Android
+        assertEquals(6, step(false, 6, 15, s)); // it didn't: written back, no change
+        assertEquals(-1, s[AudioRoute.SAVED]);
+        assertEquals(6, step(false, 15, 15, st(6, 15, 6, -1))); // it did
+        s = st(6, 15, 6, -1);
+        assertEquals(15, step(true, 6, 15, s));
+        assertEquals(6, s[AudioRoute.SAVED]);
+    }
+
+    @Test
+    public void killedAroundAKeyWrite() {
+        assertEquals(6, step(false, 15, 13, st(6, 13, 15, -1)));
+        assertEquals(6, step(false, 13, 13, st(6, 13, 15, -1)));
+        int[] s = st(6, 13, 15, -1);
+        assertEquals(-1, step(false, 3, 13, s));
+        assertEquals(-1, s[AudioRoute.SAVED]);
+    }
+
+    @Test
+    public void aMutedMediaIsLeftAlone() {
+        int[] s = AudioRoute.noMedia();
+        assertEquals(-1, step(true, 0, 15, s));
+        assertEquals(-1, s[AudioRoute.SAVED]);
+        assertEquals(15, step(true, 6, 15, s)); // unmuted mid-call: take
+        assertEquals(6, s[AudioRoute.SAVED]);
+        int[] taken = s.clone();
+        assertEquals(-1, step(true, 0, 15, s));
+        assertEquals(-1, step(true, 0, 13, s)); // a key while muted
+        assertEquals(-1, step(false, 0, 13, s)); // hang-up while muted
+        assertArrayEquals(taken, s);
+        assertEquals(6, step(false, 15, 13, s)); // a later session
+        s = taken.clone();
+        assertEquals(-1, step(false, 4, 13, s));
+        assertEquals(-1, s[AudioRoute.SAVED]);
+    }
+
+    @Test
+    public void theWatchTakingTheVoiceGivesTheLevelBack() {
+        int[] s = AudioRoute.noMedia();
+        step(true, 6, 15, s);
+        assertEquals(6, step(false, 15, 15, s));
+        assertEquals(15, step(true, 6, 15, s));
+    }
+
+    /** 035: Android and the disk as the tests script them. */
+    private static class FakeVol implements AudioRoute.Vol {
+        boolean commitOk = true, speaker = true, applies = true;
+        int level, writes;
+        Runnable onFirstSave;
+        final java.util.List<String> saves = new java.util.ArrayList<>();
+
+        public boolean save(int saved, int set, int from) {
+            saves.add(saved + "," + set + "," + from);
+            if (saves.size() == 1 && onFirstSave != null) onFirstSave.run();
+            return commitOk;
+        }
+
+        public boolean at(int l) {
+            return speaker && level == l;
+        }
+
+        public void put(int l) {
+            writes++;
+            if (applies) level = l;
+        }
+    }
+
+    private static boolean change(boolean speakerCall, int now, int call, int[] old, FakeVol v) {
+        int[] n = old.clone();
+        int w = step(speakerCall, now, call, n);
+        return AudioRoute.change(speakerCall, now, w, old, n, v);
+    }
+
+    @Test
+    public void aTakeCommitsBeforeItWrites() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        assertTrue(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(1, v.writes);
+        assertEquals("6,15,6", v.saves.get(0));
+        assertEquals(15, v.level);
+    }
+
+    @Test
+    public void aFailedCommitWritesNothing() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.commitOk = false;
+        assertFalse(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void aHeadsetTakingMediaDuringTheCommitWritesNothingAndKeepsTheOldRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.onFirstSave = () -> v.speaker = false;
+        int[] old = st(4, 6, -1, 15);
+        assertFalse(change(true, 6, 13, old, v));
+        assertEquals(0, v.writes);
+        assertEquals("4,6,-1", v.saves.get(v.saves.size() - 1)); // the old record is back on disk
+    }
+
+    @Test
+    public void aMuteDuringTheCommitWritesNothing() {
+        FakeVol v = new FakeVol();
+        v.level = 0; // Android reads a muted stream as not at 6
+        assertFalse(change(true, 6, 15, AudioRoute.noMedia(), v));
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void aHandoffAtHangUpKeepsTheSpeakersRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 7; // LS2's index, read after the first route query saw the speaker
+        v.speaker = false;
+        assertFalse(change(false, 7, 15, st(6, 15, -1, 15), v)); // would drop the record as "he moved Media"
+        assertEquals(0, v.writes);
+    }
+
+    @Test
+    public void anIgnoredRestoreKeepsTheRecord() {
+        FakeVol v = new FakeVol();
+        v.level = 15;
+        v.applies = false;
+        assertFalse(change(false, 15, 15, st(6, 15, -1, 15), v));
+        assertEquals(1, v.writes);
+        v.applies = true;
+        assertTrue(change(false, 15, 15, st(6, 15, -1, 15), v)); // the next tick
+        assertEquals(6, v.level);
+    }
+
+    /** A tick as follow() runs it: keeps n when a write was made but not seen to apply. */
+    private static int[] tick(boolean speakerCall, int now, int call, int[] rec, FakeVol v) {
+        int[] n = rec.clone();
+        int w = step(speakerCall, now, call, n);
+        return AudioRoute.change(speakerCall, now, w, rec, n, v) || n[AudioRoute.FROM] >= 0 ? n : rec;
+    }
+
+    @Test
+    public void aHeadsetRightAfterTheTakeKeepsTheRecordThroughTheHangUp() {
+        int[] rec = AudioRoute.noMedia();
+        // the write lands, then the headset connects before the check
+        FakeVol h = new FakeVol() {
+            public void put(int l) {
+                super.put(l);
+                speaker = writes > 1;
+            }
+        };
+        h.level = 6;
+        rec = tick(true, 6, 15, rec, h);
+        assertEquals(1, h.writes);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(6, rec[AudioRoute.FROM]);
+        h.speaker = true; // headset gone, still in the call: Media reads 15, the take is not repeated
+        rec = tick(true, 15, 15, rec, h);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(1, h.writes);
+        rec = tick(false, 15, 15, rec, h); // hang-up
+        assertEquals(6, h.level);
+        assertEquals(-1, rec[AudioRoute.SAVED]);
+    }
+
+    @Test
+    public void anIgnoredTakeIsWrittenAgain() {
+        FakeVol v = new FakeVol();
+        v.level = 6;
+        v.applies = false;
+        int[] rec = tick(true, 6, 15, AudioRoute.noMedia(), v);
+        assertEquals(1, v.writes);
+        v.applies = true;
+        rec = tick(true, 6, 15, rec, v); // no key since, but it never applied
+        assertEquals(2, v.writes);
+        assertEquals(15, v.level);
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        assertEquals(-1, rec[AudioRoute.FROM]);
+    }
+
+    @Test
+    public void aConfirmationReadThatThrowsKeepsTheRecordAndEndsAtTheSavedLevel() {
+        int[] rec = AudioRoute.noMedia();
+        FakeVol v = new FakeVol() {
+            boolean thrown;
+
+            public boolean at(int l) {
+                if (writes == 1 && !thrown) { // the first read after the write
+                    thrown = true;
+                    throw new IllegalStateException("audio service died");
+                }
+                return super.at(l);
+            }
+        };
+        v.level = 6;
+        rec = tick(true, 6, 15, rec, v);
+        assertEquals(15, v.level); // the write landed
+        assertEquals(6, rec[AudioRoute.SAVED]); // and the record is kept
+        rec = tick(true, 15, 15, rec, v); // the next tick must not take 15 as the start
+        assertEquals(6, rec[AudioRoute.SAVED]);
+        rec = tick(false, 15, 15, rec, v); // hang-up
+        assertEquals(6, v.level);
     }
 }
